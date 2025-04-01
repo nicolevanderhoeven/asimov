@@ -50,7 +50,7 @@ class CustomLogFW:
         :return: LoggingHandler instance configured with the logger provider.
         """
         # Set the created LoggerProvider as the global logger provider.
-        set_logger_provider(self.logger_provider)
+        # set_logger_provider(self.logger_provider)
 
         # Create an instance of OTLPLogExporter with insecure connection.        
         otlpEndpoint = os.getenv("OTLP_ENDPOINT")

@@ -17,15 +17,6 @@ def create_game():
     from dotenv import load_dotenv
     import os
     import logging
-
-    from opentelemetry import trace
-    from opentelemetry._logs import set_logger_provider
-    from opentelemetry.exporter.otlp.proto.http._log_exporter import (
-        OTLPLogExporter,
-    )
-    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-    from opentelemetry.sdk.resources import Resource
     from loggingfw import CustomLogFW
 
     load_dotenv()  # Load .env file
@@ -38,9 +29,9 @@ def create_game():
 
     otlpEndpoint = os.getenv("OTLP_ENDPOINT")
     otlpHeaders = os.getenv("OTLP_HEADERS")
-    openAiKey = os.getenv("OPENAI_KEY")
-
-    os.environ["OPENAI_API_KEY"] = openAiKey
+    # openAiKey = os.getenv("OPENAI_KEY")
+    user = os.getenv("GRAFANA_CLOUD_INSTANCE")  # your instance ID
+    api_key = os.getenv("GRAFANA_CLOUD_API_KEY")  # your Grafana Cloud API key
 
     from openlit import openlit
 
@@ -49,15 +40,6 @@ def create_game():
         otlp_endpoint=otlpEndpoint,
         otlp_headers="Authorization=Basic%20"+ otlpHeaders,
     )
-
-    # Format header for OTLPLogExporter
-    import base64
-
-    user = os.getenv("GRAFANA_CLOUD_INSTANCE")  # your instance ID
-    api_key = os.getenv("GRAFANA_CLOUD_API_KEY")  # your Grafana Cloud API key
-
-    encoded = base64.b64encode(f"{user}:{api_key}".encode("utf-8")).decode("utf-8")
-
 
     # ## `DialogueAgent` class
     # The `DialogueAgent` class is a simple wrapper around the `ChatOpenAI` model that stores the message history from the `dialogue_agent`'s point of view by simply concatenating the messages as strings.
@@ -130,6 +112,7 @@ def create_game():
             """
             for agent in self.agents:
                 agent.receive(name, message)
+                logging.info(f"{agent.name}: {message}")
 
             # increment time
             self._step += 1
@@ -140,6 +123,7 @@ def create_game():
             message = speaker.send()
             for receiver in self.agents:
                 receiver.receive(speaker.name, message)
+                logging.info(f"receiver: {receiver.name}, message: {message}")
             self._step += 1
             return speaker.name, message
 
@@ -304,4 +288,4 @@ if __name__ == "__main__":
         user_input = input(">>> ")
         simulator.inject(protagonist_name, user_input)
         name, message = simulator.step()
-        # print(f"({name}): {message}")
+        # logging.info(f"({name}): {message}")
