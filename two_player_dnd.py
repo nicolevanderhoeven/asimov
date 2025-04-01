@@ -19,19 +19,24 @@ def create_game():
     import logging
     from loggingfw import CustomLogFW
 
+
     load_dotenv()  # Load .env file
-    
-    # Set up logging
-    logFW = CustomLogFW(service_name='main_app', instance_id='1')
-    handler = logFW.setup_logging()
-    logging.getLogger().addHandler(handler)
-    logging.error("Welcome to two-player D&D, Harry Potter edition!")
 
     otlpEndpoint = os.getenv("OTLP_ENDPOINT")
     otlpHeaders = os.getenv("OTLP_HEADERS")
     # openAiKey = os.getenv("OPENAI_KEY")
     user = os.getenv("GRAFANA_CLOUD_INSTANCE")  # your instance ID
     api_key = os.getenv("GRAFANA_CLOUD_API_KEY")  # your Grafana Cloud API key
+    
+
+    # Set up logging
+    logFW = CustomLogFW(service_name='main_app', instance_id='1')
+    handler= logFW.setup_logging()
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.error("Welcome to two-player D&D, Harry Potter edition!")
+
 
     from openlit import openlit
 
@@ -39,7 +44,9 @@ def create_game():
         application_name="two-player-dnd",
         otlp_endpoint=otlpEndpoint,
         otlp_headers="Authorization=Basic%20"+ otlpHeaders,
+        event_logger=logger,
     )
+
 
     # ## `DialogueAgent` class
     # The `DialogueAgent` class is a simple wrapper around the `ChatOpenAI` model that stores the message history from the `dialogue_agent`'s point of view by simply concatenating the messages as strings.
@@ -111,9 +118,10 @@ def create_game():
             Initiates the conversation with a {message} from {name}
             """
             for agent in self.agents:
-                agent.receive(name, message)
+                print(f"{agent.name}: {message}")
                 logging.info(f"{agent.name}: {message}")
-
+                agent.receive(name, message)
+                
             # increment time
             self._step += 1
 
