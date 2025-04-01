@@ -21,6 +21,7 @@ export function fetchIntro() {
   check(res, { 
     'status is 200': (res) => res.status === 200,
     'Introduction returned': (res) => res.body.includes('quest'),
+    'not rate limited': (res) => res.status !== 429,
   });
   sleep(randomIntBetween(1, 5));
 }
@@ -37,6 +38,7 @@ export function evalHallucination() {
     'H01_Acknowledged Firebolt': (res) => res.body.includes('Firebolt'),
     'H02_Appropriate turn end': (res) => res.body.includes('It is your turn, Harry Potter'),
     'H03_Correct speaker': (res) => JSON.parse(res.body).speaker === 'Dungeon Master',
+    'not rate limited': (res) => res.status !== 429,
   });
 
   sleep(randomIntBetween(1, 3));
@@ -50,6 +52,7 @@ export function evalHallucination() {
     'H04_Acknowledged Lumos': (res) => res.body.includes('light'),
     'H05_Appropriate turn end': (res) => res.body.includes('It is your turn, Harry Potter'),
     'H06_Correct speaker': (res) => JSON.parse(res.body).speaker === 'Dungeon Master',
+    'not rate limited': (res) => res.status !== 429,
   });
 
   sleep(randomIntBetween(1, 3));
@@ -63,6 +66,7 @@ export function evalHallucination() {
     'H07_Appropriate turn end': (res) => res.body.includes('It is your turn, Harry Potter'),
     'H08_Correct speaker': (res) => JSON.parse(res.body).speaker === 'Dungeon Master',
     'H09_Focus on quest': (res) => res.body.includes('quest'),
+    'not rate limited': (res) => res.status !== 429,
   });
 
 }
