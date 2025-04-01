@@ -1,0 +1,15 @@
+version: '3'
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./otel-config.yml:/etc/otel/config.yml
+    command:
+      - '--config=/etc/otel/config.yml'
+    ports:
+      - "4317:4317" #grpc
+      - "4318:4318" #http
+    networks:
+      - otel-collector
+networks:
+    otel-collector:

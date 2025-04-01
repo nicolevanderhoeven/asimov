@@ -1,0 +1,43 @@
+# Receivers
+
+
+extensions:
+  basicauth/grafana_cloud:
+    client_auth:
+      username: "INSTANCE_ID"
+      password: "API_TOKEN"
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlphttp/grafana_cloud:
+    endpoint: "https://otlp-gateway-prod-eu-west-3.grafana.net/otlp"
+    auth:
+      authenticator: basicauth/grafana_cloud
+
+      
+# Pipelines
+service:
+  extensions:
+    [
+      basicauth/grafana_cloud,
+    ]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlphttp/grafana_cloud]
+    metrics:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlphttp/grafana_cloud]
+    traces:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlphttp/grafana_cloud]
