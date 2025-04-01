@@ -7,11 +7,11 @@ const url = 'http://localhost:5050'; // The app URL
 
 export const options = {
   vus: 10,
-  duration: '30s',
+  duration: '3m',
 };
 
 export default function() {
-  // fetchIntro();
+  fetchIntro();
   evalHallucination();
 }
 
