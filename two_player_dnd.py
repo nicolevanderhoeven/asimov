@@ -37,16 +37,14 @@ def create_game():
     logger.setLevel(logging.INFO)
     logger.error("Welcome to two-player D&D, Harry Potter edition!")
 
-
+    # Initialize OpenLIT library
     from openlit import openlit
-
     openlit.init(
         application_name="two-player-dnd",
         otlp_endpoint=otlpEndpoint,
         otlp_headers="Authorization=Basic%20"+ otlpHeaders,
         event_logger=logger,
     )
-
 
     # ## `DialogueAgent` class
     # The `DialogueAgent` class is a simple wrapper around the `ChatOpenAI` model that stores the message history from the `dialogue_agent`'s point of view by simply concatenating the messages as strings.
@@ -89,6 +87,7 @@ def create_game():
 
         def receive(self, name: str, message: str) -> None:
             self.message_history.append(f"{name}: {message}")
+            logger.info(f"{self.name} received message: {message}")
 
     # ## `DialogueSimulator` class
     # The `DialogueSimulator` class takes a list of agents. At each step, it performs the following:
@@ -118,12 +117,12 @@ def create_game():
             Initiates the conversation with a {message} from {name}
             """
             for agent in self.agents:
-                print(f"{agent.name}: {message}")
-                logging.info(f"{agent.name}: {message}")
+                logger.info(f"{agent.name}: {message}")
                 agent.receive(name, message)
                 
             # increment time
             self._step += 1
+            logger.info(f"step: {self._step}")
 
         def step(self) -> tuple[str, str]:
             speaker_idx = self.select_next_speaker(self._step, self.agents)
@@ -131,19 +130,16 @@ def create_game():
             message = speaker.send()
             for receiver in self.agents:
                 receiver.receive(speaker.name, message)
-                logging.info(f"receiver: {receiver.name}, message: {message}")
+                logger.info(f"receiver: {receiver.name}, message: {message}")
             self._step += 1
             return speaker.name, message
 
-
-
     # ## Define roles and quest
-
 
     protagonist_name = "Harry Potter"
     storyteller_name = "Dungeon Master"
     quest = "Find all of Lord Voldemort's seven horcruxes."
-    logging.info(f"Quest assigned: ${quest}")
+    logger.info(f"Quest assigned: ${quest}")
     word_limit = 50  # word limit for task brainstorming
 
 
@@ -183,12 +179,6 @@ def create_game():
         storyteller_specifier_prompt
     ).content
 
-    # print("Protagonist Description:")
-    # print(protagonist_description)
-    # print("Storyteller Description:")
-    # print(storyteller_description)
-
-
     # ## Protagonist and dungeon master system messages
 
     protagonist_system_message = SystemMessage(
@@ -227,7 +217,6 @@ def create_game():
         )
     )
 
-
     # ## Use an LLM to create an elaborate quest description
 
     quest_specifier_prompt = [
@@ -244,14 +233,7 @@ def create_game():
     ]
     specified_quest = ChatOpenAI(temperature=1.0)(quest_specifier_prompt).content
 
-    # print(f"Original quest:\n{quest}\n")
-    # print(f"Detailed quest:\n{specified_quest}\n")
-
-
     # ## Main Loop
-
-    # In[16]:
-
 
     protagonist = DialogueAgent(
         name=protagonist_name,
@@ -263,10 +245,6 @@ def create_game():
         system_message=storyteller_system_message,
         model=ChatOpenAI(temperature=0.2),
     )
-
-
-    # In[17]:
-
 
     def select_next_speaker(step: int, agents: List[DialogueAgent]) -> int:
         idx = step % len(agents)
@@ -288,12 +266,9 @@ def create_game():
     specified_quest
 )
 
-
-
 if __name__ == "__main__":
     simulator, protagonist_name, _ = create_game()
     while True:
         user_input = input(">>> ")
         simulator.inject(protagonist_name, user_input)
         name, message = simulator.step()
-        # logging.info(f"({name}): {message}")
