@@ -22,13 +22,6 @@ def create_game():
 
     load_dotenv()  # Load .env file
 
-    otlpEndpoint = os.getenv("OTLP_ENDPOINT")
-    otlpHeaders = os.getenv("OTLP_HEADERS")
-    # openAiKey = os.getenv("OPENAI_KEY")
-    user = os.getenv("GRAFANA_CLOUD_INSTANCE")  # your instance ID
-    api_key = os.getenv("GRAFANA_CLOUD_API_KEY")  # your Grafana Cloud API key
-    
-
     # Set up logging
     logFW = CustomLogFW(service_name='main_app', instance_id='1')
     handler= logFW.setup_logging()
@@ -38,6 +31,10 @@ def create_game():
     logger.error("Welcome to two-player D&D, Harry Potter edition!")
 
     # Initialize OpenLIT library
+
+    otlpEndpoint = os.getenv("OTLP_ENDPOINT")
+    otlpHeaders = os.getenv("OTLP_HEADERS")
+
     from openlit import openlit
     openlit.init(
         application_name="two-player-dnd",
