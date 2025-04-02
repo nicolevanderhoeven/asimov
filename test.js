@@ -6,7 +6,7 @@ const apiKey = __ENV.OPENAI_API_KEY;
 const url = 'http://localhost:5050'; // The app URL
 
 export const options = {
-  vus: 1,
+  vus: 10,
   duration: '3m',
 };
 
