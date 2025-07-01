@@ -2,7 +2,9 @@
 
 Author: Nicole van der Hoeven
 
-This is a repository for the slides and code for the talk "Asimov's Zeroth Law of Robotics: Observability for AI" presented at KubeCon Europe 2025 in London, England.
+This is a repository for the slides and code for the talk "Asimov's Zeroth Law of Robotics: Observability for AI" presented at:
+- KubeCon Europe 2025 in London, England ([video link](https://www.youtube.com/watch?v=x6EKTCAWtn8))
+- Dutch Cloud Native Days 2025 in Utrecht, the Netherlands
 
 This repository consists of:
 - A D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
