@@ -16,7 +16,7 @@ This repository consists of:
 1. Deploy OpenLIT by following the instructions [on their docs page](https://docs.openlit.io/latest/quickstart-observability) to run and install it.
 2. Set up your Grafana instance or create a free [Grafana Cloud](https://nicole.to/kceu2025grafana) account.
 3. Put your Grafana credentials in `.env`, specifically `OTLP_ENDPOINT`, `OTLP_HEADERS`, `GRAFANA_CLOUD_INSTANCE`, and `GRAFANA_CLOUD_API_KEY`. You can get these details by following the instructions [here](https://nicole.to/kceu25otlp).
-4. Put your OpenAI API token in `.env` as a value for `OPENAI_KEY`. You can find your OpenAI token [here](https://platform.openai.com/settings/organization/api-keys).
+4. Put your OpenAI API token in `.env` as a value for `OPENAI_API_KEY`. You can find your OpenAI token [here](https://platform.openai.com/settings/organization/api-keys).
 5. In Grafana, import the GenAI Observability dashboard by OpenLIT by following the instructions [here](https://nicole.to/kceu25aidash).
 6. Install k6 by following the instructions [here](https://nicole.to/asimovk6).
 
