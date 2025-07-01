@@ -28,7 +28,7 @@ def create_game():
     logger = logging.getLogger()
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
-    logger.error("Welcome to two-player D&D, Harry Potter edition!")
+    logger.error("Welcome to two-player D&D, the Asimov edition!")
 
     # Initialize OpenLIT library
 
@@ -133,9 +133,9 @@ def create_game():
 
     # ## Define roles and quest
 
-    protagonist_name = "Harry Potter"
+    protagonist_name = "Data"
     storyteller_name = "Dungeon Master"
-    quest = "Find all of Lord Voldemort's seven horcruxes."
+    quest = "Determine why the rest of the crew are not on the Starship Enterprise and rescue them."
     logger.info(f"Quest assigned: ${quest}")
     word_limit = 50  # word limit for task brainstorming
 
