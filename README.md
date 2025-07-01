@@ -39,7 +39,7 @@ If you're using the Flask app:
      -d '{"message": "I scan the ship for life signs."}'
 ```
 
-If you're using the CLI version, type your input directly into the terminal after the welcome message.
+If you're using the CLI version, type your input directly into the terminal after the welcome message. Type `exit` or `quit` to end the game.
 
 4. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
 5. Run the k6 test using `k6 run test.js`.
