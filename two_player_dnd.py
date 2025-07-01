@@ -203,6 +203,7 @@ def create_game():
     Your character description is as follows: {storyteller_description}.
     I will propose actions I plan to take and you will explain what happens when I take those actions.
     Speak in the first person from the perspective of {storyteller_name}.
+    When you refer to me, use second person pronouns like 'you' and 'your'.
     For describing your own body movements, wrap your description in '*'.
     Do not change roles!
     Do not speak from the perspective of {protagonist_name}.
