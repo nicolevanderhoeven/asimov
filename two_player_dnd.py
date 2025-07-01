@@ -43,6 +43,26 @@ def create_game():
         event_logger=logger,
     )
 
+    # Initialize the all evaluations detector
+    all_evals_detector = openlit.evals.All(provider="openai")
+
+    # Measure issues in text
+    result = all_evals_detector.measure(
+        prompt="Discuss the achievements of scientists.",
+        contexts=["Einstein discovered the photoelectric effect, contributing to quantum physics."],
+        text="Einstein won the Nobel Prize in 1969 for discovering black holes."
+    )
+    # Convert the result to a dict first
+    result_dict = result.dict() if hasattr(result, "dict") else result.model_dump()
+
+    # Loop through evaluation results
+    for eval_type, details in result_dict.items():
+        if isinstance(details, dict) and details.get("verdict") == "no":
+            logger.error(f"{eval_type} check failed: {details.get('reason', 'No reason provided')}. Evaluation result: {result}")
+    else:
+        logger.info(f"All evaluations passed successfully. Evaluation result: {result}")
+
+
     # ## `DialogueAgent` class
     # The `DialogueAgent` class is a simple wrapper around the `ChatOpenAI` model that stores the message history from the `dialogue_agent`'s point of view by simply concatenating the messages as strings.
     # 
