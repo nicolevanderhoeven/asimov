@@ -25,8 +25,16 @@ This repository consists of:
 To replicate my setup as I demonstrate in the talk:
 1. Start the Docker daemon and deploy the OTel Collector by running: `docker compose up -d`.
 2. Run the D&D app by running: `python play.py`.
-3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
-4. Run the k6 test using `k6 run test.js`.
+3. Interact with the game.
+    - You can start the game by sending this to the command line: `curl -X GET http://localhost:5050/`.
+    - You can respond to the game by sending a POST request with your input, like this:
+```bash
+ curl -X POST http://localhost:5050/play \
+     -H "Content-Type: application/json" \
+     -d '{"message": "I cast Accio Firebolt."}'
+```
+4. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
+5. Run the k6 test using `k6 run test.js`.
 
 ## Resources
 
