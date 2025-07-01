@@ -12,6 +12,7 @@ This repository consists of:
 - The Docker compose configuration to run the OTel Collector, in `docker-compose.yml`.
 - A k6 test to run against the AI app, in `test.js`.
 - A custom logging framework, in `loggingfw.py`.
+- A CLI wrapper for the game, in `cli_play.py`.
 
 ## Setup
 
@@ -26,15 +27,20 @@ This repository consists of:
 
 To replicate my setup as I demonstrate in the talk:
 1. Start the Docker daemon and deploy the OTel Collector by running: `docker compose up -d`.
-2. Run the D&D app by running: `python play.py`.
+2. Run the D&D app by running: `python play.py`. Alternatively, you can run the CLI version of the game by running `python cli_play.py`.
 3. Interact with the game.
+
+If you're using the Flask app:
     - You can start the game by sending this to the command line: `curl -X GET http://localhost:5050/`.
     - You can respond to the game by sending a POST request with your input, like this:
 ```bash
  curl -X POST http://localhost:5050/play \
      -H "Content-Type: application/json" \
-     -d '{"message": "I cast Accio Firebolt."}'
+     -d '{"message": "I scan the ship for life signs."}'
 ```
+
+If you're using the CLI version, type your input directly into the terminal after the welcome message.
+
 4. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
 5. Run the k6 test using `k6 run test.js`.
 
