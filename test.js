@@ -20,7 +20,6 @@ export default function() {
 
 export function fetchIntro() {
   
-  lokiClient.push('Loki logs sent from k6');
   const res = http.get(url);
   let success = check(res, { 
     'status is 200': (res) => res.status === 200,
