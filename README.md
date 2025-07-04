@@ -14,6 +14,8 @@ This repository consists of:
 - A custom logging framework, in `loggingfw.py`.
 - A CLI wrapper for the game, in `cli_play.py`.
 
+![A diagram of the architecture of the AI app, showing the D&D game, the OpenTelemetry Collector, and Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20Dutch%20Cloud%20Native%20Day%202025.svg)
+
 ## Setup
 
 1. Deploy OpenLIT by following the instructions [on their docs page](https://docs.openlit.io/latest/quickstart-observability) to run and install it.
