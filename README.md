@@ -51,10 +51,10 @@ If you're using the CLI version, type your input directly into the terminal afte
 - [OpenLIT docs: Quickstart: AI Observability](https://docs.openlit.io/latest/quickstart-observability) for AI-specific instrumentation
 - [OpenTelemetry](https://opentelemetry.io/) for instrumentation
 - Free [Grafana Cloud](https://nicole.to/kceu2025grafana) for visibility
-- [Loki](https://nicole.to/kceu2025loki) for logs
-- [Prometheus](https://prometheus.io/) for metrics
-- [Tempo](https://nicole.to/kceu2025tempo) for traces
-- [k6](https://nicole.to/kceu2025k6) for testing
+- [Loki](https://nicole.to/lokirepo) for logs
+- [Prometheus](https://nicole.to/promrepo) for metrics
+- [Tempo](https://nicole.to/temporepo) for traces
+- [k6](https://nicole.to/k6repo) for testing
 
 
 ## Slides
