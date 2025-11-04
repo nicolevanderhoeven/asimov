@@ -1,0 +1,42 @@
+# OpenTelemetry Collector Configuration Template
+# Copy this to otel-config.yml and replace environment variables
+
+extensions:
+  basicauth/grafana_cloud:
+    client_auth:
+      username: "${GRAFANA_CLOUD_USERNAME}"
+      password: "${GRAFANA_CLOUD_PASSWORD}"
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlphttp/grafana_cloud:
+    endpoint: "${GRAFANA_CLOUD_OTLP_ENDPOINT}"
+    auth:
+      authenticator: basicauth/grafana_cloud
+
+# Pipelines
+service:
+  extensions:
+    [
+      basicauth/grafana_cloud,
+    ]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlphttp/grafana_cloud]
+    metrics:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlphttp/grafana_cloud]
+    traces:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlphttp/grafana_cloud]

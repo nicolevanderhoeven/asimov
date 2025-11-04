@@ -20,10 +20,22 @@ This repository consists of:
 
 1. Deploy OpenLIT by following the instructions [on their docs page](https://docs.openlit.io/latest/quickstart-observability) to run and install it.
 2. Set up your Grafana instance or create a free [Grafana Cloud](https://nicole.to/kceu2025grafana) account.
-3. Put your Grafana credentials in `.env`, specifically `OTLP_ENDPOINT`, `OTLP_HEADERS`, `GRAFANA_CLOUD_INSTANCE`, and `GRAFANA_CLOUD_API_KEY`. You can get these details by following the instructions [here](https://nicole.to/kceu25otlp).
-4. Put your OpenAI API token in `.env` as a value for `OPENAI_API_KEY`. You can find your OpenAI token [here](https://platform.openai.com/settings/organization/api-keys).
-5. In Grafana, import the GenAI Observability dashboard by OpenLIT by following the instructions [here](https://nicole.to/kceu25aidash).
-6. Install k6 by following the instructions [here](https://nicole.to/asimovk6).
+3. **Configure your credentials securely:**
+   - Copy `env.example` to `.env`: `cp env.example .env`
+   - Edit `.env` and fill in your actual credentials:
+     - `GRAFANA_CLOUD_USERNAME` - Your Grafana Cloud username
+     - `GRAFANA_CLOUD_PASSWORD` - Your Grafana Cloud password  
+     - `GRAFANA_CLOUD_OTLP_ENDPOINT` - Your OTLP endpoint URL
+     - `OTLP_ENDPOINT` - Local collector endpoint (usually `http://localhost:4318`)
+     - `OTLP_HEADERS` - Your auth headers for OpenLIT
+     - `OPENAI_API_KEY` - Your OpenAI API token from [here](https://platform.openai.com/settings/organization/api-keys)
+   - Copy `otel-config.template.yml` to `otel-config.yml`: `cp otel-config.template.yml otel-config.yml`
+   - Replace the environment variable placeholders in `otel-config.yml` with your actual values:
+     - Replace `${GRAFANA_CLOUD_USERNAME}` with your username
+     - Replace `${GRAFANA_CLOUD_PASSWORD}` with your password
+     - Replace `${GRAFANA_CLOUD_OTLP_ENDPOINT}` with your endpoint URL
+4. In Grafana, import the GenAI Observability dashboard by OpenLIT by following the instructions [here](https://nicole.to/kceu25aidash).
+5. Install k6 by following the instructions [here](https://nicole.to/asimovk6).
 
 ## Usage
 
