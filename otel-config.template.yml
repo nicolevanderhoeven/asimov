@@ -40,3 +40,4 @@ service:
       receivers: [otlp]
       processors: []
       exporters: [otlphttp/grafana_cloud]
+
