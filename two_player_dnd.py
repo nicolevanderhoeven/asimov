@@ -105,6 +105,13 @@ def create_game():
         def receive(self, name: str, message: str) -> None:
             self.message_history.append(f"{name}: {message}")
             logger.info(f"{self.name} received message: {message}")
+            
+            # Trim conversation history to prevent context length issues
+            # Keep the initial context + last 15 messages
+            if len(self.message_history) > 16:
+                # Keep first message ("Here is the conversation so far.") + last 15
+                self.message_history = [self.message_history[0]] + self.message_history[-15:]
+                logger.info(f"Trimmed conversation history for {self.name} to prevent context overflow")
 
     # ## `DialogueSimulator` class
     # The `DialogueSimulator` class takes a list of agents. At each step, it performs the following:

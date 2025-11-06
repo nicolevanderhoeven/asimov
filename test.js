@@ -5,7 +5,7 @@ import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 const url = 'http://localhost:5050'; // The app URL
 
 export const options = {
-  vus: 1,
+  vus: 10,
   duration: '3m',
   thresholds: {
     http_req_failed: ['rate<0.01'], // http errors should be less than 1%

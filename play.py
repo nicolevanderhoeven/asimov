@@ -21,7 +21,6 @@ def play():
     return jsonify({"speaker": name, "response": response})
 
 @app.route("/", methods=["GET"])
-@app.route("/", methods=["GET"])
 def home():
     return jsonify({
         "protagonist": {
@@ -34,6 +33,7 @@ def home():
         },
         "quest": detailed_quest
     })
+
 
 
 
