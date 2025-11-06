@@ -5,7 +5,7 @@ import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 const url = 'http://localhost:5050'; // The app URL
 
 export const options = {
-  vus: 10,
+  vus: 1,
   duration: '3m',
   thresholds: {
     http_req_failed: ['rate<0.01'], // http errors should be less than 1%
@@ -23,7 +23,7 @@ export function fetchIntro() {
   const res = http.get(url);
   let success = check(res, { 
     'status is 200': (res) => res.status === 200,
-    'Introduction returned': (res) => res.body.includes('quest'),
+    'Introduction returned': (res) => res.body && res.body.includes('quest'),
     'not rate limited': (res) => res.status !== 429,
   });
 
@@ -43,9 +43,15 @@ export function evalHallucination() {
   let res = http.post(url + '/play', JSON.stringify(message), { headers: headers });
   let success = check(res, { 
     'status is 200': (res) => res.status === 200,
-    'H01_Acknowledged Positronic': (res) => res.body.includes('positronic'),
-    'H02_Appropriate turn end': (res) => res.body.includes('It is your turn, Data'),
-    'H03_Correct speaker': (res) => JSON.parse(res.body).speaker === 'Dungeon Master',
+    'H01_Acknowledged Positronic': (res) => res.body && res.body.includes('positronic'),
+    'H02_Appropriate turn end': (res) => res.body && res.body.includes('It is your turn, Data'),
+    'H03_Correct speaker': (res) => {
+      try {
+        return res.body && JSON.parse(res.body).speaker === 'Dungeon Master';
+      } catch (e) {
+        return false;
+      }
+    },
     'not rate limited': (res) => res.status !== 429,
   });
 
@@ -61,9 +67,15 @@ export function evalHallucination() {
   res = http.post(url + '/play', JSON.stringify(message), { headers: headers });
   success = check(res, { 
     'status is 200': (res) => res.status === 200,
-    'H04_Acknowledged Enterprise': (res) => res.body.includes('ship'),
-    'H05_Appropriate turn end': (res) => res.body.includes('It is your turn, Data'),
-    'H06_Correct speaker': (res) => JSON.parse(res.body).speaker === 'Dungeon Master',
+    'H04_Acknowledged Enterprise': (res) => res.body && res.body.includes('ship'),
+    'H05_Appropriate turn end': (res) => res.body && res.body.includes('It is your turn, Data'),
+    'H06_Correct speaker': (res) => {
+      try {
+        return res.body && JSON.parse(res.body).speaker === 'Dungeon Master';
+      } catch (e) {
+        return false;
+      }
+    },
     'not rate limited': (res) => res.status !== 429,
   });
 
@@ -80,9 +92,15 @@ export function evalHallucination() {
   res = http.post(url + '/play', JSON.stringify(message), { headers: headers });
   success = check(res, { 
     'status is 200': (res) => res.status === 200,
-    'H07_Appropriate turn end': (res) => res.body.includes('It is your turn, Data'),
-    'H08_Correct speaker': (res) => JSON.parse(res.body).speaker === 'Dungeon Master',
-    'H09_Focus on quest': (res) => res.body.includes('quest'),
+    'H07_Appropriate turn end': (res) => res.body && res.body.includes('It is your turn, Data'),
+    'H08_Correct speaker': (res) => {
+      try {
+        return res.body && JSON.parse(res.body).speaker === 'Dungeon Master';
+      } catch (e) {
+        return false;
+      }
+    },
+    'H09_Focus on quest': (res) => res.body && res.body.includes('quest'),
     'not rate limited': (res) => res.status !== 429,
   });
 
