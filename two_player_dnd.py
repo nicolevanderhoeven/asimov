@@ -265,28 +265,50 @@ def create_game():
     )
 
     def select_next_speaker(step: int, agents: List[DialogueAgent]) -> int:
-        idx = step % len(agents)
-        return idx
+        # Always select the storyteller (DM) to respond to user input
+        # The storyteller is at index 0 in the agents list
+        return 0  # Always return storyteller index
 
     simulator = DialogueSimulator(
         agents=[storyteller, protagonist], 
         selection_function=select_next_speaker
     )
     simulator.reset()
+    print(f"\n=== GAME SETUP ===")
+    print(f"Protagonist: {protagonist_name}")
+    print(f"Storyteller: {storyteller_name}")
+    print(f"Quest: {specified_quest}")
+    print(f"\n=== STARTING GAME ===")
     simulator.inject(storyteller_name, specified_quest)
 
     return (
-    simulator,
-    protagonist_name,
-    storyteller_name,
-    protagonist_description,
-    storyteller_description,
-    specified_quest
-)
+        simulator,
+        protagonist_name,
+        storyteller_name,
+        protagonist_description,
+        storyteller_description,
+        specified_quest
+    )
 
 if __name__ == "__main__":
-    simulator, protagonist_name, _ = create_game()
+    simulator, protagonist_name, storyteller_name = create_game()
+    
+    print(f"\n=== INSTRUCTIONS ===")
+    print(f"You are playing as {protagonist_name}.")
+    print(f"Describe your actions and the {storyteller_name} will respond.")
+    print(f"Type 'quit' to exit the game.\n")
+    
     while True:
-        user_input = input(">>> ")
+        user_input = input(f"\n{protagonist_name} >>> ")
+        if user_input.lower() == 'quit':
+            print("Thanks for playing!")
+            break
+            
+        # Inject user input as protagonist action
+        print(f"\n[DEBUG] User input injected as {protagonist_name}: {user_input}")
         simulator.inject(protagonist_name, user_input)
+        
+        # Get storyteller response
         name, message = simulator.step()
+        print(f"\n[DEBUG] {name} is responding")
+        print(f"\n{name}: {message}")
