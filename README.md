@@ -3,8 +3,9 @@
 Author: Nicole van der Hoeven ([Mastodon](https://pkm.social/@nicole))
 
 This is a repository for the slides and code for the talk "Asimov's Zeroth Law of Robotics: Observability for AI" presented at:
-- KubeCon Europe 2025 in London, England ([video link](https://www.youtube.com/watch?v=x6EKTCAWtn8))
-- Dutch Cloud Native Days 2025 in Utrecht, the Netherlands
+- [KubeCon Europe 2025](https://nicolevanderhoeven.com/blog/20250402-asmiovs-zeroth-law-of-robotics/) in London, England ([video link](https://www.youtube.com/watch?v=x6EKTCAWtn8))
+- [Dutch Cloud Native Days 2025](https://nicolevanderhoeven.com/blog/20250703-asimovs-zeroth-law-dutch-cloud-native-day/) in Utrecht, the Netherlands
+- [Newcrafts 2025](https://nicolevanderhoeven.com/blog/20251106-asimovs-zeroth-law-newcrafts/) in Paris, France
 
 This repository consists of:
 - A D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
@@ -13,6 +14,7 @@ This repository consists of:
 - A k6 test to run against the AI app, in `test.js`.
 - A custom logging framework, in `loggingfw.py`.
 - A CLI wrapper for the game, in `cli_play.py`.
+- (new) A k6 test that uses AI to test the AI app, in `test-ai.js`.
 
 ![A diagram of the architecture of the AI app, showing the D&D game, the OpenTelemetry Collector, and Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20Dutch%20Cloud%20Native%20Day%202025.svg)
 
