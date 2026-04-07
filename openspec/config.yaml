@@ -1,20 +1,27 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Tech stack: Python, Flask, LangChain, OpenAI (via langchain-openai), OpenTelemetry, OpenLIT, k6 (JavaScript)
+  Domain: AI observability demo — a two-player D&D game used to demonstrate OTel instrumentation of LLM apps
+  We use conventional commits (e.g. feat:, fix:, chore:)
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Key files:
+  - two_player_dnd.py: Core game logic; initialises OpenLIT, LangChain agents (protagonist + storyteller), and runs the conversation loop
+  - play.py: Flask wrapper exposing GET / (game info) and POST /play (send a message), runs on port 5050
+  - cli_play.py: CLI wrapper for the same game
+  - loggingfw.py: Custom OTel logging framework (CustomLogFW) — sets up OTLP log export via gRPC using BatchLogRecordProcessor
+  - otel-config.template.yml: OTel Collector config template; forwards traces/metrics/logs to Grafana Cloud
+  - docker-compose.yml: Runs the OTel Collector locally
+  - test.js: k6 load test against the Flask app
+  - test-ai.js: k6 test that uses AI to test the AI app
+
+  Observability stack: OpenLIT (LLM instrumentation) → OTel Collector (docker-compose) → Grafana Cloud (Loki/Prometheus/Tempo)
+  Config is loaded from .env (see env.example); credentials must never be hardcoded
+
+rules:
+  proposal:
+    - Always include a "Non-goals" section
+    - Reference specific file names from the project where relevant
+  tasks:
+    - Break tasks into chunks of max 2 hours
+    - Note which file each task touches
