@@ -8,11 +8,8 @@
 def create_game():
     from typing import Callable, List
 
-    from langchain.schema import (
-        HumanMessage,
-        SystemMessage,
-    )
-    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_anthropic import ChatAnthropic
 
     from dotenv import load_dotenv
     import os
@@ -186,9 +183,8 @@ def create_game():
             Do not add anything else."""
         ),
     ]
-    protagonist_description = ChatOpenAI(temperature=1.0)(
-        protagonist_specifier_prompt
-    ).content
+    _creative_llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=1.0)
+    protagonist_description = _creative_llm.invoke(protagonist_specifier_prompt).content
 
     storyteller_specifier_prompt = [
         player_descriptor_system_message,
@@ -199,9 +195,7 @@ def create_game():
             Do not add anything else."""
         ),
     ]
-    storyteller_description = ChatOpenAI(temperature=1.0)(
-        storyteller_specifier_prompt
-    ).content
+    storyteller_description = _creative_llm.invoke(storyteller_specifier_prompt).content
 
     # ## Protagonist and dungeon master system messages
 
@@ -256,19 +250,20 @@ def create_game():
             Do not add anything else."""
         ),
     ]
-    specified_quest = ChatOpenAI(temperature=1.0)(quest_specifier_prompt).content
+    specified_quest = _creative_llm.invoke(quest_specifier_prompt).content
 
     # ## Main Loop
 
+    _dialogue_llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.2)
     protagonist = DialogueAgent(
         name=protagonist_name,
         system_message=protagonist_system_message,
-        model=ChatOpenAI(temperature=0.2),
+        model=_dialogue_llm,
     )
     storyteller = DialogueAgent(
         name=storyteller_name,
         system_message=storyteller_system_message,
-        model=ChatOpenAI(temperature=0.2),
+        model=_dialogue_llm,
     )
 
     def select_next_speaker(step: int, agents: List[DialogueAgent]) -> int:
