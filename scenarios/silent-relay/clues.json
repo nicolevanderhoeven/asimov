@@ -1,0 +1,17 @@
+[
+    {
+      "id": "clue_logs",
+      "location": "loc_operations",
+      "text": "The relay detected a non-random signal."
+    },
+    {
+      "id": "clue_medical",
+      "location": "loc_med_bay",
+      "text": "Crew experienced neural interference."
+    },
+    {
+      "id": "clue_entity",
+      "location": "loc_core_chamber",
+      "text": "The intelligence is defensive."
+    }
+  ]

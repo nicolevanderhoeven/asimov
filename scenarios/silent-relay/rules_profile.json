@@ -1,0 +1,18 @@
+{
+    "core_die": "d20",
+    "difficulty_classes": {
+      "easy": 10,
+      "moderate": 13,
+      "hard": 16
+    },
+    "skills": [
+      "command",
+      "science",
+      "engineering",
+      "medical",
+      "security",
+      "insight",
+      "athletics",
+      "stealth"
+    ]
+  }

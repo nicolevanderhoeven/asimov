@@ -1,0 +1,20 @@
+{
+    "scenario_id": "silent-relay-v1",
+    "title": "The Silent Relay",
+    "version": "1.0",
+    "genre": "science_fiction",
+    "tone": ["mystery", "tense", "exploratory", "ethical"],
+    "play_profile": {
+      "player_count": 1,
+      "recommended_level": 1,
+      "combat_density": "low",
+      "max_simultaneous_hostiles": 2
+    },
+    "entry_scene": "scene_1_approach",
+    "scene_order": [
+      "scene_1_approach",
+      "scene_2_operations",
+      "scene_3_core",
+      "scene_4_resolution"
+    ]
+  }

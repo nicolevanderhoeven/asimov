@@ -1,0 +1,21 @@
+{
+    "player": {
+      "hp": 12,
+      "max_hp": 12,
+      "defense": 13,
+      "conditions": [],
+      "skills": {
+        "command": 3,
+        "science": 2,
+        "engineering": 1,
+        "medical": 0,
+        "security": 1,
+        "insight": 2
+      }
+    },
+    "scenario": {
+      "current_scene": "scene_1_approach",
+      "flags": {},
+      "alarm_state": "silent"
+    }
+  }

@@ -1,0 +1,23 @@
+[
+    {
+      "id": "haz_docking_shear",
+      "name": "Docking Hazard",
+      "check": "engineering",
+      "dc": 13,
+      "fail_effect": "minor damage"
+    },
+    {
+      "id": "haz_power_arc",
+      "name": "Power Arc",
+      "check": "engineering",
+      "dc": 10,
+      "fail_effect": "1d4 damage"
+    },
+    {
+      "id": "haz_signal_feedback",
+      "name": "Signal Feedback",
+      "check": "science",
+      "dc": 13,
+      "fail_effect": "confusion"
+    }
+  ]

@@ -1,0 +1,58 @@
+[
+    {
+      "id": "scene_1_approach",
+      "name": "Approach and Docking",
+      "entry_text": "The relay hangs against the starfield like a lantern gone cold. Your shuttle rocks in the wake of intermittent turbulence.",
+      "objectives": ["Dock safely", "Assess external damage"],
+      "obstacles": ["haz_docking_shear"],
+      "checks": [
+        { "skill": "engineering", "dc": 13, "label": "Dock safely" },
+        { "skill": "science", "dc": 10, "label": "Scan anomaly" }
+      ],
+      "next_scene": "scene_2_operations"
+    },
+    {
+      "id": "scene_2_operations",
+      "name": "The Silent Station",
+      "entry_text": "Emergency lights flicker to life as you enter operations. The silence feels intentional.",
+      "objectives": ["Recover logs", "Restore power"],
+      "obstacles": ["haz_power_arc", "haz_signal_feedback"],
+      "checks": [
+        { "skill": "science", "dc": 10 },
+        { "skill": "engineering", "dc": 13 },
+        { "skill": "medical", "dc": 10 }
+      ],
+      "next_scene": "scene_3_core"
+    },
+    {
+      "id": "scene_3_core",
+      "name": "The Voice in the Static",
+      "entry_text": "The relay core pulses. The static almost sounds like words.",
+      "approaches": [
+        {
+          "id": "diplomacy",
+          "skills": ["command", "insight"],
+          "dc": 13,
+          "outcome": "peaceful"
+        },
+        {
+          "id": "science",
+          "skills": ["science", "engineering"],
+          "dc": 13,
+          "outcome": "contained"
+        },
+        {
+          "id": "force",
+          "combat": true,
+          "adversaries": ["adv_security_drone"]
+        }
+      ],
+      "next_scene": "scene_4_resolution"
+    },
+    {
+      "id": "scene_4_resolution",
+      "name": "Relay Restored",
+      "entry_text": "The signal clears. The station breathes again.",
+      "end": true
+    }
+  ]

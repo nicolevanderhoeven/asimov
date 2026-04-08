@@ -1,0 +1,16 @@
+[
+    {
+      "id": "adv_security_drone",
+      "name": "Security Drone",
+      "hp": 9,
+      "defense": 12,
+      "attack_bonus": 3,
+      "damage": "1d6+1",
+      "abilities": [
+        {
+          "name": "Stun Pulse",
+          "effect": "Target may become disoriented"
+        }
+      ]
+    }
+  ]

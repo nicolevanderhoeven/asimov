@@ -1,0 +1,26 @@
+[
+    {
+      "id": "loc_docking_ring",
+      "name": "Docking Ring",
+      "tags": ["hazard"],
+      "description": "A misaligned docking collar rotates unevenly."
+    },
+    {
+      "id": "loc_operations",
+      "name": "Operations Hub",
+      "tags": ["control"],
+      "description": "Flickering consoles and fragmented logs."
+    },
+    {
+      "id": "loc_med_bay",
+      "name": "Medical Bay",
+      "tags": ["clue"],
+      "description": "Diagnostic equipment still running."
+    },
+    {
+      "id": "loc_core_chamber",
+      "name": "Relay Core",
+      "tags": ["finale"],
+      "description": "Energy pulses through a suspended core."
+    }
+  ]
