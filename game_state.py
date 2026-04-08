@@ -18,6 +18,7 @@ class PlayerState(BaseModel):
     attributes: dict[str, int] = {
         "STR": 10, "DEX": 10, "CON": 10, "INT": 10, "WIS": 10, "CHA": 10
     }
+    skills: dict[str, int] = {}
     inventory: list[str] = []
     conditions: list[str] = []
 
@@ -67,6 +68,12 @@ class TurnRecord(BaseModel):
 # Top-level GameState
 # ---------------------------------------------------------------------------
 
+class ScenarioState(BaseModel):
+    current_scene: str
+    flags: dict[str, str] = {}
+    alarm_state: str = "silent"
+
+
 class GameState(BaseModel):
     session_id: str
     turn_number: int = 0
@@ -75,6 +82,7 @@ class GameState(BaseModel):
     quests: list[QuestState] = []
     npcs: list[NPCState] = []
     turn_history: list[TurnRecord] = []
+    scenario: Optional[ScenarioState] = None
 
 
 # ---------------------------------------------------------------------------

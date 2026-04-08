@@ -6,7 +6,7 @@
 # ## Import LangChain related modules 
 
 def create_game():
-    from typing import Callable, List
+    from typing import Any, Callable, List
 
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_anthropic import ChatAnthropic
@@ -37,27 +37,23 @@ def create_game():
         application_name="two-player-dnd",
         otlp_endpoint=otlpEndpoint,
         otlp_headers="Authorization=Basic%20"+ otlpHeaders,
-        event_logger=logger,
     )
 
     # Initialize the all evaluations detector
-    all_evals_detector = openlit.evals.All(provider="openai")
-
-    # Measure issues in text
-    result = all_evals_detector.measure(
-        prompt="Discuss the achievements of scientists.",
-        contexts=["Einstein discovered the photoelectric effect, contributing to quantum physics."],
-        text="Einstein won the Nobel Prize in 1969 for discovering black holes."
-    )
-    # Convert the result to a dict first
-    result_dict = result.dict() if hasattr(result, "dict") else result.model_dump()
-
-    # Loop through evaluation results
-    for eval_type, details in result_dict.items():
-        if isinstance(details, dict) and details.get("verdict") == "no":
-            logger.error(f"{eval_type} check failed: {details.get('reason', 'No reason provided')}. Evaluation result: {result}")
-    else:
+    try:
+        all_evals_detector = openlit.evals.All(provider="anthropic", model="claude-sonnet-4-5")
+        result = all_evals_detector.measure(
+            prompt="Discuss the achievements of scientists.",
+            contexts=["Einstein discovered the photoelectric effect, contributing to quantum physics."],
+            text="Einstein won the Nobel Prize in 1969 for discovering black holes."
+        )
+        result_dict = result.dict() if hasattr(result, "dict") else result.model_dump()
+        for eval_type, details in result_dict.items():
+            if isinstance(details, dict) and details.get("verdict") == "no":
+                logger.error(f"{eval_type} check failed: {details.get('reason', 'No reason provided')}. Evaluation result: {result}")
         logger.info(f"All evaluations passed successfully. Evaluation result: {result}")
+    except Exception as exc:
+        logger.warning(f"OpenLIT eval skipped: {exc}")
 
 
     # ## `DialogueAgent` class
@@ -73,7 +69,7 @@ def create_game():
             self,
             name: str,
             system_message: SystemMessage,
-            model: ChatOpenAI,
+            model: Any,
         ) -> None:
             self.name = name
             self.system_message = system_message

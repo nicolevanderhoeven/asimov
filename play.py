@@ -8,6 +8,7 @@ from two_player_dnd import create_game
 from game_state import GameState, starter_character, STARTER_LOCATION
 from loggingfw import log_session_event
 from rules_engine import RulesEngine
+from scenario_runner import ScenarioLoadError, ScenarioLoader, ScenarioValidationError, SceneRunner
 from turn_loop import TurnLoop
 
 load_dotenv()
@@ -23,9 +24,12 @@ app = Flask(__name__)
 ) = create_game()
 
 # ---------------------------------------------------------------------------
-# In-memory single-player session store  (ephemeral — lost on restart)
+# In-memory session stores (ephemeral — lost on restart)
 # ---------------------------------------------------------------------------
 _sessions: dict[str, GameState] = {}
+
+# Scenario sessions: session_id → SceneRunner
+_scenario_runners: dict[str, SceneRunner] = {}
 
 
 def _get_llm():
@@ -157,6 +161,127 @@ def singleplayer_end():
     )
 
     return jsonify({"ended": True, "total_turns": state.turn_number})
+
+
+# ---------------------------------------------------------------------------
+# Scenario routes
+# ---------------------------------------------------------------------------
+
+@app.route("/scenario/start", methods=["POST"])
+def scenario_start():
+    """Initialise a scenario session.
+
+    Body: {"scenario": "<scenario-name>"}
+    Returns: {"session_id": ..., "scene": ..., "state": ...}
+    """
+    data = request.get_json(silent=True) or {}
+    scenario_name = data.get("scenario", "").strip()
+    if not scenario_name:
+        abort(400, description="'scenario' field is required.")
+
+    try:
+        loader = ScenarioLoader()
+        scenario_data, initial_state = loader.load(scenario_name)
+    except ScenarioLoadError as exc:
+        abort(400, description=str(exc))
+    except ScenarioValidationError as exc:
+        abort(422, description=str(exc))
+
+    runner = SceneRunner(
+        data=scenario_data,
+        state=initial_state,
+        rules_engine=RulesEngine(),
+        llm=_get_llm(),
+    )
+    session_id = initial_state.session_id
+    _scenario_runners[session_id] = runner
+
+    log_session_event(
+        event="scenario_start",
+        session_id=session_id,
+        payload={
+            "scenario": scenario_name,
+            "scenario_id": scenario_data.meta.scenario_id,
+            "initial_scene": runner.current_scene,
+        },
+    )
+
+    scene_def = scenario_data.scenes[runner.current_scene]
+    return jsonify({
+        "session_id": session_id,
+        "scene": {
+            "id": scene_def.id,
+            "name": scene_def.name,
+            "entry_text": scene_def.entry_text,
+            "objectives": scene_def.objectives,
+        },
+        "state": runner.state.model_dump(),
+    }), 201
+
+
+@app.route("/scenario/play", methods=["POST"])
+def scenario_play():
+    """Process one player turn within a scenario session.
+
+    Body: {"session_id": "...", "input": "...", "approach": null}
+    Returns: {"narrative": ..., "scene": ..., "state": ..., "complete": bool, "outcome": null|str}
+    """
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id")
+    player_input = data.get("input", "")
+    approach = data.get("approach")  # optional explicit approach ID
+
+    if not session_id or session_id not in _scenario_runners:
+        abort(404, description="Scenario session not found.")
+
+    runner = _scenario_runners[session_id]
+
+    try:
+        narrative, new_state = runner.process_turn(player_input, approach=approach)
+    except ValueError as exc:
+        abort(400, description=str(exc))
+
+    scene_def = runner._data.scenes[runner.current_scene]
+    response = {
+        "narrative": narrative,
+        "scene": {
+            "id": scene_def.id,
+            "name": scene_def.name,
+        },
+        "state": new_state.model_dump(),
+        "complete": runner.is_complete,
+        "outcome": runner.outcome_type,
+    }
+
+    if runner.is_complete:
+        _scenario_runners.pop(session_id, None)
+        log_session_event(
+            event="scenario_end",
+            session_id=session_id,
+            payload={
+                "outcome": runner.outcome_type,
+                "total_turns": new_state.turn_number,
+            },
+        )
+
+    return jsonify(response)
+
+
+@app.route("/scenario/info", methods=["GET"])
+def scenario_info():
+    """Return metadata about the scenario mode and available scenarios."""
+    return jsonify({
+        "description": "Single-player scenario mode — investigation-driven one-shots.",
+        "endpoints": {
+            "start": "POST /scenario/start",
+            "play": "POST /scenario/play",
+        },
+        "play_body": {
+            "session_id": "string (from /scenario/start)",
+            "input": "string — player action",
+            "approach": "string|null — explicit approach ID for multi-path scenes",
+        },
+    })
 
 
 if __name__ == "__main__":
