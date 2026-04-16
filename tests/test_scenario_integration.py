@@ -161,16 +161,17 @@ class TestScenarioPlay:
     def test_play_turn_number_increments(self, client):
         c, _ = client
         session_id = self._start(c)
-        c.post("/scenario/play", json={"session_id": session_id, "input": "Turn 1."})
-        resp = c.post("/scenario/play", json={"session_id": session_id, "input": "Turn 2."})
+        # Prompts don't increment turn_number; /roll resolves a mechanic and does
+        c.post("/scenario/play", json={"session_id": session_id, "input": "/roll"})
+        resp = c.post("/scenario/play", json={"session_id": session_id, "input": "/roll"})
         body = resp.get_json()
         assert body["state"]["turn_number"] == 2
 
     def test_play_flags_accumulate(self, client):
         c, _ = client
         session_id = self._start(c)
-        c.post("/scenario/play", json={"session_id": session_id, "input": "I act."})
-        resp = c.post("/scenario/play", json={"session_id": session_id, "input": "I continue."})
+        c.post("/scenario/play", json={"session_id": session_id, "input": "/roll"})
+        resp = c.post("/scenario/play", json={"session_id": session_id, "input": "/roll"})
         flags = resp.get_json()["state"]["scenario"]["flags"]
         assert len(flags) >= 1
 
@@ -213,9 +214,18 @@ class TestScenarioPlay:
         )
         runner._start_scene_span("scene_3_core")
 
+        # Step 1: select approach — returns /roll prompt (non-combat approach)
         resp = c.post(
             "/scenario/play",
             json={"session_id": session_id, "input": "I open a channel.", "approach": "diplomacy"},
+        )
+        assert resp.status_code == 200
+        assert "/roll" in resp.get_json()["narrative"]
+
+        # Step 2: roll to resolve
+        resp = c.post(
+            "/scenario/play",
+            json={"session_id": session_id, "input": "/roll"},
         )
         assert resp.status_code == 200
         body = resp.get_json()

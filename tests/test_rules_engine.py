@@ -2,6 +2,9 @@ import pytest
 
 from game_state import DiceResult, GameState, STARTER_LOCATION, PlayerState, starter_character
 from rules_engine import (
+    ABILITY_FULL_NAMES,
+    CONDITION_RULES,
+    CONDITION_SAVE_ABILITY,
     AttackResult,
     DiceTrigger,
     RulesEngine,
@@ -349,3 +352,36 @@ class TestApplyResults:
         results = [DiceResult(roll="d6", modifier=0, raw_result=4, total=4, outcome="hit")]
         engine.apply_results(state, results)
         assert state.player.hp == 10
+
+
+# ---------------------------------------------------------------------------
+# CONDITION_RULES and ABILITY_FULL_NAMES
+# ---------------------------------------------------------------------------
+
+class TestConditionRulesDict:
+    def test_all_valid_conditions_covered(self):
+        from game_state import VALID_CONDITIONS
+        for c in VALID_CONDITIONS:
+            assert c in CONDITION_RULES
+
+    def test_each_entry_is_nonempty_string(self):
+        for key, val in CONDITION_RULES.items():
+            assert isinstance(val, str) and len(val) > 0, f"{key} has empty rule"
+
+
+class TestAbilityFullNames:
+    def test_all_six_abilities(self):
+        for abbr in ("STR", "DEX", "CON", "INT", "WIS", "CHA"):
+            assert abbr in ABILITY_FULL_NAMES
+
+
+class TestConditionSaveAbility:
+    def test_frightened_uses_wisdom(self):
+        assert CONDITION_SAVE_ABILITY["frightened"] == "WIS"
+
+    def test_poisoned_uses_constitution(self):
+        assert CONDITION_SAVE_ABILITY["poisoned"] == "CON"
+
+    def test_stunned_has_no_end_of_turn_save(self):
+        # Stunned is cleared by other mechanics (end of next turn, post-combat)
+        assert "stunned" not in CONDITION_SAVE_ABILITY

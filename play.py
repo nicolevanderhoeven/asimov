@@ -250,6 +250,7 @@ def scenario_play():
     scene_def = runner._data.scenes[runner.current_scene]
     response = {
         "narrative": narrative,
+        "mechanic_log": runner.last_mechanic_log,
         "scene": {
             "id": scene_def.id,
             "name": scene_def.name,

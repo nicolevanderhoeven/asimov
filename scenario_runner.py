@@ -31,6 +31,9 @@ from game_state import (
     TurnRecord,
 )
 from rules_engine import (
+    ABILITY_FULL_NAMES,
+    CONDITION_RULES,
+    CONDITION_SAVE_ABILITY,
     AttackResult,
     DiceTrigger,
     RulesEngine,
@@ -339,13 +342,17 @@ class ScenarioLoader:
 _SCENARIO_STORYTELLER_SYSTEM = """\
 You are the narrator for a Star Trek–inspired investigation scenario.
 Your job is to narrate what happens next based on the mechanical outcome provided.
-Be vivid but concise (3–5 sentences). Stay in genre. Do not invent mechanics.
+Be vivid but concise (3–5 sentences). Stay in genre. Do not invent new mechanics
+or dice rolls — the player has already seen the exact numbers.
 
 Scene: {scene_name}
 Scene context: {entry_text}
 Current objectives: {objectives}
 
-Mechanical outcome: {mechanic_summary}
+Mechanical outcome (already shown to the player — do not repeat numbers):
+{mechanic_summary}
+
+Player conditions: {active_conditions}
 """
 
 _SCENARIO_STORYTELLER_HUMAN = "Player action: {player_input}"
@@ -386,6 +393,9 @@ class SceneRunner:
 
         self._is_complete = False
         self._outcome_type: Optional[str] = None
+        self._last_mechanic_log: str = ""
+        self._pending_approach_id: Optional[str] = None
+        self._condition_save_dcs: dict[str, int] = {}
 
         self._start_scenario_span()
         self._start_scene_span(self._state.scenario.current_scene)  # type: ignore[union-attr]
@@ -411,6 +421,11 @@ class SceneRunner:
     def state(self) -> GameState:
         return self._state
 
+    @property
+    def last_mechanic_log(self) -> str:
+        """The detailed 5e mechanic log from the most recent turn (dice rolls, DCs, conditions)."""
+        return self._last_mechanic_log
+
     def enter_scene(self, scene_id: str) -> GameState:
         """Transition to *scene_id*, emit a scene span, update state."""
         assert self._state.scenario is not None
@@ -434,6 +449,9 @@ class SceneRunner:
     ) -> tuple[str, GameState]:
         """Resolve the next pending mechanic and return (narrative, updated_state).
 
+        After each turn the ``last_mechanic_log`` property contains the
+        detailed 5e dice/check breakdown.  Prompts (no dice rolled) clear it.
+
         Raises:
             ValueError: if the session is already complete or input is empty.
         """
@@ -443,12 +461,26 @@ class SceneRunner:
             raise ValueError("Player input must not be empty.")
 
         scene = self._current_scene_def()
+
+        # Automatic end-of-encounter removals (cheap no-ops if unset)
+        prone_notices = self._auto_clear_prone()
+
         mechanic_summary, self._state, mechanic_resolved = self._resolve_next_mechanic(
             scene, approach, player_input
         )
 
         if not mechanic_resolved:
+            self._last_mechanic_log = ""
             return mechanic_summary, self._state
+
+        # End-of-turn saving throws for conditions that allow one (frightened, poisoned)
+        save_notices = self._attempt_condition_saves()
+
+        trailing_notices = prone_notices + save_notices
+        if trailing_notices:
+            mechanic_summary = mechanic_summary + "\n" + "\n".join(trailing_notices)
+
+        self._last_mechanic_log = mechanic_summary
 
         if self._state.player.hp <= 0:
             self._finalise_session("defeated")
@@ -461,7 +493,11 @@ class SceneRunner:
                 outcome = self._classify_outcome()
                 self._finalise_session(outcome)
             else:
+                scene_change_notices = self._clear_conditions_on_scene_change()
                 self.enter_scene(scene.next_scene)  # type: ignore[arg-type]
+                if scene_change_notices:
+                    mechanic_summary = mechanic_summary + "\n" + "\n".join(scene_change_notices)
+                    self._last_mechanic_log = mechanic_summary
                 next_scene_def = self._current_scene_def()
                 if next_scene_def.end and self._scene_complete(next_scene_def):
                     outcome = self._classify_outcome()
@@ -490,6 +526,131 @@ class SceneRunner:
         )
 
     # ------------------------------------------------------------------
+    # /roll parsing and 5e formatting helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_roll_command(player_input: str) -> Optional[str]:
+        """Parse ``/roll [skill]``.  Returns skill name, ``""`` for bare /roll, or None."""
+        stripped = player_input.strip().lower()
+        if stripped == "/roll":
+            return ""
+        if stripped.startswith("/roll "):
+            return stripped[6:].strip()
+        return None
+
+    def _format_5e_check_name(self, skill: str) -> str:
+        """Format as *Ability (Skill)*, e.g. ``Intelligence (Engineering)``."""
+        ability_abbr = self._skill_abilities.get(skill, "INT").upper()
+        ability_full = ABILITY_FULL_NAMES.get(ability_abbr, ability_abbr)
+        return f"{ability_full} ({skill.title()})"
+
+    def _format_roll_result(
+        self, skill: str, dc: int, result: "DiceResult", label: Optional[str] = None,
+    ) -> str:
+        """Build a 5e-style roll summary, e.g.
+
+        ``Dock safely — Intelligence (Engineering) check, DC 13:
+        d20(14) +2 [INT] +2 [proficiency] = 18 — SUCCESS``
+        """
+        from game_state import DiceResult as _DR  # avoid circular at module level
+
+        ability_abbr = self._skill_abilities.get(skill, "INT").upper()
+        check_name = self._format_5e_check_name(skill)
+        player = self._state.player
+
+        ability_mod = player.ability_modifier(ability_abbr)
+        prof = player.proficiency_bonus if skill in player.skill_proficiencies else 0
+
+        mod_parts: list[str] = []
+        if ability_mod >= 0:
+            mod_parts.append(f"+{ability_mod} [{ability_abbr}]")
+        else:
+            mod_parts.append(f"{ability_mod} [{ability_abbr}]")
+        if prof:
+            mod_parts.append(f"+{prof} [proficiency]")
+
+        mod_str = " ".join(mod_parts)
+        passed = result.outcome == "success"
+        outcome_str = "SUCCESS" if passed else "FAILURE"
+
+        extra = ""
+        if result.is_critical:
+            extra = " (Natural 20!)"
+        elif result.is_fumble:
+            extra = " (Natural 1!)"
+
+        disadv = ""
+        if conditions_impose_disadvantage(player.conditions):
+            disadv_causes = [c for c in player.conditions if c in ("frightened", "poisoned")]
+            disadv = f" [disadvantage — {', '.join(disadv_causes)}]"
+
+        prefix = f"{label} — " if label else ""
+        return (
+            f"{prefix}{check_name} check, DC {dc}{disadv}:\n"
+            f"  d20({result.natural_roll}) {mod_str} = {result.total} — {outcome_str}{extra}"
+        )
+
+    def _format_condition_notice(self, condition: str) -> str:
+        """Return a player-facing notice when a condition is applied."""
+        desc = CONDITION_RULES.get(condition, "")
+        notice = f"You are now {condition.upper()}."
+        if desc:
+            notice += f"\n  → {desc}"
+        return notice
+
+    def _format_hazard_prompt(self, hazard: "HazardDef") -> str:
+        check_name = self._format_5e_check_name(hazard.check)
+        return (
+            f"Hazard: {hazard.name}\n"
+            f"Make a {check_name} check (DC {hazard.dc}).\n"
+            f"Type `/roll {hazard.check}` or `/roll` to attempt it."
+        )
+
+    def _format_check_prompt(self, check: "CheckDef") -> str:
+        check_name = self._format_5e_check_name(check.skill)
+        label = check.label or check.skill.title()
+        return (
+            f"{label}\n"
+            f"Make a {check_name} check (DC {check.dc}).\n"
+            f"Type `/roll {check.skill}` or `/roll` to attempt it."
+        )
+
+    def _format_approach_prompt(self, scene: "SceneDef") -> str:
+        lines = ["Choose your approach:\n"]
+        for a in scene.approaches:
+            if a.combat:
+                adv_names = []
+                for adv_id in a.adversaries:
+                    adv = self._data.adversaries.get(adv_id)
+                    if adv:
+                        adv_names.append(f"{adv.name} (AC {adv.ac}, HP {adv.hp})")
+                target = ", ".join(adv_names) if adv_names else "hostiles"
+                lines.append(f"  * {a.id} — Combat with {target}")
+            else:
+                primary_skill = a.skills[0] if a.skills else "command"
+                dc = a.dc or 13
+                check_name = self._format_5e_check_name(primary_skill)
+                outcome_str = f"  On success: {a.outcome}" if a.outcome else ""
+                lines.append(
+                    f"  * {a.id} — {check_name} check, DC {dc}"
+                    f"{outcome_str}"
+                    f"\n    On failure: escalates to combat"
+                )
+        lines.append(f"\nType `approach <name>` to choose (e.g. `approach {scene.approaches[0].id}`).")
+        return "\n".join(lines)
+
+    def _format_approach_roll_prompt(
+        self, approach_def: "ApproachDef", skill: str, dc: int,
+    ) -> str:
+        check_name = self._format_5e_check_name(skill)
+        return (
+            f"{approach_def.id.title()} approach selected.\n"
+            f"Make a {check_name} check (DC {dc}).\n"
+            f"Type `/roll {skill}` or `/roll` to attempt it."
+        )
+
+    # ------------------------------------------------------------------
     # Mechanic resolution
     # ------------------------------------------------------------------
 
@@ -500,38 +661,108 @@ class SceneRunner:
 
         Returns (summary, updated_state, mechanic_resolved).
         mechanic_resolved=False when the return is an input prompt (no dice).
+
+        Hazards and skill checks require the player to type ``/roll [skill]``
+        before they are resolved — mirroring D&D's "the DM asks for a check
+        and the player rolls" flow.
         """
         assert self._state.scenario is not None
         flags = self._state.scenario.flags
+        roll_cmd = self._parse_roll_command(player_input)
 
-        # Self-Repair Cycle detection
+        # Self-Repair Cycle detection (no /roll needed — class feature)
         if self._is_self_repair_request(player_input) and "self_repair_used" not in flags:
             summary, state = self._resolve_self_repair()
             return summary, state, True
 
-        # 1. Pending hazards
+        # 1. Pending hazards — prompt until player /rolls
         for hazard_id in scene.obstacles:
             flag_key = f"hazard:{hazard_id}"
             if flag_key not in flags:
-                summary, state = self._resolve_hazard(hazard_id)
-                return summary, state, True
+                hazard = self._data.hazards[hazard_id]
+                if roll_cmd is not None:
+                    if roll_cmd and roll_cmd != hazard.check:
+                        expected_name = self._format_5e_check_name(hazard.check)
+                        return (
+                            f"This hazard requires a {expected_name} check. "
+                            f"Type `/roll {hazard.check}` or `/roll`."
+                        ), self._state, False
+                    summary, state = self._resolve_hazard(hazard_id)
+                    return summary, state, True
+                return self._format_hazard_prompt(hazard), self._state, False
 
-        # 2. Pending skill checks
+        # 2. Pending skill checks — prompt until player /rolls
         for check in scene.checks:
             flag_key = f"check:{scene.id}:{check.skill}"
             if flag_key not in flags:
-                summary, state = self._resolve_check(scene.id, check)
-                return summary, state, True
+                if roll_cmd is not None:
+                    if roll_cmd and roll_cmd != check.skill:
+                        expected_name = self._format_5e_check_name(check.skill)
+                        return (
+                            f"This check requires a {expected_name} check. "
+                            f"Type `/roll {check.skill}` or `/roll`."
+                        ), self._state, False
+                    summary, state = self._resolve_check(scene.id, check)
+                    return summary, state, True
+                return self._format_check_prompt(check), self._state, False
 
-        # 3. Approach
+        # 3. Approach — two-step: choose approach, then /roll (except combat)
         if scene.approaches and "approach" not in flags:
-            if approach is None:
-                available = [a.id for a in scene.approaches]
-                prompt = f"Choose your approach: {', '.join(available)}"
-                return prompt, self._state, False
-            summary, state = self._resolve_approach(scene, approach)
-            return summary, state, True
+            # An approach has been selected and is waiting for a /roll
+            if self._pending_approach_id is not None:
+                approach_def = next(
+                    a for a in scene.approaches if a.id == self._pending_approach_id
+                )
+                if roll_cmd is not None:
+                    primary_skill = approach_def.skills[0] if approach_def.skills else "command"
+                    if roll_cmd and roll_cmd != primary_skill:
+                        expected_name = self._format_5e_check_name(primary_skill)
+                        return (
+                            f"This approach requires a {expected_name} check. "
+                            f"Type `/roll {primary_skill}` or `/roll`."
+                        ), self._state, False
+                    approach_id = self._pending_approach_id
+                    self._pending_approach_id = None
+                    summary, state = self._resolve_approach(scene, approach_id)
+                    return summary, state, True
+                dc = approach_def.dc or 13
+                primary_skill = approach_def.skills[0] if approach_def.skills else "command"
+                return self._format_approach_roll_prompt(
+                    approach_def, primary_skill, dc,
+                ), self._state, False
 
+            # New approach selection
+            if approach is not None:
+                approach_def = next(
+                    (a for a in scene.approaches if a.id == approach), None
+                )
+                if approach_def is None:
+                    valid = [a.id for a in scene.approaches]
+                    raise ValueError(
+                        f"Unknown approach '{approach}'. Valid: {valid}"
+                    )
+                if approach_def.combat:
+                    summary, state = self._resolve_approach(scene, approach)
+                    return summary, state, True
+                self._pending_approach_id = approach
+                primary_skill = approach_def.skills[0] if approach_def.skills else "command"
+                dc = approach_def.dc or 13
+                return self._format_approach_roll_prompt(
+                    approach_def, primary_skill, dc,
+                ), self._state, False
+
+            # /roll typed but no approach chosen yet
+            if roll_cmd is not None:
+                return (
+                    "No approach selected yet. Choose an approach first.\n"
+                    + self._format_approach_prompt(scene)
+                ), self._state, False
+
+            return self._format_approach_prompt(scene), self._state, False
+
+        # Nothing pending
+        if roll_cmd is not None:
+            return "There is no pending check to roll for.", self._state, False
         return "The situation develops.", self._state, True
 
     def _resolve_check(
@@ -555,7 +786,7 @@ class SceneRunner:
 
         passed = result.outcome == "success"
         flag_key = f"check:{scene_id}:{check.skill}"
-        label = check.label or check.skill
+        label = check.label or check.skill.title()
 
         new_flags = {**self._state.scenario.flags, flag_key: "passed" if passed else "failed"}
         self._state = self._state.model_copy(
@@ -564,11 +795,7 @@ class SceneRunner:
             }
         )
 
-        summary = (
-            f"{label} check ({check.skill} DC {check.dc}): "
-            f"rolled {result.raw_result} + {result.modifier} = {result.total} — "
-            f"{'SUCCESS' if passed else 'FAILURE'}"
-        )
+        summary = self._format_roll_result(check.skill, check.dc, result, label=label)
         logger.info("Resolved check: %s", summary)
         return summary, self._state
 
@@ -602,20 +829,35 @@ class SceneRunner:
             }
         )
 
+        roll_line = self._format_roll_result(
+            hazard.check, hazard.dc, result, label=f"Hazard: {hazard.name}",
+        )
+
+        effect_lines: list[str] = []
         if not passed:
-            new_state = self._apply_hazard_effect(new_state, hazard.fail_effect)
+            old_hp = new_state.player.hp
+            old_conditions = list(new_state.player.conditions)
+            new_state = self._apply_hazard_effect(new_state, hazard.fail_effect, save_dc=hazard.dc)
+            if new_state.player.hp < old_hp:
+                dmg = old_hp - new_state.player.hp
+                effect_lines.append(
+                    f"You take {dmg} damage. (HP: {new_state.player.hp}/{new_state.player.max_hp})"
+                )
+            new_conditions = set(new_state.player.conditions) - set(old_conditions)
+            for c in sorted(new_conditions):
+                effect_lines.append(self._format_condition_notice(c))
 
         self._state = new_state
 
-        summary = (
-            f"Hazard '{hazard.name}' ({hazard.check} DC {hazard.dc}): "
-            f"rolled {result.raw_result} + {result.modifier} = {result.total} — "
-            f"{'AVOIDED' if passed else f'FAILED — {hazard.fail_effect}'}"
-        )
+        summary = roll_line
+        if effect_lines:
+            summary += "\n" + "\n".join(effect_lines)
         logger.info("Resolved hazard: %s", summary)
         return summary, self._state
 
-    def _apply_hazard_effect(self, state: GameState, effect: str) -> GameState:
+    def _apply_hazard_effect(
+        self, state: GameState, effect: str, save_dc: Optional[int] = None,
+    ) -> GameState:
         """Apply a hazard fail_effect — either damage (NdM) or an SRD condition."""
         if re.match(r"\d+d\d+", effect):
             damage = self._rules.roll_damage(effect)
@@ -633,6 +875,8 @@ class SceneRunner:
                         )
                     }
                 )
+            if save_dc is not None and condition in CONDITION_SAVE_ABILITY:
+                self._condition_save_dcs[condition] = save_dc
         else:
             condition = effect.lower().replace(" ", "_")
             if condition not in state.player.conditions:
@@ -677,21 +921,21 @@ class SceneRunner:
                     skill_abilities=self._skill_abilities,
                 )
                 passed = result.outcome == "success"
+                roll_line = self._format_roll_result(
+                    primary_skill, dc, result,
+                    label=f"{approach_id.title()} approach",
+                )
 
                 if passed:
                     outcome_flag = approach_def.outcome or approach_id
-                    summary = (
-                        f"{approach_id.title()} approach — {primary_skill} DC {dc}: "
-                        f"rolled {result.raw_result} + {result.modifier} = {result.total} — SUCCESS"
-                    )
+                    summary = roll_line
                     span.set_attribute("approach.outcome", outcome_flag)
                 else:
                     outcome_flag = "force"
                     combat_outcome = self._resolve_combat_by_id("adv_security_drone")
                     summary = (
-                        f"{approach_id.title()} approach — {primary_skill} DC {dc}: "
-                        f"rolled {result.raw_result} + {result.modifier} = {result.total} — FAILED, "
-                        f"escalated to force: {combat_outcome}"
+                        f"{roll_line}\n"
+                        f"Check failed — escalated to combat!\n{combat_outcome}"
                     )
                     span.set_attribute("approach.outcome", "combat")
 
@@ -768,8 +1012,14 @@ class SceneRunner:
                     combat_log.append(f"Round {round_num}: Drone destroyed!")
                     break
 
+        # Stunned from Stun Pulse is "until end of next turn" — clears post-combat
+        post_combat_notices = self._clear_post_combat_conditions()
+
         result_str = "; ".join(combat_log[-3:])
-        return f"{result_str} (player HP: {self._state.player.hp})"
+        out = f"{result_str} (player HP: {self._state.player.hp})"
+        if post_combat_notices:
+            out += "\n" + "\n".join(post_combat_notices)
+        return out
 
     def _player_combat_turn(
         self,
@@ -828,7 +1078,7 @@ class SceneRunner:
                     ability_name="CON", dc=12, player=self._state.player,
                 )
                 if save_result.outcome == "failure":
-                    self._apply_condition("stunned")
+                    self._apply_condition("stunned", save_dc=12)
                     player_stunned = True
                     combat_log.append("Drone uses Stun Pulse — player STUNNED!")
                 else:
@@ -858,7 +1108,7 @@ class SceneRunner:
 
         return stun_pulse_available, player_stunned
 
-    def _apply_condition(self, condition: str) -> None:
+    def _apply_condition(self, condition: str, save_dc: Optional[int] = None) -> None:
         if condition not in self._state.player.conditions:
             self._state = self._state.model_copy(
                 update={
@@ -867,6 +1117,8 @@ class SceneRunner:
                     )
                 }
             )
+        if save_dc is not None and condition in CONDITION_SAVE_ABILITY:
+            self._condition_save_dcs[condition] = save_dc
 
     def _remove_condition(self, condition: str) -> None:
         if condition in self._state.player.conditions:
@@ -878,6 +1130,81 @@ class SceneRunner:
                     )
                 }
             )
+            self._condition_save_dcs.pop(condition, None)
+
+    # ------------------------------------------------------------------
+    # 5e condition removal
+    # ------------------------------------------------------------------
+
+    def _attempt_condition_saves(self) -> list[str]:
+        """End-of-turn saving throws for conditions like frightened and poisoned.
+
+        Per 5e SRD, certain conditions allow a save at the end of each of
+        the affected creature's turns.  Returns a list of player-facing
+        notices for each save attempted.
+        """
+        notices: list[str] = []
+        for condition in list(self._state.player.conditions):
+            save_ability = CONDITION_SAVE_ABILITY.get(condition)
+            if save_ability is None:
+                continue
+            dc = self._condition_save_dcs.get(condition, 13)
+            ability_full = ABILITY_FULL_NAMES.get(save_ability, save_ability)
+            result = self._rules.resolve_saving_throw(
+                ability_name=save_ability, dc=dc, player=self._state.player,
+            )
+            if result.outcome == "success":
+                self._remove_condition(condition)
+                notices.append(
+                    f"End-of-turn {ability_full} save vs {condition} (DC {dc}): "
+                    f"d20({result.natural_roll}) +{result.modifier} = {result.total} — "
+                    f"SUCCESS! {condition.title()} ends."
+                )
+            else:
+                notices.append(
+                    f"End-of-turn {ability_full} save vs {condition} (DC {dc}): "
+                    f"d20({result.natural_roll}) +{result.modifier} = {result.total} — "
+                    f"FAILED. You remain {condition}."
+                )
+        return notices
+
+    def _clear_conditions_on_scene_change(self) -> list[str]:
+        """Remove conditions whose source is no longer present.
+
+        Frightened ends when the source of fear is out of sight (5e SRD).
+        Poisoned environmental effects end when the player leaves the area.
+        """
+        notices: list[str] = []
+        for condition in ("frightened", "poisoned"):
+            if condition in self._state.player.conditions:
+                self._remove_condition(condition)
+                notices.append(
+                    f"{condition.title()} ends — the source is no longer present."
+                )
+        return notices
+
+    def _clear_post_combat_conditions(self) -> list[str]:
+        """Remove conditions tied to combat after it resolves.
+
+        Stunned from the Stun Pulse ability is "until end of next turn"
+        so it clears once combat is over.
+        """
+        notices: list[str] = []
+        if "stunned" in self._state.player.conditions:
+            self._remove_condition("stunned")
+            notices.append("Stunned ends — combat is over.")
+        return notices
+
+    def _auto_clear_prone(self) -> list[str]:
+        """Standing up from prone costs half movement (5e SRD).
+
+        Outside combat there is no movement budget, so prone clears
+        automatically at the start of the player's next action.
+        """
+        if "prone" in self._state.player.conditions:
+            self._remove_condition("prone")
+            return ["You stand up. (Prone ends — costs half movement.)"]
+        return []
 
     # ------------------------------------------------------------------
     # Self-Repair Cycle (Second Wind)
@@ -941,11 +1268,22 @@ class SceneRunner:
 
     def _narrate(self, scene: SceneDef, mechanic_summary: str, player_input: str) -> str:
         """Call the LLM storyteller with scenario context and mechanical outcome."""
+        conditions = self._state.player.conditions
+        if conditions:
+            cond_strs = []
+            for c in conditions:
+                desc = CONDITION_RULES.get(c, "")
+                cond_strs.append(f"{c} ({desc})" if desc else c)
+            active_conditions = "; ".join(cond_strs)
+        else:
+            active_conditions = "none"
+
         system = _SCENARIO_STORYTELLER_SYSTEM.format(
             scene_name=scene.name,
             entry_text=scene.entry_text,
             objectives=", ".join(scene.objectives) if scene.objectives else "Resolve the situation",
             mechanic_summary=mechanic_summary,
+            active_conditions=active_conditions,
         )
         human = _SCENARIO_STORYTELLER_HUMAN.format(player_input=player_input)
 

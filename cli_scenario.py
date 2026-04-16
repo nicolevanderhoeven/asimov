@@ -92,8 +92,9 @@ def run_scenario(scenario_name: str = "silent-relay") -> None:
     print(f"{'─' * 60}")
 
     print("\nType your actions and press Enter.")
-    print("When prompted for an approach, type: approach <name>")
-    print("  e.g.  approach diplomacy")
+    print("When prompted for a check, type:  /roll <skill>  or just  /roll")
+    print("When prompted for an approach, type:  approach <name>")
+    print("  e.g.  /roll engineering   |   approach diplomacy")
     print("Type 'quit' to end the session.\n")
 
     current_scene_id = None
@@ -139,6 +140,12 @@ def run_scenario(scenario_name: str = "silent-relay") -> None:
         except ValueError as exc:
             print(f"[!] {exc}")
             continue
+
+        if runner.last_mechanic_log:
+            print(f"\n{'─' * 40}")
+            for line in runner.last_mechanic_log.splitlines():
+                print(f"  {line}")
+            print(f"{'─' * 40}")
 
         print(f"\nNarrator: {narrative}\n")
 

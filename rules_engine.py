@@ -73,6 +73,50 @@ def conditions_auto_fail_str_dex_saves(conditions: list[str]) -> bool:
     return "stunned" in conditions
 
 
+CONDITION_RULES: dict[str, str] = {
+    "frightened": (
+        "Disadvantage on ability checks and attack rolls while the source of fear "
+        "is within line of sight. Cannot willingly move closer to the source."
+    ),
+    "poisoned": (
+        "Disadvantage on attack rolls and ability checks."
+    ),
+    "stunned": (
+        "Incapacitated; cannot move; can speak only falteringly. "
+        "Automatically fails Strength and Dexterity saving throws. "
+        "Attack rolls against you have advantage."
+    ),
+    "incapacitated": (
+        "Cannot take actions or reactions."
+    ),
+    "prone": (
+        "Disadvantage on attack rolls. Attacks within 5 ft have advantage; "
+        "attacks from farther away have disadvantage. Standing up costs half movement."
+    ),
+}
+
+CONDITION_SAVE_ABILITY: dict[str, str] = {
+    "frightened": "WIS",
+    "poisoned": "CON",
+}
+"""Conditions that allow a saving throw at the end of each turn.
+
+Stunned, incapacitated, and prone are removed by other mechanics
+(stunned clears after one skipped turn; prone is cleared by standing up;
+incapacitated is typically a side-effect of another condition).
+"""
+
+
+ABILITY_FULL_NAMES: dict[str, str] = {
+    "STR": "Strength",
+    "DEX": "Dexterity",
+    "CON": "Constitution",
+    "INT": "Intelligence",
+    "WIS": "Wisdom",
+    "CHA": "Charisma",
+}
+
+
 # ---------------------------------------------------------------------------
 # RulesEngine
 # ---------------------------------------------------------------------------
