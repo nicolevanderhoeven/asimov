@@ -87,6 +87,23 @@ class TestScenarioStart:
         assert "entry_text" in body["scene"]
         assert "objectives" in body["scene"]
 
+    def test_start_returns_prologue(self, client):
+        c, _ = client
+        resp = c.post("/scenario/start", json={"scenario": "silent-relay"})
+        body = resp.get_json()
+        assert "prologue" in body
+        assert body["prologue"] is not None
+        assert "Data" in body["prologue"]
+
+    def test_start_returns_player_summary(self, client):
+        c, _ = client
+        resp = c.post("/scenario/start", json={"scenario": "silent-relay"})
+        body = resp.get_json()
+        assert "player" in body
+        assert body["player"]["name"] == "Data"
+        assert body["player"]["character_class"] == "Positronic Operative"
+        assert body["player"]["level"] == 1
+
     def test_start_returns_initial_state(self, client):
         c, _ = client
         resp = c.post("/scenario/start", json={"scenario": "silent-relay"})

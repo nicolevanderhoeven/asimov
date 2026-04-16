@@ -72,6 +72,25 @@ def run_scenario(scenario_name: str = "silent-relay") -> None:
     print(f"  {data.meta.title.upper()}")
     print(f"  Genre: {data.meta.genre}  |  Tone: {', '.join(data.meta.tone)}")
     print(f"{'=' * 60}")
+
+    if data.meta.prologue:
+        print()
+        for paragraph in data.meta.prologue.split("\n"):
+            paragraph = paragraph.strip()
+            if paragraph:
+                print(f"  {paragraph}")
+            else:
+                print()
+
+    p = initial_state.player
+    print(f"\n{'─' * 60}")
+    print(f"  CHARACTER: {p.name}  |  {p.character_class}  |  Level {p.level}")
+    print(f"  HP: {p.hp}/{p.max_hp}  |  AC: {p.armor_class}")
+    equip_names = [e.get("name", e) if isinstance(e, dict) else str(e) for e in p.equipment]
+    if equip_names:
+        print(f"  Equipment: {', '.join(equip_names)}")
+    print(f"{'─' * 60}")
+
     print("\nType your actions and press Enter.")
     print("When prompted for an approach, type: approach <name>")
     print("  e.g.  approach diplomacy")

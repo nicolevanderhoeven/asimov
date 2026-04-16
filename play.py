@@ -209,6 +209,12 @@ def scenario_start():
     scene_def = scenario_data.scenes[runner.current_scene]
     return jsonify({
         "session_id": session_id,
+        "prologue": scenario_data.meta.prologue or None,
+        "player": {
+            "name": runner.state.player.name,
+            "character_class": runner.state.player.character_class,
+            "level": runner.state.player.level,
+        },
         "scene": {
             "id": scene_def.id,
             "name": scene_def.name,

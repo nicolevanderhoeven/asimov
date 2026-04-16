@@ -2,7 +2,7 @@
     {
       "id": "scene_1_approach",
       "name": "Approach and Docking",
-      "entry_text": "The relay hangs against the starfield like a lantern gone cold. Your shuttle rocks in the wake of intermittent turbulence.",
+      "entry_text": "Relay Station Epsilon-7 hangs against the starfield like a lantern gone cold, its navigation beacons dark. Hull scoring marks the docking ring — micro-meteor damage, weeks old at least, never repaired. Your shuttle rocks in the wake of intermittent turbulence as the station's gravity generator cycles erratically. The docking collar rotates at an uneven pitch. You will need steady hands — or steady subroutines — to lock on.",
       "objectives": ["Dock safely", "Assess external damage"],
       "obstacles": ["haz_docking_shear"],
       "checks": [

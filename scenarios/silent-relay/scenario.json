@@ -4,6 +4,7 @@
     "version": "1.0",
     "genre": "science_fiction",
     "tone": ["mystery", "tense", "exploratory", "ethical"],
+    "prologue": "You are Lieutenant Commander Data, a Positronic Operative serving aboard the USS Enterprise. Starfleet Command has received a priority-one distress signal from Relay Station Epsilon-7, a deep-space communications hub on the edge of the Neutral Zone. The station's crew of twelve has gone silent. All automated systems have ceased transmitting.\n\nYou have been dispatched alone in a shuttle — your positronic nature makes you uniquely suited to environments that might be hazardous to organic life. Your mission: investigate the relay, determine the fate of its crew, and restore communications before the blackout destabilises the sector.\n\nThe shuttle's sensors show the relay still has power, but something is wrong. Energy signatures fluctuate in patterns that match no known system diagnostic. As you close the distance, a faint signal bleeds through the static — almost like a voice.",
     "play_profile": {
       "player_count": 1,
       "recommended_level": 1,

@@ -131,6 +131,13 @@ class TestScenarioLoaderValidLoad:
         assert data.meta.scenario_id == "silent-relay-v1"
         assert data.meta.entry_scene in data.scenes
 
+    def test_prologue_loaded(self):
+        loader = ScenarioLoader()
+        data, _ = loader.load("silent-relay")
+        assert data.meta.prologue
+        assert "Data" in data.meta.prologue
+        assert "Relay Station Epsilon-7" in data.meta.prologue
+
     def test_all_scenes_present(self):
         loader = ScenarioLoader()
         data, _ = loader.load("silent-relay")
@@ -209,6 +216,14 @@ class TestScenarioLoaderMissingFiles:
         loader = ScenarioLoader(base_dir=tmp_path)
         data, state = loader.load("empty-npcs")
         assert data is not None
+
+    def test_prologue_defaults_to_empty(self, tmp_path):
+        """Scenarios without a prologue field still load with an empty string."""
+        _make_minimal_scenario(tmp_path / "no-prologue")
+
+        loader = ScenarioLoader(base_dir=tmp_path)
+        data, _ = loader.load("no-prologue")
+        assert data.meta.prologue == ""
 
 
 class TestScenarioLoaderCrossValidation:

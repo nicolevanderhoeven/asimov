@@ -163,6 +163,7 @@ class ScenarioMeta(BaseModel):
     version: str = "1.0"
     genre: str = "fantasy"
     tone: list[str] = []
+    prologue: str = ""
     play_profile: PlayProfile = Field(default_factory=PlayProfile)
     entry_scene: str
     scene_order: list[str] = []
