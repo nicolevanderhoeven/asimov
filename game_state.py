@@ -98,6 +98,21 @@ class TurnRecord(BaseModel):
     state_delta: dict = {}
 
 
+class MetaEvent(BaseModel):
+    """Non-mechanic player/GM interaction (e.g. a free-turn question).
+
+    Recorded separately from ``turn_history`` so analytics can distinguish
+    questions-about-the-game from in-character actions.
+    """
+
+    event_type: Literal["question"]
+    turn_number: int
+    scene_id: Optional[str] = None
+    player_input: str
+    response: str
+    classification: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Top-level GameState
 # ---------------------------------------------------------------------------
@@ -116,6 +131,7 @@ class GameState(BaseModel):
     quests: list[QuestState] = []
     npcs: list[NPCState] = []
     turn_history: list[TurnRecord] = []
+    meta_history: list[MetaEvent] = []
     scenario: Optional[ScenarioState] = None
 
 
