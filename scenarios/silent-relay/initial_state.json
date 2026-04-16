@@ -1,16 +1,38 @@
 {
     "player": {
+      "name": "Data",
+      "character_class": "Positronic Operative",
       "hp": 12,
       "max_hp": 12,
-      "defense": 13,
+      "armor_class": 14,
+      "level": 1,
+      "proficiency_bonus": 2,
+      "attributes": {
+        "STR": 15,
+        "DEX": 12,
+        "CON": 14,
+        "INT": 15,
+        "WIS": 10,
+        "CHA": 8
+      },
+      "skill_proficiencies": ["athletics", "investigation"],
+      "saving_throw_proficiencies": ["STR", "CON"],
       "conditions": [],
-      "skills": {
-        "command": 3,
-        "science": 2,
-        "engineering": 1,
-        "medical": 0,
-        "security": 1,
-        "insight": 2
+      "equipment": [
+        { "name": "Starfleet Tactical Uniform", "type": "armor", "base_ac": 13, "max_dex_bonus": 2 },
+        { "name": "Phaser", "type": "ranged_weapon", "damage": "1d8", "ability": "DEX" },
+        { "name": "Positronic Strike", "type": "melee_weapon", "damage": "1d8", "ability": "STR" }
+      ],
+      "class_features": {
+        "self_repair_cycle": {
+          "name": "Self-Repair Cycle",
+          "description": "Heal 1d10 + level HP. Usable once per scenario.",
+          "heal_dice": "1d10"
+        },
+        "subroutine_focus": {
+          "name": "Subroutine Focus: Defensive Protocols",
+          "description": "+1 AC when wearing armor (included in AC)."
+        }
       }
     },
     "scenario": {

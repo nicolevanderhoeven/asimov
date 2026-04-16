@@ -1,4 +1,4 @@
-"""Integration tests for the /scenario Flask routes (task 4.5).
+"""Integration tests for the /scenario Flask routes.
 
 The LLM is mocked; the scenario runner uses real dice with seeded RNG.
 Tests verify the full HTTP → ScenarioLoader → SceneRunner → response cycle.
@@ -93,6 +93,8 @@ class TestScenarioStart:
         state = resp.get_json()["state"]
         assert state["turn_number"] == 0
         assert state["player"]["hp"] == 12
+        assert state["player"]["name"] == "Data"
+        assert state["player"]["proficiency_bonus"] == 2
         assert state["scenario"]["current_scene"] == "scene_1_approach"
         assert state["scenario"]["alarm_state"] == "silent"
 
@@ -171,7 +173,6 @@ class TestScenarioPlay:
         session_id = self._start(c)
         runner = play_module._scenario_runners[session_id]
 
-        # Pre-fill all scene 1 and scene 2 flags so we're effectively at scene 3
         all_flags = {
             "hazard:haz_docking_shear": "passed",
             "check:scene_1_approach:engineering": "passed",
@@ -189,7 +190,7 @@ class TestScenarioPlay:
             update={
                 "scenario": new_scenario,
                 "player": runner.state.player.model_copy(
-                    update={"skills": {**runner.state.player.skills, "command": 50}}
+                    update={"attributes": {**runner.state.player.attributes, "CHA": 30}}
                 ),
             }
         )
@@ -201,7 +202,6 @@ class TestScenarioPlay:
         )
         assert resp.status_code == 200
         body = resp.get_json()
-        # After successful diplomacy the session may be complete
         flags = body["state"]["scenario"]["flags"]
         assert "approach" in flags
 
@@ -219,7 +219,6 @@ class TestScenarioFullRun:
         session_id = resp.get_json()["session_id"]
         runner = play_module._scenario_runners[session_id]
 
-        # Inject pre-resolved flags for scenes 1–3 so only scene advancement remains
         all_flags = {
             "hazard:haz_docking_shear": "passed",
             "check:scene_1_approach:engineering": "passed",
@@ -241,11 +240,9 @@ class TestScenarioFullRun:
         )
         runner._start_scene_span("scene_3_core")
 
-        # One final turn should advance to scene_4 and finalise
         resp = c.post("/scenario/play", json={"session_id": session_id, "input": "The relay is quiet."})
         body = resp.get_json()
 
         assert body["complete"] is True
         assert body["outcome"] == "peaceful"
-        # Session should be cleaned up from the runners dict
         assert session_id not in play_module._scenario_runners

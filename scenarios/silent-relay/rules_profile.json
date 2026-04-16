@@ -5,14 +5,15 @@
       "moderate": 13,
       "hard": 16
     },
-    "skills": [
-      "command",
-      "science",
-      "engineering",
-      "medical",
-      "security",
-      "insight",
-      "athletics",
-      "stealth"
-    ]
+    "skill_abilities": {
+      "command": "CHA",
+      "science": "INT",
+      "engineering": "INT",
+      "medical": "WIS",
+      "security": "STR",
+      "insight": "WIS",
+      "athletics": "STR",
+      "stealth": "DEX",
+      "investigation": "INT"
+    }
   }

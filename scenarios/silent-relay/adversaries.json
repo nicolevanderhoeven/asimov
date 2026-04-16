@@ -2,14 +2,24 @@
     {
       "id": "adv_security_drone",
       "name": "Security Drone",
-      "hp": 9,
-      "defense": 12,
-      "attack_bonus": 3,
-      "damage": "1d6+1",
+      "hp": 11,
+      "ac": 13,
+      "attack_bonus": 4,
+      "damage": "1d6+2",
+      "ability_scores": {
+        "STR": 12,
+        "DEX": 14,
+        "CON": 12,
+        "INT": 6,
+        "WIS": 10,
+        "CHA": 1
+      },
+      "initiative_bonus": 2,
       "abilities": [
         {
           "name": "Stun Pulse",
-          "effect": "Target may become disoriented"
+          "recharge": [5, 6],
+          "effect": "Target must succeed on a DC 12 CON save or be stunned until end of next turn"
         }
       ]
     }

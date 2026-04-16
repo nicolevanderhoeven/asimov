@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -56,10 +55,12 @@ def _make_minimal_scenario(tmp_path: Path, overrides: dict | None = None) -> Pat
             {
                 "id": "adv_drone",
                 "name": "Drone",
-                "hp": 9,
-                "defense": 12,
-                "attack_bonus": 3,
-                "damage": "1d6",
+                "hp": 11,
+                "ac": 13,
+                "attack_bonus": 4,
+                "damage": "1d6+2",
+                "ability_scores": {"STR": 12, "DEX": 14, "CON": 12, "INT": 6, "WIS": 10, "CHA": 1},
+                "initiative_bonus": 2,
             }
         ],
         "hazards.json": [
@@ -68,7 +69,7 @@ def _make_minimal_scenario(tmp_path: Path, overrides: dict | None = None) -> Pat
                 "name": "Hazard One",
                 "check": "engineering",
                 "dc": 10,
-                "fail_effect": "minor damage",
+                "fail_effect": "1d4",
             }
         ],
         "clues.json": [{"id": "clue_1", "location": "scene_1", "text": "A clue."}],
@@ -77,18 +78,32 @@ def _make_minimal_scenario(tmp_path: Path, overrides: dict | None = None) -> Pat
         ],
         "initial_state.json": {
             "player": {
+                "name": "Data",
+                "character_class": "Positronic Operative",
                 "hp": 12,
                 "max_hp": 12,
-                "defense": 13,
+                "armor_class": 14,
+                "level": 1,
+                "proficiency_bonus": 2,
+                "attributes": {
+                    "STR": 15, "DEX": 12, "CON": 14, "INT": 15, "WIS": 10, "CHA": 8,
+                },
+                "skill_proficiencies": ["athletics", "investigation"],
+                "saving_throw_proficiencies": ["STR", "CON"],
                 "conditions": [],
-                "skills": {"engineering": 1},
             },
             "scenario": {"current_scene": "scene_1", "flags": {}, "alarm_state": "silent"},
         },
         "rules_profile.json": {
             "core_die": "d20",
             "difficulty_classes": {"easy": 10, "moderate": 13, "hard": 16},
-            "skills": ["engineering"],
+            "skill_abilities": {
+                "engineering": "INT",
+                "science": "INT",
+                "command": "CHA",
+                "athletics": "STR",
+                "investigation": "INT",
+            },
         },
         "npcs.json": [],
     }
@@ -125,7 +140,27 @@ class TestScenarioLoaderValidLoad:
         loader = ScenarioLoader()
         _, state = loader.load("silent-relay")
         assert state.player.hp == 12
-        assert state.player.skills["command"] == 3
+        assert state.player.name == "Data"
+        assert state.player.proficiency_bonus == 2
+
+    def test_player_has_5e_fields(self):
+        loader = ScenarioLoader()
+        _, state = loader.load("silent-relay")
+        assert "athletics" in state.player.skill_proficiencies
+        assert "STR" in state.player.saving_throw_proficiencies
+        assert state.player.ability_modifier("STR") == 2
+
+    def test_rules_profile_loaded(self):
+        loader = ScenarioLoader()
+        data, _ = loader.load("silent-relay")
+        assert "engineering" in data.rules_profile.skill_abilities
+        assert data.rules_profile.skill_abilities["engineering"] == "INT"
+
+    def test_adversary_has_ac_field(self):
+        loader = ScenarioLoader()
+        data, _ = loader.load("silent-relay")
+        drone = data.adversaries["adv_security_drone"]
+        assert drone.ac == 13
 
     def test_current_scene_is_entry_scene(self):
         loader = ScenarioLoader()
@@ -169,7 +204,7 @@ class TestScenarioLoaderMissingFiles:
 
     def test_empty_npcs_file_is_valid(self, tmp_path):
         """npcs.json is allowed to be empty."""
-        scenario_dir = _make_minimal_scenario(tmp_path / "empty-npcs", {"npcs.json": None})
+        _make_minimal_scenario(tmp_path / "empty-npcs", {"npcs.json": None})
 
         loader = ScenarioLoader(base_dir=tmp_path)
         data, state = loader.load("empty-npcs")
@@ -180,7 +215,6 @@ class TestScenarioLoaderCrossValidation:
     def test_valid_scene_adversary_reference_passes(self):
         loader = ScenarioLoader()
         data, _ = loader.load("silent-relay")
-        # scene_3_core references adv_security_drone which exists
         assert "adv_security_drone" in data.adversaries
 
     def test_broken_adversary_reference_raises(self, tmp_path):
@@ -196,9 +230,7 @@ class TestScenarioLoaderCrossValidation:
             },
             {"id": "scene_2", "name": "End", "entry_text": "", "end": True},
         ]
-        scenario_dir = _make_minimal_scenario(
-            tmp_path / "broken-adv", {"scenes.json": scenes}
-        )
+        _make_minimal_scenario(tmp_path / "broken-adv", {"scenes.json": scenes})
         loader = ScenarioLoader(base_dir=tmp_path)
         with pytest.raises(ScenarioValidationError, match="adv_nonexistent"):
             loader.load("broken-adv")
@@ -213,7 +245,7 @@ class TestScenarioLoaderCrossValidation:
                 "end": True,
             }
         ]
-        scenario_dir = _make_minimal_scenario(
+        _make_minimal_scenario(
             tmp_path / "broken-haz",
             {
                 "scenes.json": scenes,
@@ -247,7 +279,7 @@ class TestScenarioLoaderGraphValidation:
                 "next_scene": "scene_nonexistent",
             }
         ]
-        scenario_dir = _make_minimal_scenario(
+        _make_minimal_scenario(
             tmp_path / "orphan",
             {
                 "scenes.json": scenes,
@@ -271,7 +303,7 @@ class TestScenarioLoaderGraphValidation:
             loader.load("orphan")
 
     def test_missing_entry_scene_raises(self, tmp_path):
-        scenario_dir = _make_minimal_scenario(
+        _make_minimal_scenario(
             tmp_path / "bad-entry",
             {
                 "scenario.json": {
@@ -296,7 +328,6 @@ class TestScenarioLoaderGraphValidation:
     def test_complete_graph_passes(self):
         loader = ScenarioLoader()
         data, _ = loader.load("silent-relay")
-        # All non-terminal scenes have valid next_scene (graph validated on load)
         for scene in data.scenes.values():
             if not scene.end:
                 assert scene.next_scene in data.scenes

@@ -4,14 +4,14 @@ Implements:
 - ScenarioLoader: reads, validates, and initialises a scenario from disk
 - SceneRunner: drives turn-by-turn scene progression with deterministic mechanics
 - OTel instrumentation: scenario/scene/skill_check/hazard/approach spans
+
+Uses 5e SRD rules (CC v5.2.1) for ability checks, saving throws, attacks, and combat.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-import random
 import re
 import uuid
 from pathlib import Path
@@ -22,6 +22,7 @@ from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, Field
 
 from game_state import (
+    VALID_CONDITIONS,
     DiceResult,
     GameState,
     LocationState,
@@ -29,7 +30,15 @@ from game_state import (
     ScenarioState,
     TurnRecord,
 )
-from rules_engine import DiceTrigger, RulesEngine
+from rules_engine import (
+    AttackResult,
+    DiceTrigger,
+    RulesEngine,
+    ability_modifier,
+    conditions_grant_attack_advantage,
+    conditions_impose_disadvantage,
+    conditions_prevent_actions,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("dnd.scenario")
@@ -47,6 +56,8 @@ REQUIRED_FILES = [
     "rules_profile.json",
     "npcs.json",
 ]
+
+MAX_COMBAT_ROUNDS = 5
 
 
 # ---------------------------------------------------------------------------
@@ -92,21 +103,32 @@ class SceneDef(BaseModel):
     end: bool = False
 
 
-class HazardDef(BaseModel):
-    id: str
+class AdversaryAbilityDef(BaseModel):
     name: str
-    check: str
-    dc: int
-    fail_effect: str
+    recharge: list[int] = []
+    effect: str = ""
 
 
 class AdversaryDef(BaseModel):
     id: str
     name: str
     hp: int
-    defense: int
+    ac: int
     attack_bonus: int
     damage: str
+    ability_scores: dict[str, int] = Field(
+        default_factory=lambda: {"STR": 10, "DEX": 14, "CON": 12, "INT": 6, "WIS": 10, "CHA": 1}
+    )
+    initiative_bonus: int = 0
+    abilities: list[AdversaryAbilityDef] = []
+
+
+class HazardDef(BaseModel):
+    id: str
+    name: str
+    check: str
+    dc: int
+    fail_effect: str
 
 
 class ClueDef(BaseModel):
@@ -120,6 +142,12 @@ class LocationDef(BaseModel):
     name: str
     tags: list[str] = []
     description: str = ""
+
+
+class RulesProfile(BaseModel):
+    core_die: str = "d20"
+    difficulty_classes: dict[str, int] = {}
+    skill_abilities: dict[str, str] = {}
 
 
 class PlayProfile(BaseModel):
@@ -147,6 +175,7 @@ class ScenarioData(BaseModel):
     hazards: dict[str, HazardDef]
     clues: dict[str, ClueDef]
     locations: dict[str, LocationDef]
+    rules_profile: RulesProfile = Field(default_factory=RulesProfile)
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +206,7 @@ class ScenarioLoader:
         hazards = {h["id"]: HazardDef.model_validate(h) for h in raw["hazards"]}
         clues = {c["id"]: ClueDef.model_validate(c) for c in raw["clues"]}
         locations = {loc["id"]: LocationDef.model_validate(loc) for loc in raw["locations"]}
+        rules_profile = RulesProfile.model_validate(raw.get("rules_profile", {}))
 
         data = ScenarioData(
             meta=meta,
@@ -185,6 +215,7 @@ class ScenarioLoader:
             hazards=hazards,
             clues=clues,
             locations=locations,
+            rules_profile=rules_profile,
         )
 
         self._cross_validate(data)
@@ -268,12 +299,22 @@ class ScenarioLoader:
         sc = initial.get("scenario", {})
 
         player = PlayerState(
-            name="Player",
-            character_class="Officer",
+            name=p.get("name", "Data"),
+            character_class=p.get("character_class", "Positronic Operative"),
             hp=p.get("hp", 12),
             max_hp=p.get("max_hp", 12),
-            armor_class=p.get("defense", 13),
+            armor_class=p.get("armor_class", p.get("defense", 14)),
+            level=p.get("level", 1),
+            proficiency_bonus=p.get("proficiency_bonus", 2),
+            attributes=p.get("attributes", {
+                "STR": 15, "DEX": 12, "CON": 14, "INT": 15, "WIS": 10, "CHA": 8,
+            }),
+            skill_proficiencies=p.get("skill_proficiencies", []),
+            saving_throw_proficiencies=p.get("saving_throw_proficiencies", []),
             skills=p.get("skills", {}),
+            inventory=p.get("inventory", []),
+            equipment=p.get("equipment", []),
+            class_features=p.get("class_features", {}),
             conditions=p.get("conditions", []),
         )
         scenario_state = ScenarioState(
@@ -334,6 +375,7 @@ class SceneRunner:
         self._state = state
         self._rules = rules_engine
         self._llm = llm
+        self._skill_abilities = data.rules_profile.skill_abilities
 
         # OTel spans — manually managed across HTTP requests
         self._scenario_span: Any = trace.INVALID_SPAN
@@ -401,28 +443,39 @@ class SceneRunner:
 
         scene = self._current_scene_def()
         mechanic_summary, self._state, mechanic_resolved = self._resolve_next_mechanic(
-            scene, approach
+            scene, approach, player_input
         )
 
-        # Return approach prompt directly without LLM narration
         if not mechanic_resolved:
             return mechanic_summary, self._state
 
-        # Auto-advance if all mechanics for the current scene are resolved
+        if self._state.player.hp <= 0:
+            self._finalise_session("defeated")
+            narrative = self._narrate(scene, mechanic_summary, player_input)
+            self._append_turn(player_input, narrative)
+            return narrative, self._state
+
         if self._scene_complete(scene):
             if scene.end:
                 outcome = self._classify_outcome()
                 self._finalise_session(outcome)
             else:
                 self.enter_scene(scene.next_scene)  # type: ignore[arg-type]
-                # Immediately finalise if the new scene is terminal with no mechanics
                 next_scene_def = self._current_scene_def()
                 if next_scene_def.end and self._scene_complete(next_scene_def):
                     outcome = self._classify_outcome()
                     self._finalise_session(outcome)
 
         narrative = self._narrate(scene, mechanic_summary, player_input)
+        self._append_turn(player_input, narrative)
 
+        return narrative, self._state
+
+    # ------------------------------------------------------------------
+    # Turn record
+    # ------------------------------------------------------------------
+
+    def _append_turn(self, player_input: str, narrative: str) -> None:
         record = TurnRecord(
             turn_number=self._state.turn_number,
             player_input=player_input,
@@ -435,14 +488,12 @@ class SceneRunner:
             }
         )
 
-        return narrative, self._state
-
     # ------------------------------------------------------------------
     # Mechanic resolution
     # ------------------------------------------------------------------
 
     def _resolve_next_mechanic(
-        self, scene: SceneDef, approach: Optional[str]
+        self, scene: SceneDef, approach: Optional[str], player_input: str
     ) -> tuple[str, GameState, bool]:
         """Resolve one pending mechanic.
 
@@ -451,6 +502,11 @@ class SceneRunner:
         """
         assert self._state.scenario is not None
         flags = self._state.scenario.flags
+
+        # Self-Repair Cycle detection
+        if self._is_self_repair_request(player_input) and "self_repair_used" not in flags:
+            summary, state = self._resolve_self_repair()
+            return summary, state, True
 
         # 1. Pending hazards
         for hazard_id in scene.obstacles:
@@ -466,7 +522,7 @@ class SceneRunner:
                 summary, state = self._resolve_check(scene.id, check)
                 return summary, state, True
 
-        # 3. Approach (scene_3_core)
+        # 3. Approach
         if scene.approaches and "approach" not in flags:
             if approach is None:
                 available = [a.id for a in scene.approaches]
@@ -475,7 +531,6 @@ class SceneRunner:
             summary, state = self._resolve_approach(scene, approach)
             return summary, state, True
 
-        # 4. Nothing pending — scene already resolved this turn
         return "The situation develops.", self._state, True
 
     def _resolve_check(
@@ -483,15 +538,17 @@ class SceneRunner:
     ) -> tuple[str, GameState]:
         assert self._state.scenario is not None
 
-        modifier = self._state.player.skills.get(check.skill, 0)
-        trigger = DiceTrigger(roll="d20", skill=check.skill, dc=check.dc, modifier=modifier)
-
         with tracer.start_as_current_span("skill_check", context=self._scene_ctx) as span:
-            result = self._rules.resolve(trigger)
+            result = self._rules.resolve_ability_check(
+                skill=check.skill,
+                dc=check.dc,
+                player=self._state.player,
+                skill_abilities=self._skill_abilities,
+            )
             span.set_attribute("check.skill", check.skill)
             span.set_attribute("check.dc", check.dc)
             span.set_attribute("check.roll", result.raw_result)
-            span.set_attribute("check.modifier", modifier)
+            span.set_attribute("check.modifier", result.modifier)
             span.set_attribute("check.total", result.total)
             span.set_attribute("check.passed", result.outcome == "success")
 
@@ -508,7 +565,7 @@ class SceneRunner:
 
         summary = (
             f"{label} check ({check.skill} DC {check.dc}): "
-            f"rolled {result.raw_result} + {modifier} = {result.total} — "
+            f"rolled {result.raw_result} + {result.modifier} = {result.total} — "
             f"{'SUCCESS' if passed else 'FAILURE'}"
         )
         logger.info("Resolved check: %s", summary)
@@ -518,11 +575,14 @@ class SceneRunner:
         assert self._state.scenario is not None
 
         hazard = self._data.hazards[hazard_id]
-        modifier = self._state.player.skills.get(hazard.check, 0)
-        trigger = DiceTrigger(roll="d20", skill=hazard.check, dc=hazard.dc, modifier=modifier)
 
         with tracer.start_as_current_span("hazard", context=self._scene_ctx) as span:
-            result = self._rules.resolve(trigger)
+            result = self._rules.resolve_ability_check(
+                skill=hazard.check,
+                dc=hazard.dc,
+                player=self._state.player,
+                skill_abilities=self._skill_abilities,
+            )
             passed = result.outcome == "success"
             span.set_attribute("hazard.id", hazard_id)
             span.set_attribute("hazard.check", hazard.check)
@@ -548,22 +608,31 @@ class SceneRunner:
 
         summary = (
             f"Hazard '{hazard.name}' ({hazard.check} DC {hazard.dc}): "
-            f"rolled {result.raw_result} + {modifier} = {result.total} — "
+            f"rolled {result.raw_result} + {result.modifier} = {result.total} — "
             f"{'AVOIDED' if passed else f'FAILED — {hazard.fail_effect}'}"
         )
         logger.info("Resolved hazard: %s", summary)
         return summary, self._state
 
     def _apply_hazard_effect(self, state: GameState, effect: str) -> GameState:
-        """Apply a hazard fail_effect to the player state."""
-        if "damage" in effect.lower() or re.match(r"\d+d\d+", effect):
-            damage = self._roll_damage(effect)
+        """Apply a hazard fail_effect — either damage (NdM) or an SRD condition."""
+        if re.match(r"\d+d\d+", effect):
+            damage = self._rules.roll_damage(effect)
             new_hp = max(0, state.player.hp - damage)
             state = state.model_copy(
                 update={"player": state.player.model_copy(update={"hp": new_hp})}
             )
+        elif effect.lower() in VALID_CONDITIONS:
+            condition = effect.lower()
+            if condition not in state.player.conditions:
+                state = state.model_copy(
+                    update={
+                        "player": state.player.model_copy(
+                            update={"conditions": [*state.player.conditions, condition]}
+                        )
+                    }
+                )
         else:
-            # Treat as a condition string (e.g. "confusion", "minor damage")
             condition = effect.lower().replace(" ", "_")
             if condition not in state.player.conditions:
                 state = state.model_copy(
@@ -574,15 +643,6 @@ class SceneRunner:
                     }
                 )
         return state
-
-    def _roll_damage(self, damage_str: str) -> int:
-        """Parse and roll a damage expression like '1d4' or '1d6+1'."""
-        match = re.match(r"(\d+)d(\d+)([+-]\d+)?", damage_str.replace(" ", ""))
-        if not match:
-            return 1
-        num, sides = int(match.group(1)), int(match.group(2))
-        bonus = int(match.group(3) or 0)
-        return sum(random.randint(1, sides) for _ in range(num)) + bonus
 
     def _resolve_approach(
         self, scene: SceneDef, approach_id: str
@@ -607,28 +667,29 @@ class SceneRunner:
                 span.set_attribute("approach.outcome", "combat")
                 outcome_flag = "force"
             else:
-                # Skill check for non-combat approaches
                 primary_skill = approach_def.skills[0] if approach_def.skills else "command"
-                modifier = self._state.player.skills.get(primary_skill, 0)
                 dc = approach_def.dc or 13
-                trigger = DiceTrigger(roll="d20", skill=primary_skill, dc=dc, modifier=modifier)
-                result = self._rules.resolve(trigger)
+                result = self._rules.resolve_ability_check(
+                    skill=primary_skill,
+                    dc=dc,
+                    player=self._state.player,
+                    skill_abilities=self._skill_abilities,
+                )
                 passed = result.outcome == "success"
 
                 if passed:
                     outcome_flag = approach_def.outcome or approach_id
                     summary = (
                         f"{approach_id.title()} approach — {primary_skill} DC {dc}: "
-                        f"rolled {result.raw_result} + {modifier} = {result.total} — SUCCESS"
+                        f"rolled {result.raw_result} + {result.modifier} = {result.total} — SUCCESS"
                     )
                     span.set_attribute("approach.outcome", outcome_flag)
                 else:
-                    # Escalate to force on failure
                     outcome_flag = "force"
                     combat_outcome = self._resolve_combat_by_id("adv_security_drone")
                     summary = (
                         f"{approach_id.title()} approach — {primary_skill} DC {dc}: "
-                        f"rolled {result.raw_result} + {modifier} = {result.total} — FAILED, "
+                        f"rolled {result.raw_result} + {result.modifier} = {result.total} — FAILED, "
                         f"escalated to force: {combat_outcome}"
                     )
                     span.set_attribute("approach.outcome", "combat")
@@ -645,39 +706,203 @@ class SceneRunner:
         )
         return summary, self._state
 
+    # ------------------------------------------------------------------
+    # 5e Combat
+    # ------------------------------------------------------------------
+
     def _resolve_combat(self, approach_def: ApproachDef) -> str:
         adversary_id = approach_def.adversaries[0] if approach_def.adversaries else "adv_security_drone"
         return self._resolve_combat_by_id(adversary_id)
 
     def _resolve_combat_by_id(self, adversary_id: str) -> str:
-        """Resolve a single round of combat, return outcome description."""
+        """Multi-round 5e combat. Returns outcome description."""
         adversary = self._data.adversaries.get(adversary_id)
         if not adversary:
             return "combat resolved"
 
         max_hostiles = self._data.meta.play_profile.max_simultaneous_hostiles
-        assert max_hostiles <= 2  # enforced by scenario design
+        assert max_hostiles <= 2
 
-        # Player attacks adversary
-        player_attack = self._rules.resolve(DiceTrigger(roll="d20", dc=adversary.defense, modifier=2))
-        player_hits = player_attack.outcome == "success"
+        adv_hp = adversary.hp
+        adv_dex_mod = ability_modifier(adversary.ability_scores.get("DEX", 10))
+        player_dex_mod = self._state.player.ability_modifier("DEX")
+        player_str_mod = self._state.player.ability_modifier("STR")
+        player_attack_bonus = player_str_mod + self._state.player.proficiency_bonus
 
-        # Adversary attacks player
-        adv_attack = self._rules.resolve(
-            DiceTrigger(roll="d20", dc=self._state.player.armor_class, modifier=adversary.attack_bonus)
+        player_init = self._rules.resolve_initiative(player_dex_mod)
+        adv_init = self._rules.resolve_initiative(adv_dex_mod)
+        player_goes_first = player_init >= adv_init
+
+        stun_pulse_available = True
+        player_stunned_this_round = False
+        combat_log: list[str] = []
+
+        for round_num in range(1, MAX_COMBAT_ROUNDS + 1):
+            if player_goes_first:
+                adv_hp, player_stunned_this_round = self._player_combat_turn(
+                    adversary, adv_hp, player_attack_bonus, player_str_mod,
+                    player_stunned_this_round, combat_log,
+                )
+                if adv_hp <= 0:
+                    combat_log.append(f"Round {round_num}: Drone destroyed!")
+                    break
+                stun_pulse_available, player_stunned_this_round = self._adversary_combat_turn(
+                    adversary, stun_pulse_available, player_stunned_this_round, combat_log,
+                )
+                if self._state.player.hp <= 0:
+                    combat_log.append(f"Round {round_num}: Player defeated!")
+                    break
+            else:
+                stun_pulse_available, player_stunned_this_round = self._adversary_combat_turn(
+                    adversary, stun_pulse_available, player_stunned_this_round, combat_log,
+                )
+                if self._state.player.hp <= 0:
+                    combat_log.append(f"Round {round_num}: Player defeated!")
+                    break
+                adv_hp, player_stunned_this_round = self._player_combat_turn(
+                    adversary, adv_hp, player_attack_bonus, player_str_mod,
+                    player_stunned_this_round, combat_log,
+                )
+                if adv_hp <= 0:
+                    combat_log.append(f"Round {round_num}: Drone destroyed!")
+                    break
+
+        result_str = "; ".join(combat_log[-3:])
+        return f"{result_str} (player HP: {self._state.player.hp})"
+
+    def _player_combat_turn(
+        self,
+        adversary: AdversaryDef,
+        adv_hp: int,
+        player_attack_bonus: int,
+        player_str_mod: int,
+        player_stunned: bool,
+        combat_log: list[str],
+    ) -> tuple[int, bool]:
+        """Player's turn. Returns (remaining_adv_hp, player_still_stunned)."""
+        if conditions_prevent_actions(self._state.player.conditions):
+            combat_log.append("Player is incapacitated — skips turn")
+            if player_stunned:
+                self._remove_condition("stunned")
+                player_stunned = False
+            return adv_hp, player_stunned
+
+        disadvantage = conditions_impose_disadvantage(self._state.player.conditions)
+        attack = self._rules.resolve_attack(
+            attacker_bonus=player_attack_bonus,
+            target_ac=adversary.ac,
+            damage_str="1d8",
+            ability_mod=player_str_mod,
+            disadvantage=disadvantage,
         )
-        adv_hits = adv_attack.outcome == "success"
+        if attack.hit:
+            adv_hp -= attack.damage
+            crit_str = " (CRITICAL HIT!)" if attack.is_critical else ""
+            combat_log.append(f"Player hits for {attack.damage}{crit_str}")
+        else:
+            combat_log.append("Player misses")
 
-        if adv_hits:
-            damage = self._roll_damage(adversary.damage)
-            new_hp = max(0, self._state.player.hp - damage)
+        return adv_hp, player_stunned
+
+    def _adversary_combat_turn(
+        self,
+        adversary: AdversaryDef,
+        stun_pulse_available: bool,
+        player_stunned: bool,
+        combat_log: list[str],
+    ) -> tuple[bool, bool]:
+        """Adversary's turn. Returns (stun_pulse_available, player_stunned)."""
+        # Recharge check for abilities
+        for ability_def in adversary.abilities:
+            if not stun_pulse_available and ability_def.recharge:
+                recharge_roll = self._rules._rng.randint(1, 6)
+                if recharge_roll in ability_def.recharge:
+                    stun_pulse_available = True
+
+        # Try Stun Pulse if available
+        used_stun = False
+        for ability_def in adversary.abilities:
+            if stun_pulse_available and ability_def.name == "Stun Pulse":
+                save_result = self._rules.resolve_saving_throw(
+                    ability_name="CON", dc=12, player=self._state.player,
+                )
+                if save_result.outcome == "failure":
+                    self._apply_condition("stunned")
+                    player_stunned = True
+                    combat_log.append("Drone uses Stun Pulse — player STUNNED!")
+                else:
+                    combat_log.append("Drone uses Stun Pulse — player resists")
+                stun_pulse_available = False
+                used_stun = True
+                break
+
+        if not used_stun:
+            advantage = conditions_grant_attack_advantage(self._state.player.conditions)
+            attack = self._rules.resolve_attack(
+                attacker_bonus=adversary.attack_bonus,
+                target_ac=self._state.player.armor_class,
+                damage_str=adversary.damage,
+                ability_mod=ability_modifier(adversary.ability_scores.get("STR", 10)),
+                advantage=advantage,
+            )
+            if attack.hit:
+                new_hp = max(0, self._state.player.hp - attack.damage)
+                self._state = self._state.model_copy(
+                    update={"player": self._state.player.model_copy(update={"hp": new_hp})}
+                )
+                crit_str = " (CRIT!)" if attack.is_critical else ""
+                combat_log.append(f"Drone hits for {attack.damage}{crit_str}")
+            else:
+                combat_log.append("Drone misses")
+
+        return stun_pulse_available, player_stunned
+
+    def _apply_condition(self, condition: str) -> None:
+        if condition not in self._state.player.conditions:
             self._state = self._state.model_copy(
-                update={"player": self._state.player.model_copy(update={"hp": new_hp})}
+                update={
+                    "player": self._state.player.model_copy(
+                        update={"conditions": [*self._state.player.conditions, condition]}
+                    )
+                }
             )
 
-        hit_str = "hit" if player_hits else "missed"
-        adv_str = f"hit for {self._roll_damage(adversary.damage)}" if adv_hits else "missed"
-        return f"Player {hit_str} the drone; drone {adv_str} (player HP: {self._state.player.hp})"
+    def _remove_condition(self, condition: str) -> None:
+        if condition in self._state.player.conditions:
+            new_conditions = [c for c in self._state.player.conditions if c != condition]
+            self._state = self._state.model_copy(
+                update={
+                    "player": self._state.player.model_copy(
+                        update={"conditions": new_conditions}
+                    )
+                }
+            )
+
+    # ------------------------------------------------------------------
+    # Self-Repair Cycle (Second Wind)
+    # ------------------------------------------------------------------
+
+    def _is_self_repair_request(self, player_input: str) -> bool:
+        keywords = ("self-repair", "self_repair", "repair cycle", "second wind", "heal")
+        return any(kw in player_input.lower() for kw in keywords)
+
+    def _resolve_self_repair(self) -> tuple[str, GameState]:
+        assert self._state.scenario is not None
+        heal = self._rules.roll_damage("1d10") + self._state.player.level
+        new_hp = min(self._state.player.max_hp, self._state.player.hp + heal)
+        healed = new_hp - self._state.player.hp
+
+        new_flags = {**self._state.scenario.flags, "self_repair_used": "true"}
+        self._state = self._state.model_copy(
+            update={
+                "player": self._state.player.model_copy(update={"hp": new_hp}),
+                "scenario": self._state.scenario.model_copy(update={"flags": new_flags}),
+            }
+        )
+
+        summary = f"Self-Repair Cycle activated: healed {healed} HP (now {new_hp}/{self._state.player.max_hp})"
+        logger.info(summary)
+        return summary, self._state
 
     # ------------------------------------------------------------------
     # Scene state helpers

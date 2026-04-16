@@ -1,4 +1,4 @@
-"""Unit tests for SceneRunner (task 3.7).
+"""Unit tests for SceneRunner — 5e mechanics.
 
 Uses a stub LLM so no real API calls are made.
 All dice rolls are seeded for reproducibility.
@@ -64,37 +64,34 @@ class TestSceneEntry:
 
 
 # ---------------------------------------------------------------------------
-# Skill checks
+# Skill checks — 5e ability check formula
 # ---------------------------------------------------------------------------
 
 class TestSkillChecks:
     def test_check_flag_set_after_resolution(self):
         runner = _make_runner(seed=99)
-        # scene_1_approach has checks; hazard comes first
-        # First, resolve the hazard, then the check
         runner.process_turn("I approach carefully.")
         runner.process_turn("I scan the anomaly.")
         flags = runner.state.scenario.flags  # type: ignore[union-attr]
-        # At least one check or hazard flag should be present
         assert any(k.startswith("check:") or k.startswith("hazard:") for k in flags)
 
-    def test_check_uses_player_skill_modifier(self):
-        """Verify modifier taken from player.skills, not zero."""
+    def test_check_uses_5e_ability_modifier(self):
+        """With high attributes, checks should pass consistently."""
         data, state = _load()
-        # Set engineering to a very high value to guarantee success
         state = state.model_copy(
             update={
                 "player": state.player.model_copy(
-                    update={"skills": {**state.player.skills, "engineering": 20}}
+                    update={
+                        "attributes": {**state.player.attributes, "INT": 30},
+                        "skill_proficiencies": [*state.player.skill_proficiencies, "engineering"],
+                    }
                 )
             }
         )
         runner = SceneRunner(data, state, RulesEngine(seed=1), _stub_llm())
-        # Process until the engineering check is resolved
         for _ in range(3):
             runner.process_turn("I attempt the task.")
         flags = runner.state.scenario.flags  # type: ignore[union-attr]
-        # With modifier=20 the check must always pass
         eng_flag = next(
             (v for k, v in flags.items() if "engineering" in k and k.startswith("check:")),
             None,
@@ -109,46 +106,64 @@ class TestSkillChecks:
 
 class TestHazardResolution:
     def test_hazard_flag_set_after_first_turn(self):
-        """First turn in scene_1 resolves the hazard (obstacles are first)."""
         runner = _make_runner(seed=5)
         runner.process_turn("I try to dock.")
         flags = runner.state.scenario.flags  # type: ignore[union-attr]
         assert "hazard:haz_docking_shear" in flags
 
     def test_failed_hazard_applies_condition(self):
-        """With a guaranteed-fail seed, haz_signal_feedback adds 'confusion' condition."""
+        """haz_signal_feedback fails → applies 'frightened' condition."""
         data, state = _load()
-        # Jump straight to scene_2 where haz_signal_feedback lives
         state = state.model_copy(
             update={
                 "scenario": state.scenario.model_copy(  # type: ignore[union-attr]
                     update={"current_scene": "scene_2_operations"}
-                )
-            }
-        )
-        # Use all-zero skills so modifier=0, DC=13 → likely to fail with low seed
-        state = state.model_copy(
-            update={
-                "player": state.player.model_copy(update={"skills": {}})
+                ),
+                "player": state.player.model_copy(
+                    update={
+                        "attributes": {**state.player.attributes, "INT": 1, "STR": 1},
+                        "skill_proficiencies": [],
+                    }
+                ),
             }
         )
         runner = SceneRunner(data, state, RulesEngine(seed=0), _stub_llm())
-        # Process first turn (haz_power_arc, dc=10)
         runner.process_turn("I investigate the console.")
-        # Process second turn (haz_signal_feedback, dc=13)
         runner.process_turn("I reach for the relay controls.")
         haz_flag = runner.state.scenario.flags.get("hazard:haz_signal_feedback")  # type: ignore[union-attr]
         if haz_flag == "failed":
-            assert "confusion" in runner.state.player.conditions
+            assert "frightened" in runner.state.player.conditions
+
+    def test_hazard_damage_reduces_hp(self):
+        """haz_power_arc on failure deals 1d4 damage."""
+        data, state = _load()
+        state = state.model_copy(
+            update={
+                "scenario": state.scenario.model_copy(  # type: ignore[union-attr]
+                    update={"current_scene": "scene_2_operations"}
+                ),
+                "player": state.player.model_copy(
+                    update={
+                        "attributes": {**state.player.attributes, "INT": 1},
+                        "skill_proficiencies": [],
+                    }
+                ),
+            }
+        )
+        runner = SceneRunner(data, state, RulesEngine(seed=0), _stub_llm())
+        runner.process_turn("I touch the panel.")
+        haz_flag = runner.state.scenario.flags.get("hazard:haz_power_arc")  # type: ignore[union-attr]
+        if haz_flag == "failed":
+            assert runner.state.player.hp < 12
 
     def test_passed_hazard_does_not_apply_condition(self):
-        """With a guaranteed-pass modifier, no condition applied."""
         data, state = _load()
-        # Set all skills very high
         state = state.model_copy(
             update={
                 "player": state.player.model_copy(
-                    update={"skills": {"engineering": 50, "science": 50}}
+                    update={
+                        "attributes": {**state.player.attributes, "INT": 30, "STR": 30},
+                    }
                 )
             }
         )
@@ -167,7 +182,6 @@ class TestHazardResolution:
 class TestApproachResolution:
     def _runner_at_scene_3(self, seed: int = 42) -> SceneRunner:
         data, state = _load()
-        # Pre-mark all scene_1 and scene_2 mechanics as resolved
         flags = {
             "hazard:haz_docking_shear": "passed",
             "check:scene_1_approach:engineering": "passed",
@@ -193,7 +207,6 @@ class TestApproachResolution:
         assert "approach" in narrative.lower() or "diplomacy" in narrative.lower()
 
     def test_diplomacy_approach_sets_flag(self):
-        # Use high skill to guarantee success
         data, state = _load()
         flags = {
             "hazard:haz_docking_shear": "passed",
@@ -211,7 +224,7 @@ class TestApproachResolution:
                     update={"current_scene": "scene_3_core", "flags": flags}
                 ),
                 "player": state.player.model_copy(
-                    update={"skills": {**state.player.skills, "command": 50}}
+                    update={"attributes": {**state.player.attributes, "CHA": 30}}
                 ),
             }
         )
@@ -233,7 +246,6 @@ class TestApproachResolution:
             runner.process_turn("I try something weird.", approach="bribery")
 
     def test_diplomatic_success_sets_peaceful_outcome(self):
-        """Guarantee success via modifier=50."""
         data, state = _load()
         flags = {
             "hazard:haz_docking_shear": "passed",
@@ -251,7 +263,7 @@ class TestApproachResolution:
                     update={"current_scene": "scene_3_core", "flags": flags}
                 ),
                 "player": state.player.model_copy(
-                    update={"skills": {**state.player.skills, "command": 50}}
+                    update={"attributes": {**state.player.attributes, "CHA": 30}}
                 ),
             }
         )
@@ -262,29 +274,57 @@ class TestApproachResolution:
 
 
 # ---------------------------------------------------------------------------
+# Self-Repair Cycle (Second Wind)
+# ---------------------------------------------------------------------------
+
+class TestSelfRepairCycle:
+    def test_self_repair_heals(self):
+        data, state = _load()
+        state = state.model_copy(
+            update={"player": state.player.model_copy(update={"hp": 5})}
+        )
+        runner = SceneRunner(data, state, RulesEngine(seed=42), _stub_llm())
+        runner.process_turn("I activate self-repair.")
+        assert runner.state.player.hp > 5
+        assert runner.state.player.hp <= runner.state.player.max_hp
+        assert runner.state.scenario.flags.get("self_repair_used") == "true"  # type: ignore[union-attr]
+
+    def test_self_repair_cannot_be_used_twice(self):
+        data, state = _load()
+        state = state.model_copy(
+            update={
+                "player": state.player.model_copy(update={"hp": 5}),
+                "scenario": state.scenario.model_copy(  # type: ignore[union-attr]
+                    update={"flags": {"self_repair_used": "true"}}
+                ),
+            }
+        )
+        runner = SceneRunner(data, state, RulesEngine(seed=42), _stub_llm())
+        runner.process_turn("I activate self-repair.")
+        # Should resolve a hazard instead of self-repair
+        assert "hazard:haz_docking_shear" in runner.state.scenario.flags  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
 # Scene transitions
 # ---------------------------------------------------------------------------
 
 class TestSceneTransitions:
     def test_scene_advances_after_all_mechanics_resolved(self):
-        """After all hazards+checks in scene_1 are resolved, runner moves to scene_2."""
         data, state = _load()
-        # Use high skills and seed that ensures passes
         state = state.model_copy(
             update={
                 "player": state.player.model_copy(
-                    update={"skills": {k: 50 for k in state.player.skills}}
+                    update={"attributes": {k: 30 for k in state.player.attributes}}
                 )
             }
         )
         runner = SceneRunner(data, state, RulesEngine(seed=1), _stub_llm())
-        # scene_1 has: 1 hazard + 2 checks = 3 turns to resolve
         for _ in range(3):
             runner.process_turn("I proceed.")
         assert runner.current_scene == "scene_2_operations"
 
     def test_terminal_scene_finalises_session(self):
-        """Entering scene_4_resolution (end=True) should finalise the session."""
         data, state = _load()
         all_flags = {
             "hazard:haz_docking_shear": "passed",
@@ -303,13 +343,9 @@ class TestSceneTransitions:
                 "scenario": state.scenario.model_copy(  # type: ignore[union-attr]
                     update={"current_scene": "scene_3_core", "flags": all_flags}
                 ),
-                "player": state.player.model_copy(
-                    update={"skills": {**state.player.skills, "command": 50}}
-                ),
             }
         )
         runner = SceneRunner(data, state, RulesEngine(seed=1), _stub_llm())
-        # scene_3_core approach already resolved → scene_complete → advance to scene_4
         runner.process_turn("The relay pulses.")
         assert runner.is_complete
 
@@ -382,3 +418,79 @@ class TestOutcomeClassification:
     def test_force_outcome(self):
         runner = self._complete_runner("force")
         assert runner.outcome_type == "force"
+
+
+# ---------------------------------------------------------------------------
+# Combat — multi-round, 5e mechanics
+# ---------------------------------------------------------------------------
+
+class TestCombat:
+    def _runner_at_scene_3_for_combat(self, seed: int = 42) -> SceneRunner:
+        data, state = _load()
+        flags = {
+            "hazard:haz_docking_shear": "passed",
+            "check:scene_1_approach:engineering": "passed",
+            "check:scene_1_approach:science": "passed",
+            "hazard:haz_power_arc": "passed",
+            "hazard:haz_signal_feedback": "passed",
+            "check:scene_2_operations:science": "passed",
+            "check:scene_2_operations:engineering": "passed",
+            "check:scene_2_operations:medical": "passed",
+        }
+        state = state.model_copy(
+            update={
+                "scenario": state.scenario.model_copy(  # type: ignore[union-attr]
+                    update={"current_scene": "scene_3_core", "flags": flags}
+                )
+            }
+        )
+        return SceneRunner(data, state, RulesEngine(seed=seed), _stub_llm())
+
+    def test_force_combat_resolves(self):
+        runner = self._runner_at_scene_3_for_combat(seed=42)
+        runner.process_turn("I attack!", approach="force")
+        flags = runner.state.scenario.flags  # type: ignore[union-attr]
+        assert flags.get("approach") == "force"
+
+    def test_combat_can_reduce_player_hp(self):
+        """Over many seeds, at least one should result in player taking damage."""
+        any_damage = False
+        for seed in range(50):
+            runner = self._runner_at_scene_3_for_combat(seed=seed)
+            initial_hp = runner.state.player.hp
+            runner.process_turn("I engage!", approach="force")
+            if runner.state.player.hp < initial_hp:
+                any_damage = True
+                break
+        assert any_damage, "Expected at least one seed to result in player damage"
+
+    def test_0_hp_means_defeated(self):
+        """With very low HP, combat should end in defeat."""
+        data, state = _load()
+        flags = {
+            "hazard:haz_docking_shear": "passed",
+            "check:scene_1_approach:engineering": "passed",
+            "check:scene_1_approach:science": "passed",
+            "hazard:haz_power_arc": "passed",
+            "hazard:haz_signal_feedback": "passed",
+            "check:scene_2_operations:science": "passed",
+            "check:scene_2_operations:engineering": "passed",
+            "check:scene_2_operations:medical": "passed",
+        }
+        state = state.model_copy(
+            update={
+                "scenario": state.scenario.model_copy(  # type: ignore[union-attr]
+                    update={"current_scene": "scene_3_core", "flags": flags}
+                ),
+                "player": state.player.model_copy(update={"hp": 1, "max_hp": 12}),
+            }
+        )
+        defeated = False
+        for seed in range(100):
+            runner = SceneRunner(data, state, RulesEngine(seed=seed), _stub_llm())
+            runner.process_turn("I charge!", approach="force")
+            if runner.state.player.hp <= 0 and runner.is_complete:
+                assert runner.outcome_type == "defeated"
+                defeated = True
+                break
+        assert defeated, "Expected at least one seed to result in defeat at 1 HP"
