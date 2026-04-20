@@ -835,7 +835,8 @@ class SceneRunner:
                 if self._last_classifier_run_id
                 else None
             )
-            response = self._llm.invoke(
+            chunks: list[str] = []
+            for chunk in self._llm.stream(
                 [
                     SystemMessage(content=system),
                     HumanMessage(content=_GM_QA_HUMAN.format(player_input=player_input)),
@@ -844,8 +845,11 @@ class SceneRunner:
                     component="gm_qa",
                     extra_metadata=parent_metadata,
                 ),
-            )
-            return response.content if hasattr(response, "content") else str(response)
+            ):
+                piece = getattr(chunk, "content", None)
+                if piece:
+                    chunks.append(piece)
+            return "".join(chunks)
         except Exception as exc:
             logger.warning("GM QA LLM failed, using fallback: %s", exc)
             return (
@@ -1622,7 +1626,8 @@ class SceneRunner:
                 if self._last_classifier_run_id
                 else None
             )
-            response = self._llm.invoke(
+            chunks: list[str] = []
+            for chunk in self._llm.stream(
                 [
                     SystemMessage(content=system),
                     HumanMessage(content=human),
@@ -1631,8 +1636,11 @@ class SceneRunner:
                     component="storyteller_scenario",
                     extra_metadata=parent_metadata,
                 ),
-            )
-            return response.content if hasattr(response, "content") else str(response)
+            ):
+                piece = getattr(chunk, "content", None)
+                if piece:
+                    chunks.append(piece)
+            return "".join(chunks)
         except Exception as exc:
             logger.warning("Storyteller LLM failed, using fallback: %s", exc)
             return f"[{scene.name}] {mechanic_summary}"

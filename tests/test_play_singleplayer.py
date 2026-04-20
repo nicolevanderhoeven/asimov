@@ -27,7 +27,7 @@ def _make_mock_llm():
     msg = MagicMock()
     msg.content = VALID_LLM_RESPONSE
     llm = MagicMock()
-    llm.invoke.return_value = msg
+    llm.stream.side_effect = lambda *_args, **_kwargs: iter([msg])
     return llm
 
 

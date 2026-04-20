@@ -37,7 +37,7 @@ def mock_llm(narrative: str = "Silence.", state_delta: dict = None, dice_trigger
     msg = MagicMock()
     msg.content = json.dumps(payload)
     llm = MagicMock()
-    llm.invoke.return_value = msg
+    llm.stream.side_effect = lambda *_args, **_kwargs: iter([msg])
     return llm
 
 
@@ -142,7 +142,7 @@ class TestTurnSpanAttributes:
         provider, exporter = make_tracer_with_exporter()
         state = make_state()
         broken_llm = MagicMock()
-        broken_llm.invoke.side_effect = RuntimeError("boom")
+        broken_llm.stream.side_effect = RuntimeError("boom")
 
         with patch("turn_loop.tracer", provider.get_tracer("dnd.singleplayer")):
             loop = TurnLoop(state, RulesEngine(), broken_llm)

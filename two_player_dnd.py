@@ -60,14 +60,18 @@ def create_game():
             Applies the chatmodel to the message history
             and returns the message string
             """
-            message = self.model.invoke(
+            chunks: list[str] = []
+            for chunk in self.model.stream(
                 [
                     self.system_message,
                     HumanMessage(content="\n".join(self.message_history + [self.prefix])),
                 ],
                 config=sigil_langchain_config(component="dialogue"),
-            )
-            return message.content
+            ):
+                piece = getattr(chunk, "content", None)
+                if piece:
+                    chunks.append(piece)
+            return "".join(chunks)
 
         def receive(self, name: str, message: str) -> None:
             self.message_history.append(f"{name}: {message}")

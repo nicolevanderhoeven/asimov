@@ -17,14 +17,19 @@ def make_state() -> GameState:
 
 
 def mock_llm_with_responses(*responses: str) -> MagicMock:
-    """Build a mock LLM whose .invoke() cycles through the given response strings."""
+    """Build a mock LLM whose .stream() cycles through the given response strings.
+
+    Each call to ``.stream()`` returns a fresh iterator yielding a single chunk
+    whose ``.content`` is the next string in the sequence. This mirrors how the
+    production code accumulates streamed chunks into the full response text.
+    """
     llm = MagicMock()
-    side_effects = []
+    iters = []
     for text in responses:
         msg = MagicMock()
         msg.content = text
-        side_effects.append(msg)
-    llm.invoke.side_effect = side_effects
+        iters.append(iter([msg]))
+    llm.stream.side_effect = iters
     return llm
 
 
@@ -70,13 +75,13 @@ class TestInvokeStoryteller:
         llm = mock_llm_with_responses(VALID_RESPONSE)
         _, retried = self._call(llm)
         assert retried is False
-        assert llm.invoke.call_count == 1
+        assert llm.stream.call_count == 1
 
     def test_first_fail_second_valid_retries(self):
         llm = mock_llm_with_responses("not json at all", VALID_RESPONSE)
         result, retried = self._call(llm)
         assert retried is True
-        assert llm.invoke.call_count == 2
+        assert llm.stream.call_count == 2
         assert isinstance(result, LLMTurnResponse)
         assert result.narrative == "You cautiously step into the torchlit hallway."
 
@@ -84,10 +89,34 @@ class TestInvokeStoryteller:
         llm = mock_llm_with_responses("bad output", "also bad")
         result, retried = self._call(llm)
         assert retried is True
-        assert llm.invoke.call_count == 2
+        assert llm.stream.call_count == 2
         assert result.narrative == "also bad"
         assert result.state_delta == {}
         assert result.dice_triggers == []
+
+    def test_uses_stream_not_invoke(self):
+        """Narration must call .stream() so Sigil can record time-to-first-token.
+
+        Calling .invoke() would bypass the on_llm_new_token callback and leave
+        the TTFT histogram empty in Grafana.
+        """
+        llm = mock_llm_with_responses(VALID_RESPONSE)
+        self._call(llm)
+        assert llm.stream.call_count == 1
+        llm.invoke.assert_not_called()
+
+    def test_multi_chunk_response_accumulated(self):
+        """Streamed chunks must be joined in order to reconstruct the full text."""
+        llm = MagicMock()
+        chunks = []
+        for piece in ['{"narrative": "You step', ' into the hall.", "state_delta": {}, "dice_triggers": []}']:
+            c = MagicMock()
+            c.content = piece
+            chunks.append(c)
+        llm.stream.side_effect = lambda *_a, **_kw: iter(chunks)
+
+        result, _ = self._call(llm)
+        assert result.narrative == "You step into the hall."
 
     def test_markdown_fence_stripped(self):
         fenced = "```json\n" + VALID_RESPONSE + "\n```"

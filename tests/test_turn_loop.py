@@ -23,7 +23,7 @@ def mock_llm(narrative: str = "The torch flickers.", state_delta: dict = None, d
     msg = MagicMock()
     msg.content = json.dumps(response_payload)
     llm = MagicMock()
-    llm.invoke.return_value = msg
+    llm.stream.side_effect = lambda *_args, **_kwargs: iter([msg])
     return llm
 
 
@@ -101,7 +101,7 @@ class TestRunFailurePath:
         original_turn = state.turn_number
 
         broken_llm = MagicMock()
-        broken_llm.invoke.side_effect = RuntimeError("LLM blew up")
+        broken_llm.stream.side_effect = RuntimeError("LLM blew up")
 
         loop = TurnLoop(state, RulesEngine(), broken_llm)
         with pytest.raises(RuntimeError):
@@ -114,7 +114,7 @@ class TestRunFailurePath:
         loop = TurnLoop(make_state(), RulesEngine(), llm)
         with pytest.raises(ValueError):
             loop.run("")
-        llm.invoke.assert_not_called()
+        llm.stream.assert_not_called()
 
 
 class TestComputeDelta:

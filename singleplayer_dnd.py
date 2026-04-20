@@ -96,11 +96,15 @@ def invoke_storyteller(
 
     for attempt in range(2):
         try:
-            response = llm.invoke(
+            chunks: list[str] = []
+            for chunk in llm.stream(
                 messages,
                 config=sigil_langchain_config(component="storyteller_single"),
-            )
-            raw_text = response.content if hasattr(response, "content") else str(response)
+            ):
+                piece = getattr(chunk, "content", None)
+                if piece:
+                    chunks.append(piece)
+            raw_text = "".join(chunks)
             parsed = LLMTurnResponse.model_validate_json(_extract_json(raw_text))
             return parsed, retried
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:

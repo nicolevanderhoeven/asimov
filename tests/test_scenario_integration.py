@@ -16,10 +16,12 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _stub_llm_instance(narrative: str = "The relay hums in response.") -> MagicMock:
+    """Stub LLM serving both classifier (.invoke) and narration/QA (.stream)."""
     msg = MagicMock()
     msg.content = narrative
     llm = MagicMock()
     llm.invoke.return_value = msg
+    llm.stream.side_effect = lambda *_a, **_kw: iter([msg])
     return llm
 
 
