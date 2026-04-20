@@ -38,6 +38,17 @@ This repository consists of:
      - Replace `${GRAFANA_CLOUD_OTLP_ENDPOINT}` with your endpoint URL
 4. In Grafana, import the GenAI Observability dashboard by OpenLIT by following the instructions [here](https://nicole.to/kceu25aidash).
 5. Install k6 by following the instructions [here](https://nicole.to/asimovk6).
+6. **(Optional) Enable the Grafana Sigil SDK** for normalized LLM generation telemetry on top of OpenLIT. Sigil runs side-by-side with OpenLIT and exports generations directly to the Sigil ingest endpoint on Grafana Cloud.
+   - Install the SDK packages: `pip install sigil-sdk sigil-sdk-langchain` (or `pip install -r requirements.txt`).
+   - Add these keys to your `.env` (leave `GRAFANA_CLOUD_SIGIL_ENDPOINT` unset to disable Sigil):
+     - `GRAFANA_CLOUD_SIGIL_ENDPOINT` — e.g. `https://<your-stack>.grafana.net/api/v1/generations:export`
+     - `GRAFANA_CLOUD_INSTANCE_ID` — your Grafana Cloud instance ID (same value as `GRAFANA_CLOUD_USERNAME`; `GRAFANA_CLOUD_INSTANCE` is also accepted as an alias)
+     - `GRAFANA_CLOUD_API_KEY` — a Grafana Cloud API key with Sigil write scope
+     - (optional) `ASIMOV_AGENT_VERSION` — explicit agent version string. If unset, the app uses `git-<short-sha>` when running from a checkout, falling back to `1.0.0`.
+   - Generations flow directly from the app to the Sigil ingest endpoint using basic auth; OTel traces and metrics keep going through your existing collector. Open the **Sigil** app in Grafana Cloud to see conversations grouped by the `asimov-dnd` agent.
+   - **Component tags** split per-call cost/latency in the Sigil agent catalog: `game_setup`, `dialogue`, `classifier`, `gm_qa`, `storyteller_single`, `storyteller_scenario`. Filter on the `sigil.component` tag.
+   - **Verify request params are captured.** After your first conversations appear, open one in Sigil and confirm the generation payload has `gen_ai.request.temperature` and `gen_ai.request.max_tokens`. These are read from LangChain's invocation params by the adapter. If they're missing, file an issue against `sigil-sdk-langchain`.
+   - **Multi-agent DAG placeholder.** The scenario runner emits `sigil.run.id` on the classifier generation and `sigil.run.parent_ids` on the downstream `gm_qa` / `storyteller_scenario` generations, so once Sigil adds first-class DAG support (or a `with_parent_generation_ids()` context helper in the SDK) the links can be backfilled from metadata without code changes here.
 
 ## Usage
 
@@ -63,6 +74,7 @@ If you're using the CLI version, type your input directly into the terminal afte
 ## Resources
 
 - [OpenLIT docs: Quickstart: AI Observability](https://docs.openlit.io/latest/quickstart-observability) for AI-specific instrumentation
+- [Grafana Sigil SDK](https://github.com/grafana/sigil-sdk) for normalized LLM generation telemetry on Grafana Cloud
 - [OpenTelemetry](https://opentelemetry.io/) for instrumentation
 - Free [Grafana Cloud](https://nicole.to/kceu2025grafana) for visibility
 - [Loki](https://nicole.to/lokirepo) for logs

@@ -49,7 +49,7 @@ def _stub_llm_routed(
     """
     llm = MagicMock()
 
-    def _invoke(messages):
+    def _invoke(messages, **_kwargs):
         system_content = ""
         if messages:
             system_content = getattr(messages[0], "content", "") or ""
@@ -884,7 +884,7 @@ class TestQuestionHandling:
         # Capture the system prompt sent to the GM so we can assert on its content
         captured: dict[str, str] = {}
 
-        def _invoke(messages):
+        def _invoke(messages, **_kwargs):
             system = getattr(messages[0], "content", "")
             response = MagicMock()
             lower_sys = system.lower()
@@ -1013,7 +1013,7 @@ class TestPromptInjectionHardening:
         data, state = _load()
         captured_messages: list[list] = []
 
-        def _invoke(messages):
+        def _invoke(messages, **_kwargs):
             captured_messages.append(messages)
             response = MagicMock()
             system_content = (getattr(messages[0], "content", "") or "").lower()

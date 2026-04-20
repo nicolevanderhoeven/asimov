@@ -15,6 +15,7 @@ def create_game():
     import os
     import logging
     from loggingfw import CustomLogFW
+    from sigil_setup import sigil_langchain_config
 
 
     load_dotenv()  # Load .env file
@@ -91,7 +92,8 @@ def create_game():
                 [
                     self.system_message,
                     HumanMessage(content="\n".join(self.message_history + [self.prefix])),
-                ]
+                ],
+                config=sigil_langchain_config(component="dialogue"),
             )
             return message.content
 
@@ -180,7 +182,10 @@ def create_game():
         ),
     ]
     _creative_llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=1.0)
-    protagonist_description = _creative_llm.invoke(protagonist_specifier_prompt).content
+    protagonist_description = _creative_llm.invoke(
+        protagonist_specifier_prompt,
+        config=sigil_langchain_config(component="game_setup"),
+    ).content
 
     storyteller_specifier_prompt = [
         player_descriptor_system_message,
@@ -191,7 +196,10 @@ def create_game():
             Do not add anything else."""
         ),
     ]
-    storyteller_description = _creative_llm.invoke(storyteller_specifier_prompt).content
+    storyteller_description = _creative_llm.invoke(
+        storyteller_specifier_prompt,
+        config=sigil_langchain_config(component="game_setup"),
+    ).content
 
     # ## Protagonist and dungeon master system messages
 
@@ -246,7 +254,10 @@ def create_game():
             Do not add anything else."""
         ),
     ]
-    specified_quest = _creative_llm.invoke(quest_specifier_prompt).content
+    specified_quest = _creative_llm.invoke(
+        quest_specifier_prompt,
+        config=sigil_langchain_config(component="game_setup"),
+    ).content
 
     # ## Main Loop
 

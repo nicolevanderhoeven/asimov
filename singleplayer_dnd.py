@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 
 from game_state import GameState
 from rules_engine import DiceTrigger
+from sigil_setup import sigil_langchain_config
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,10 @@ def invoke_storyteller(
 
     for attempt in range(2):
         try:
-            response = llm.invoke(messages)
+            response = llm.invoke(
+                messages,
+                config=sigil_langchain_config(component="storyteller_single"),
+            )
             raw_text = response.content if hasattr(response, "content") else str(response)
             parsed = LLMTurnResponse.model_validate_json(_extract_json(raw_text))
             return parsed, retried

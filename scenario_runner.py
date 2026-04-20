@@ -43,6 +43,7 @@ from rules_engine import (
     conditions_impose_disadvantage,
     conditions_prevent_actions,
 )
+from sigil_setup import sigil_langchain_config
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("dnd.scenario")
@@ -510,6 +511,7 @@ class SceneRunner:
         self._last_mechanic_log: str = ""
         self._pending_approach_id: Optional[str] = None
         self._condition_save_dcs: dict[str, int] = {}
+        self._last_classifier_run_id: Optional[str] = None
 
         self._start_scenario_span()
         self._start_scene_span(self._state.scenario.current_scene)  # type: ignore[union-attr]
@@ -689,14 +691,22 @@ class SceneRunner:
             with tracer.start_as_current_span(
                 "input_classify", context=self._scene_ctx
             ) as span:
-                response = self._llm.invoke([
-                    SystemMessage(content=_INPUT_CLASSIFIER_SYSTEM),
-                    HumanMessage(
-                        content=_INPUT_CLASSIFIER_HUMAN.format(
-                            player_input=sanitized
-                        )
+                classifier_run_id = uuid.uuid4().hex
+                self._last_classifier_run_id = classifier_run_id
+                response = self._llm.invoke(
+                    [
+                        SystemMessage(content=_INPUT_CLASSIFIER_SYSTEM),
+                        HumanMessage(
+                            content=_INPUT_CLASSIFIER_HUMAN.format(
+                                player_input=sanitized
+                            )
+                        ),
+                    ],
+                    config=sigil_langchain_config(
+                        component="classifier",
+                        extra_metadata={"sigil.run.id": classifier_run_id},
                     ),
-                ])
+                )
                 content = (
                     response.content if hasattr(response, "content") else str(response)
                 )
@@ -706,6 +716,7 @@ class SceneRunner:
                 return label
         except Exception as exc:
             logger.warning("Input classifier failed, defaulting to 'action': %s", exc)
+            self._last_classifier_run_id = None
             return "action"
 
     def _answer_question(self, player_input: str) -> str:
@@ -819,10 +830,21 @@ class SceneRunner:
 
         try:
             from langchain_core.messages import HumanMessage, SystemMessage
-            response = self._llm.invoke([
-                SystemMessage(content=system),
-                HumanMessage(content=_GM_QA_HUMAN.format(player_input=player_input)),
-            ])
+            parent_metadata = (
+                {"sigil.run.parent_ids": [self._last_classifier_run_id]}
+                if self._last_classifier_run_id
+                else None
+            )
+            response = self._llm.invoke(
+                [
+                    SystemMessage(content=system),
+                    HumanMessage(content=_GM_QA_HUMAN.format(player_input=player_input)),
+                ],
+                config=sigil_langchain_config(
+                    component="gm_qa",
+                    extra_metadata=parent_metadata,
+                ),
+            )
             return response.content if hasattr(response, "content") else str(response)
         except Exception as exc:
             logger.warning("GM QA LLM failed, using fallback: %s", exc)
@@ -1595,10 +1617,21 @@ class SceneRunner:
 
         try:
             from langchain_core.messages import HumanMessage, SystemMessage
-            response = self._llm.invoke([
-                SystemMessage(content=system),
-                HumanMessage(content=human),
-            ])
+            parent_metadata = (
+                {"sigil.run.parent_ids": [self._last_classifier_run_id]}
+                if self._last_classifier_run_id
+                else None
+            )
+            response = self._llm.invoke(
+                [
+                    SystemMessage(content=system),
+                    HumanMessage(content=human),
+                ],
+                config=sigil_langchain_config(
+                    component="storyteller_scenario",
+                    extra_metadata=parent_metadata,
+                ),
+            )
             return response.content if hasattr(response, "content") else str(response)
         except Exception as exc:
             logger.warning("Storyteller LLM failed, using fallback: %s", exc)
