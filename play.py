@@ -3,6 +3,13 @@ import uuid
 
 from dotenv import load_dotenv
 from flask import Flask, abort, jsonify, request
+
+load_dotenv()
+
+from otel_setup import init as init_otel
+
+init_otel()
+
 from two_player_dnd import create_game
 
 from game_state import GameState, starter_character, STARTER_LOCATION
@@ -10,8 +17,6 @@ from loggingfw import log_session_event
 from rules_engine import RulesEngine
 from scenario_runner import ScenarioLoadError, ScenarioLoader, ScenarioValidationError, SceneRunner
 from turn_loop import TurnLoop
-
-load_dotenv()
 
 app = Flask(__name__)
 (

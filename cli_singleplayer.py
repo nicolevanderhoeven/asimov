@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from otel_setup import init as init_otel
+
+init_otel()
+
 
 def _stat_block(state) -> str:
     """Return a concise one-line stat summary to display before each prompt."""

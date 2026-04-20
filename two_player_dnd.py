@@ -12,9 +12,9 @@ def create_game():
     from langchain_anthropic import ChatAnthropic
 
     from dotenv import load_dotenv
-    import os
     import logging
     from loggingfw import CustomLogFW
+    from otel_setup import init as init_otel
     from sigil_setup import sigil_langchain_config
 
 
@@ -28,33 +28,7 @@ def create_game():
     logger.setLevel(logging.INFO)
     logger.error("Welcome to two-player D&D, the Asimov edition!")
 
-    # Initialize OpenLIT library
-
-    otlpEndpoint = os.getenv("OTLP_ENDPOINT")
-    otlpHeaders = os.getenv("OTLP_HEADERS")
-
-    from openlit import openlit
-    openlit.init(
-        application_name="two-player-dnd",
-        otlp_endpoint=otlpEndpoint,
-        otlp_headers="Authorization=Basic%20"+ otlpHeaders,
-    )
-
-    # Initialize the all evaluations detector
-    try:
-        all_evals_detector = openlit.evals.All(provider="anthropic", model="claude-sonnet-4-5")
-        result = all_evals_detector.measure(
-            prompt="Discuss the achievements of scientists.",
-            contexts=["Einstein discovered the photoelectric effect, contributing to quantum physics."],
-            text="Einstein won the Nobel Prize in 1969 for discovering black holes."
-        )
-        result_dict = result.dict() if hasattr(result, "dict") else result.model_dump()
-        for eval_type, details in result_dict.items():
-            if isinstance(details, dict) and details.get("verdict") == "no":
-                logger.error(f"{eval_type} check failed: {details.get('reason', 'No reason provided')}. Evaluation result: {result}")
-        logger.info(f"All evaluations passed successfully. Evaluation result: {result}")
-    except Exception as exc:
-        logger.warning(f"OpenLIT eval skipped: {exc}")
+    init_otel()
 
 
     # ## `DialogueAgent` class
@@ -80,8 +54,6 @@ def create_game():
 
         def reset(self):
             self.message_history = ["Here is the conversation so far."]
-
-        from openlit import trace
 
         def send(self) -> str:
             """

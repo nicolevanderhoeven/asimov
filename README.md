@@ -20,35 +20,43 @@ This repository consists of:
 
 ## Setup
 
-1. Deploy OpenLIT by following the instructions [on their docs page](https://docs.openlit.io/latest/quickstart-observability) to run and install it.
-2. Set up your Grafana instance or create a free [Grafana Cloud](https://nicole.to/kceu2025grafana) account.
-3. **Configure your credentials securely:**
-   - Copy `env.example` to `.env`: `cp env.example .env`
-   - Edit `.env` and fill in your actual credentials:
-     - `GRAFANA_CLOUD_USERNAME` - Your Grafana Cloud username
-     - `GRAFANA_CLOUD_PASSWORD` - Your Grafana Cloud password  
-     - `GRAFANA_CLOUD_OTLP_ENDPOINT` - Your OTLP endpoint URL
-     - `OTLP_ENDPOINT` - Local collector endpoint (usually `http://localhost:4318`)
-     - `OTLP_HEADERS` - Your auth headers for OpenLIT
-     - `OPENAI_API_KEY` - Your OpenAI API token from [here](https://platform.openai.com/settings/organization/api-keys)
-   - Copy `otel-config.template.yml` to `otel-config.yml`: `cp otel-config.template.yml otel-config.yml`
-   - Replace the environment variable placeholders in `otel-config.yml` with your actual values:
-     - Replace `${GRAFANA_CLOUD_USERNAME}` with your username
-     - Replace `${GRAFANA_CLOUD_PASSWORD}` with your password
-     - Replace `${GRAFANA_CLOUD_OTLP_ENDPOINT}` with your endpoint URL
-4. In Grafana, import the GenAI Observability dashboard by OpenLIT by following the instructions [here](https://nicole.to/kceu25aidash).
-5. Install k6 by following the instructions [here](https://nicole.to/asimovk6).
-6. **(Optional) Enable the Grafana Sigil SDK** for normalized LLM generation telemetry on top of OpenLIT. Sigil runs side-by-side with OpenLIT and exports generations directly to the Sigil ingest endpoint on Grafana Cloud.
-   - Install the SDK packages: `pip install sigil-sdk sigil-sdk-langchain` (or `pip install -r requirements.txt`).
-   - Add these keys to your `.env` (leave `GRAFANA_CLOUD_SIGIL_ENDPOINT` unset to disable Sigil):
-     - `GRAFANA_CLOUD_SIGIL_ENDPOINT` — e.g. `https://<your-stack>.grafana.net/api/v1/generations:export`
-     - `GRAFANA_CLOUD_INSTANCE_ID` — your Grafana Cloud instance ID (same value as `GRAFANA_CLOUD_USERNAME`; `GRAFANA_CLOUD_INSTANCE` is also accepted as an alias)
-     - `GRAFANA_CLOUD_API_KEY` — a Grafana Cloud API key with Sigil write scope
-     - (optional) `ASIMOV_AGENT_VERSION` — explicit agent version string. If unset, the app uses `git-<short-sha>` when running from a checkout, falling back to `1.0.0`.
-   - Generations flow directly from the app to the Sigil ingest endpoint using basic auth; OTel traces and metrics keep going through your existing collector. Open the **Sigil** app in Grafana Cloud to see conversations grouped by the `asimov-dnd` agent.
-   - **Component tags** split per-call cost/latency in the Sigil agent catalog: `game_setup`, `dialogue`, `classifier`, `gm_qa`, `storyteller_single`, `storyteller_scenario`. Filter on the `sigil.component` tag.
-   - **Verify request params are captured.** After your first conversations appear, open one in Sigil and confirm the generation payload has `gen_ai.request.temperature` and `gen_ai.request.max_tokens`. These are read from LangChain's invocation params by the adapter. If they're missing, file an issue against `sigil-sdk-langchain`.
-   - **Multi-agent DAG placeholder.** The scenario runner emits `sigil.run.id` on the classifier generation and `sigil.run.parent_ids` on the downstream `gm_qa` / `storyteller_scenario` generations, so once Sigil adds first-class DAG support (or a `with_parent_generation_ids()` context helper in the SDK) the links can be backfilled from metadata without code changes here.
+Telemetry is now Sigil-only. The Sigil SDK handles both normalized generation export **and** `gen_ai.*` OTel metrics/traces, so OpenLIT is no longer needed. Two small modules wire this up:
+
+- `sigil_setup.py` — singleton Sigil client + LangChain callback helper (generations).
+- `otel_setup.py` — bootstraps the global OTel `TracerProvider` + `MeterProvider` with OTLP/HTTP exporters. Sigil's histograms (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`, `gen_ai.client.time_to_first_token`, `gen_ai.client.tool_calls_per_operation`) and spans flow through these.
+
+### Steps
+
+1. Create a free [Grafana Cloud](https://nicole.to/kceu2025grafana) account (or use an existing stack) and enable the **Sigil** app on that stack.
+2. Install dependencies: `pip install -r requirements.txt`.
+3. Copy `env.example` to `.env`: `cp env.example .env`.
+4. Fill in `.env`:
+   - `ANTHROPIC_API_KEY` — your Anthropic API key.
+   - `OPENAI_API_KEY` — your OpenAI API key (if using OpenAI models).
+   - **OTel (metrics + traces):**
+     - `OTLP_ENDPOINT` — your stack's OTLP gateway, e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp`.
+     - `OTLP_HEADERS` — base64-encoded `"<instance_id>:<otlp_write_token>"`. The app prefixes `Basic ` automatically.
+   - **Sigil (generations):**
+     - `GRAFANA_CLOUD_SIGIL_ENDPOINT` — e.g. `https://sigil-prod-us-central-0.grafana.net/api/v1/generations:export`.
+     - `GRAFANA_CLOUD_INSTANCE_ID` — your Grafana Cloud instance ID (or set `GRAFANA_CLOUD_INSTANCE` as an alias).
+     - `GRAFANA_CLOUD_API_KEY` — a Grafana Cloud API key with Sigil-write scope.
+   - **Optional:**
+     - `ASIMOV_AGENT_VERSION` — explicit agent version. Defaults to `git-<short-sha>`, falling back to `1.0.0`.
+     - `SSL_CERT_FILE` — path to your CA bundle if your Python install lacks trust roots (common on python.org macOS builds). `certifi/cacert.pem` works.
+5. In the Sigil app, link `grafanacloud-<stack>-prom` as the Prometheus datasource and your stack's Tempo as the traces datasource. Without this, conversations will appear but rollup panels stay empty.
+6. Install k6 by following the instructions [here](https://nicole.to/asimovk6) if you want to run load tests.
+
+### What you get in the Sigil app
+
+- **Conversations** — every LLM call, grouped by `conversation_id`, with full inputs/outputs, tagged by `sigil.component` (`game_setup`, `dialogue`, `classifier`, `gm_qa`, `storyteller_single`, `storyteller_scenario`).
+- **Rollup metrics** — requests, error rate, p50/p95 latency, token consumption, tool calls per operation (from Sigil's `gen_ai.client.*` histograms).
+- **Traces** — one span per LLM call, with `gen_ai.*` semantic-convention attributes.
+- **DAG placeholder** — the scenario runner emits `sigil.run.id` on classifier generations and `sigil.run.parent_ids` on downstream `gm_qa` / `storyteller_scenario` generations, so multi-agent links can be rendered once Sigil exposes native DAG support.
+- **Request params** — `gen_ai.request.temperature` and `gen_ai.request.max_tokens` appear on each generation (read from LangChain's invocation params by `sigil-sdk-langchain`).
+
+### Time to first token (TTFT)
+
+TTFT only populates for streaming calls. This app uses `.invoke()` (non-streaming), so TTFT panels stay empty. Switch specific call sites to `.stream()` if you want TTFT coverage.
 
 ## Usage
 
@@ -73,8 +81,7 @@ If you're using the CLI version, type your input directly into the terminal afte
 
 ## Resources
 
-- [OpenLIT docs: Quickstart: AI Observability](https://docs.openlit.io/latest/quickstart-observability) for AI-specific instrumentation
-- [Grafana Sigil SDK](https://github.com/grafana/sigil-sdk) for normalized LLM generation telemetry on Grafana Cloud
+- [Grafana Sigil SDK](https://github.com/grafana/sigil-sdk) for normalized LLM generation telemetry, metrics, and traces on Grafana Cloud
 - [OpenTelemetry](https://opentelemetry.io/) for instrumentation
 - Free [Grafana Cloud](https://nicole.to/kceu2025grafana) for visibility
 - [Loki](https://nicole.to/lokirepo) for logs

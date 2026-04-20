@@ -13,6 +13,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from otel_setup import init as init_otel
+
+init_otel()
+
 
 def _stat_block(state) -> str:
     conditions = ", ".join(state.player.conditions) if state.player.conditions else "none"
