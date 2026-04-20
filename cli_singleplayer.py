@@ -43,7 +43,8 @@ def run_singleplayer():
         location=STARTER_LOCATION,
     )
 
-    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.7)
+    # streaming=True so Sigil records time_to_first_token for storyteller turns.
+    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.7, streaming=True)
     engine = RulesEngine()
     loop = TurnLoop(state, engine, llm)
 

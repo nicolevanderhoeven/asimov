@@ -706,6 +706,7 @@ class SceneRunner:
                         component="classifier",
                         extra_metadata={"sigil.run.id": classifier_run_id},
                     ),
+                    stream=False,
                 )
                 content = (
                     response.content if hasattr(response, "content") else str(response)

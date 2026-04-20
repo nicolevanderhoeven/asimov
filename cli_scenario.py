@@ -60,7 +60,10 @@ def run_scenario(scenario_name: str = "silent-relay") -> None:
         print(f"[ERROR] Scenario validation failed: {exc}")
         sys.exit(1)
 
-    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.7)
+    # streaming=True so Sigil tags narration generations as stream mode and
+    # records time_to_first_token. The classifier call overrides this with
+    # stream=False at the call site so its sync metrics stay clean.
+    llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.7, streaming=True)
     runner = SceneRunner(data, initial_state, RulesEngine(), llm)
 
     log_session_event(

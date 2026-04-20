@@ -237,7 +237,9 @@ def create_game():
 
     # ## Main Loop
 
-    _dialogue_llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.2)
+    # streaming=True so Sigil tags dialogue generations as stream mode and
+    # records time_to_first_token; DialogueAgent.send() uses .stream().
+    _dialogue_llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.2, streaming=True)
     protagonist = DialogueAgent(
         name=protagonist_name,
         system_message=protagonist_system_message,

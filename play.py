@@ -40,7 +40,11 @@ _scenario_runners: dict[str, SceneRunner] = {}
 def _get_llm():
     """Lazy-initialise the LangChain LLM used by the single-player storyteller."""
     from langchain_anthropic import ChatAnthropic
-    return ChatAnthropic(model="claude-sonnet-4-6", temperature=0.7)
+    # streaming=True so Sigil's framework handler tags generations with
+    # GenerationMode.STREAM → operation_name "streamText" → time_to_first_token
+    # histogram is recorded. Without it, .stream() still yields chunks but the
+    # generation is mis-tagged as SYNC and TTFT is silently dropped.
+    return ChatAnthropic(model="claude-sonnet-4-6", temperature=0.7, streaming=True)
 
 
 # ---------------------------------------------------------------------------
