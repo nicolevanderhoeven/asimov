@@ -195,7 +195,6 @@ class TestScenarioPlay:
 
         all_flags = {
             "hazard:haz_docking_shear": "passed",
-            "check:scene_1_approach:engineering": "passed",
             "check:scene_1_approach:science": "passed",
             "hazard:haz_power_arc": "passed",
             "hazard:haz_signal_feedback": "passed",
@@ -250,7 +249,6 @@ class TestScenarioFullRun:
 
         all_flags = {
             "hazard:haz_docking_shear": "passed",
-            "check:scene_1_approach:engineering": "passed",
             "check:scene_1_approach:science": "passed",
             "hazard:haz_power_arc": "passed",
             "hazard:haz_signal_feedback": "passed",

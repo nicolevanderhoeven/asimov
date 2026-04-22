@@ -6,7 +6,6 @@
       "objectives": ["Dock safely", "Assess external damage"],
       "obstacles": ["haz_docking_shear"],
       "checks": [
-        { "skill": "engineering", "dc": 13, "label": "Dock safely" },
         { "skill": "science", "dc": 10, "label": "Scan anomaly" }
       ],
       "next_scene": "scene_2_operations"

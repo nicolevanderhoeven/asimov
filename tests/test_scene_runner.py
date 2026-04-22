@@ -93,7 +93,6 @@ def _make_runner(seed: int = 42) -> SceneRunner:
 
 ALL_SCENE_1_2_FLAGS = {
     "hazard:haz_docking_shear": "passed",
-    "check:scene_1_approach:engineering": "passed",
     "check:scene_1_approach:science": "passed",
     "hazard:haz_power_arc": "passed",
     "hazard:haz_signal_feedback": "passed",
@@ -459,7 +458,6 @@ class TestEndOfTurnSaves:
         data, state = _load()
         scene_1_cleared = {
             "hazard:haz_docking_shear": "passed",
-            "check:scene_1_approach:engineering": "passed",
             "check:scene_1_approach:science": "passed",
         }
         state = state.model_copy(
@@ -542,7 +540,6 @@ class TestSceneChangeClearsConditions:
                     update={
                         "flags": {
                             "hazard:haz_docking_shear": "passed",
-                            "check:scene_1_approach:engineering": "passed",
                         }
                     }
                 ),
@@ -570,7 +567,6 @@ class TestSceneChangeClearsConditions:
                     update={
                         "flags": {
                             "hazard:haz_docking_shear": "passed",
-                            "check:scene_1_approach:engineering": "passed",
                         }
                     }
                 ),
@@ -1127,13 +1123,14 @@ class TestOpenCheck:
 
     def test_advances_to_scene_check_after_hazard(self):
         runner = _make_runner(seed=42)
-        # Resolve the hazard; next open check should be the scene 1 engineering check.
+        # Resolve the hazard; next open check should be the scene 1 science scan.
         runner.process_turn("I dock.")
         runner.process_turn("/roll")
         oc = runner.open_check
         assert oc is not None
         assert oc.kind == "check"
-        assert oc.skill in {"engineering", "science"}
+        assert oc.skill == "science"
+        assert oc.dc == 10
 
     def test_none_when_scene_fully_resolved(self):
         data, state = _load()
@@ -1144,7 +1141,6 @@ class TestOpenCheck:
                     update={
                         "flags": {
                             "hazard:haz_docking_shear": "passed",
-                            "check:scene_1_approach:engineering": "passed",
                             "check:scene_1_approach:science": "passed",
                         }
                     }

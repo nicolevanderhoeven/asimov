@@ -974,8 +974,8 @@ class SceneRunner:
     ) -> str:
         """Build a 5e-style roll summary, e.g.
 
-        ``Dock safely — Intelligence (Engineering) check, DC 13:
-        d20(14) +2 [INT] +2 [proficiency] = 18 — SUCCESS``
+        ``Scan anomaly — Intelligence (Science) check, DC 10:
+        d20(14) +2 [INT] +2 [proficiency] = 16 — SUCCESS``
         """
         from game_state import DiceResult as _DR  # avoid circular at module level
 
