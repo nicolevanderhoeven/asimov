@@ -18,8 +18,12 @@ class TestPositronicOperative:
 
     def test_default_skills(self):
         cls = PositronicOperative()
+        # Fighter-class skills.
         assert "athletics" in cls.default_skill_proficiencies
         assert "investigation" in cls.default_skill_proficiencies
+        # Starfleet Operations Training background skills.
+        assert "engineering" in cls.default_skill_proficiencies
+        assert "science" in cls.default_skill_proficiencies
 
     def test_ac_computation(self):
         cls = PositronicOperative()
@@ -63,6 +67,12 @@ class TestBuildDataCharacter:
         data = build_data_character()
         assert "athletics" in data.skill_proficiencies
         assert "investigation" in data.skill_proficiencies
+        assert "engineering" in data.skill_proficiencies
+        assert "science" in data.skill_proficiencies
+
+    def test_starfleet_ops_training_feature(self):
+        data = build_data_character()
+        assert "starfleet_ops_training" in data.class_features
 
     def test_saving_throw_proficiencies(self):
         data = build_data_character()

@@ -15,7 +15,7 @@
         "WIS": 10,
         "CHA": 8
       },
-      "skill_proficiencies": ["athletics", "investigation"],
+      "skill_proficiencies": ["athletics", "investigation", "engineering", "science"],
       "saving_throw_proficiencies": ["STR", "CON"],
       "conditions": [],
       "equipment": [
@@ -32,6 +32,10 @@
         "subroutine_focus": {
           "name": "Subroutine Focus: Defensive Protocols",
           "description": "+1 AC when wearing armor (included in AC)."
+        },
+        "starfleet_ops_training": {
+          "name": "Starfleet Operations Training",
+          "description": "Background grants proficiency in Science and Engineering."
         }
       }
     },

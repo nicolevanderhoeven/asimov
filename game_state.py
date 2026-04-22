@@ -150,7 +150,7 @@ def starter_character(name: str = "Data", character_class: str = "Positronic Ope
         level=1,
         proficiency_bonus=2,
         attributes={"STR": 15, "DEX": 12, "CON": 14, "INT": 15, "WIS": 10, "CHA": 8},
-        skill_proficiencies=["athletics", "investigation"],
+        skill_proficiencies=["athletics", "investigation", "engineering", "science"],
         saving_throw_proficiencies=["STR", "CON"],
         inventory=["phaser", "tricorder", "starfleet_uniform"],
         equipment=[
@@ -167,6 +167,10 @@ def starter_character(name: str = "Data", character_class: str = "Positronic Ope
             "subroutine_focus": {
                 "name": "Subroutine Focus: Defensive Protocols",
                 "description": "+1 AC when wearing armor (included in AC).",
+            },
+            "starfleet_ops_training": {
+                "name": "Starfleet Operations Training",
+                "description": "Background grants proficiency in Science and Engineering.",
             },
         },
         conditions=[],

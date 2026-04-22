@@ -113,10 +113,17 @@ class TestSkillModifiers:
         mod = p.skill_modifier("investigation", self.SKILL_ABILITIES)
         assert mod == 2 + 2  # INT +2 + proficiency +2
 
-    def test_non_proficient_science(self):
+    def test_proficient_science(self):
+        # Data gained Science proficiency via the Starfleet Operations Training background.
         p = starter_character()
         mod = p.skill_modifier("science", self.SKILL_ABILITIES)
-        assert mod == 2  # INT +2, no proficiency
+        assert mod == 2 + 2  # INT +2 + proficiency +2
+
+    def test_non_proficient_skill_without_prof(self):
+        # CHA-based command is not on Data's proficiency list.
+        p = starter_character()
+        mod = p.skill_modifier("command", self.SKILL_ABILITIES)
+        assert mod == -1  # CHA -1, no proficiency
 
 
 # ---------------------------------------------------------------------------

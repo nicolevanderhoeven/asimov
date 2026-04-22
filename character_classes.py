@@ -23,7 +23,11 @@ class PositronicOperative:
     skill_proficiency_options: tuple[str, ...] = (
         "athletics", "investigation", "insight", "science", "engineering",
     )
-    default_skill_proficiencies: tuple[str, ...] = ("athletics", "investigation")
+    # Two from the Fighter class list (athletics, investigation) + two from the
+    # "Starfleet Operations Training" background (engineering, science).
+    default_skill_proficiencies: tuple[str, ...] = (
+        "athletics", "investigation", "engineering", "science",
+    )
 
     fighting_style: str = "Subroutine Focus: Defensive Protocols"
     fighting_style_ac_bonus: int = 1
@@ -87,6 +91,10 @@ def build_data_character() -> PlayerState:
             "subroutine_focus": {
                 "name": cls.fighting_style,
                 "description": "+1 AC when wearing armor (included in AC).",
+            },
+            "starfleet_ops_training": {
+                "name": "Starfleet Operations Training",
+                "description": "Background grants proficiency in Science and Engineering.",
             },
         },
         conditions=[],

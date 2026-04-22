@@ -1151,6 +1151,49 @@ class TestOpenCheck:
         assert runner.open_check is None
 
 
+class TestProficiencyInRollLine:
+    def test_engineering_roll_shows_proficiency_tag(self):
+        # Data is now proficient in engineering → docking hazard roll line
+        # should include "+2 [proficiency]" alongside the INT modifier.
+        runner = _make_runner(seed=42)
+        runner.process_turn("I dock.")
+        runner.process_turn("/roll")
+        assert "[proficiency]" in runner.last_mechanic_log
+        assert "[INT]" in runner.last_mechanic_log
+
+    def test_science_roll_shows_proficiency_tag(self):
+        # Data is now proficient in science → scan check should include it too.
+        runner = _make_runner(seed=42)
+        runner.process_turn("I dock.")
+        runner.process_turn("/roll")  # hazard
+        runner.process_turn("I scan.")
+        runner.process_turn("/roll")  # science check
+        assert "[proficiency]" in runner.last_mechanic_log
+
+    def test_medical_roll_omits_proficiency_tag(self):
+        # Data is NOT proficient in medical → tag should be absent.
+        data, state = _load()
+        state = state.model_copy(
+            update={
+                "scenario": state.scenario.model_copy(  # type: ignore[union-attr]
+                    update={
+                        "current_scene": "scene_2_operations",
+                        "flags": {
+                            "hazard:haz_power_arc": "passed",
+                            "hazard:haz_signal_feedback": "passed",
+                            "check:scene_2_operations:science": "passed",
+                            "check:scene_2_operations:engineering": "passed",
+                        },
+                    }
+                )
+            }
+        )
+        runner = SceneRunner(data, state, RulesEngine(seed=42), _stub_llm())
+        runner.process_turn("I triage.")
+        runner.process_turn("/roll")
+        assert "[proficiency]" not in runner.last_mechanic_log
+
+
 class TestSkillAbilitiesAccessor:
     def test_exposes_scenario_mapping(self):
         runner = _make_runner()
