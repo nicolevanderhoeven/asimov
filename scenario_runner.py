@@ -136,6 +136,19 @@ class HazardDef(BaseModel):
     fail_effect: str
 
 
+class OpenCheck(BaseModel):
+    """Read-only snapshot of the currently-pending mechanic.
+
+    Returned by ``SceneRunner.open_check`` so UI layers (CLI, web, etc.)
+    can describe what the player owes the table without mutating state.
+    """
+    kind: str  # "hazard" | "check" | "approach"
+    skill: str
+    ability: str  # abbrev, e.g. "INT"
+    dc: int
+    label: Optional[str] = None
+
+
 class ClueDef(BaseModel):
     id: str
     location: str
@@ -542,6 +555,68 @@ class SceneRunner:
         """The detailed 5e mechanic log from the most recent turn (dice rolls, DCs, conditions)."""
         return self._last_mechanic_log
 
+    @property
+    def skill_abilities(self) -> dict[str, str]:
+        """Mapping of skill → governing ability abbrev (e.g. ``{"medical": "WIS"}``)."""
+        return dict(self._skill_abilities)
+
+    @property
+    def open_check(self) -> Optional[OpenCheck]:
+        """The currently pending mechanic, or ``None`` if the scene has nothing queued.
+
+        Precedence mirrors ``_resolve_next_mechanic``: hazards → scene checks →
+        approach roll (only once an approach has been selected). Read-only.
+        """
+        if self._state.scenario is None:
+            return None
+        scene = self._data.scenes.get(self._state.scenario.current_scene)
+        if scene is None:
+            return None
+        flags = self._state.scenario.flags
+
+        for hazard_id in scene.obstacles:
+            if f"hazard:{hazard_id}" not in flags:
+                h = self._data.hazards[hazard_id]
+                return OpenCheck(
+                    kind="hazard",
+                    skill=h.check,
+                    ability=self._skill_abilities.get(h.check, "INT").upper(),
+                    dc=h.dc,
+                    label=h.name,
+                )
+
+        for check in scene.checks:
+            if f"check:{scene.id}:{check.skill}" not in flags:
+                return OpenCheck(
+                    kind="check",
+                    skill=check.skill,
+                    ability=self._skill_abilities.get(check.skill, "INT").upper(),
+                    dc=check.dc,
+                    label=check.label,
+                )
+
+        if (
+            scene.approaches
+            and "approach" not in flags
+            and self._pending_approach_id is not None
+        ):
+            approach_def = next(
+                (a for a in scene.approaches if a.id == self._pending_approach_id),
+                None,
+            )
+            if approach_def is not None and not approach_def.combat:
+                primary_skill = approach_def.skills[0] if approach_def.skills else "command"
+                dc = approach_def.dc or 13
+                return OpenCheck(
+                    kind="approach",
+                    skill=primary_skill,
+                    ability=self._skill_abilities.get(primary_skill, "INT").upper(),
+                    dc=dc,
+                    label=f"{approach_def.id.title()} approach",
+                )
+
+        return None
+
     def enter_scene(self, scene_id: str) -> GameState:
         """Transition to *scene_id*, emit a scene span, update state."""
         assert self._state.scenario is not None
@@ -878,6 +953,22 @@ class SceneRunner:
         ability_full = ABILITY_FULL_NAMES.get(ability_abbr, ability_abbr)
         return f"{ability_full} ({skill.title()})"
 
+    @staticmethod
+    def _a_or_an(word: str) -> str:
+        """Heuristic article picker — good enough for ability names (Intelligence)."""
+        return "an" if word[:1].lower() in "aeiou" else "a"
+
+    def _format_wrong_skill_error(
+        self, expected_skill: str, expected_dc: int, typed_skill: str,
+    ) -> str:
+        """Unified error when the player rolls a different skill than the open check."""
+        name = self._format_5e_check_name(expected_skill)
+        return (
+            f"Open check: {name} DC {expected_dc}.\n"
+            f"You typed `/roll {typed_skill}`. Type `/roll` to accept the open check, "
+            f"or describe a different action."
+        )
+
     def _format_roll_result(
         self, skill: str, dc: int, result: "DiceResult", label: Optional[str] = None,
     ) -> str:
@@ -934,18 +1025,20 @@ class SceneRunner:
 
     def _format_hazard_prompt(self, hazard: "HazardDef") -> str:
         check_name = self._format_5e_check_name(hazard.check)
+        article = self._a_or_an(check_name)
         return (
             f"Hazard: {hazard.name}\n"
-            f"Make a {check_name} check (DC {hazard.dc}).\n"
+            f"Make {article} {check_name} check (DC {hazard.dc}).\n"
             f"Type `/roll {hazard.check}` or `/roll` to attempt it."
         )
 
     def _format_check_prompt(self, check: "CheckDef") -> str:
         check_name = self._format_5e_check_name(check.skill)
-        label = check.label or check.skill.title()
+        article = self._a_or_an(check_name)
+        header = f"{check.label}\n" if check.label else ""
         return (
-            f"{label}\n"
-            f"Make a {check_name} check (DC {check.dc}).\n"
+            f"{header}"
+            f"Make {article} {check_name} check (DC {check.dc}).\n"
             f"Type `/roll {check.skill}` or `/roll` to attempt it."
         )
 
@@ -977,9 +1070,10 @@ class SceneRunner:
         self, approach_def: "ApproachDef", skill: str, dc: int,
     ) -> str:
         check_name = self._format_5e_check_name(skill)
+        article = self._a_or_an(check_name)
         return (
             f"{approach_def.id.title()} approach selected.\n"
-            f"Make a {check_name} check (DC {dc}).\n"
+            f"Make {article} {check_name} check (DC {dc}).\n"
             f"Type `/roll {skill}` or `/roll` to attempt it."
         )
 
@@ -1015,10 +1109,8 @@ class SceneRunner:
                 hazard = self._data.hazards[hazard_id]
                 if roll_cmd is not None:
                     if roll_cmd and roll_cmd != hazard.check:
-                        expected_name = self._format_5e_check_name(hazard.check)
-                        return (
-                            f"This hazard requires a {expected_name} check. "
-                            f"Type `/roll {hazard.check}` or `/roll`."
+                        return self._format_wrong_skill_error(
+                            hazard.check, hazard.dc, roll_cmd,
                         ), self._state, False
                     summary, state = self._resolve_hazard(hazard_id)
                     return summary, state, True
@@ -1030,10 +1122,8 @@ class SceneRunner:
             if flag_key not in flags:
                 if roll_cmd is not None:
                     if roll_cmd and roll_cmd != check.skill:
-                        expected_name = self._format_5e_check_name(check.skill)
-                        return (
-                            f"This check requires a {expected_name} check. "
-                            f"Type `/roll {check.skill}` or `/roll`."
+                        return self._format_wrong_skill_error(
+                            check.skill, check.dc, roll_cmd,
                         ), self._state, False
                     summary, state = self._resolve_check(scene.id, check)
                     return summary, state, True
@@ -1048,11 +1138,10 @@ class SceneRunner:
                 )
                 if roll_cmd is not None:
                     primary_skill = approach_def.skills[0] if approach_def.skills else "command"
+                    dc = approach_def.dc or 13
                     if roll_cmd and roll_cmd != primary_skill:
-                        expected_name = self._format_5e_check_name(primary_skill)
-                        return (
-                            f"This approach requires a {expected_name} check. "
-                            f"Type `/roll {primary_skill}` or `/roll`."
+                        return self._format_wrong_skill_error(
+                            primary_skill, dc, roll_cmd,
                         ), self._state, False
                     approach_id = self._pending_approach_id
                     self._pending_approach_id = None
@@ -1119,7 +1208,7 @@ class SceneRunner:
 
         passed = result.outcome == "success"
         flag_key = f"check:{scene_id}:{check.skill}"
-        label = check.label or check.skill.title()
+        label = check.label  # None → the roll line omits the "<label> — " prefix
 
         new_flags = {**self._state.scenario.flags, flag_key: "passed" if passed else "failed"}
         self._state = self._state.model_copy(

@@ -1108,3 +1108,132 @@ class TestMetaHistory:
         runner.process_turn("Q3?")
         assert len(runner.state.meta_history) == 3
         assert [e.player_input for e in runner.state.meta_history] == ["Q1?", "Q2?", "Q3?"]
+
+
+# ---------------------------------------------------------------------------
+# Open-check accessor + wrong-skill error + label fallback
+# ---------------------------------------------------------------------------
+
+class TestOpenCheck:
+    def test_returns_hazard_first(self):
+        runner = _make_runner(seed=42)
+        oc = runner.open_check
+        assert oc is not None
+        assert oc.kind == "hazard"
+        assert oc.skill == "engineering"
+        assert oc.ability == "INT"
+        assert oc.dc == 13
+        assert oc.label == "Docking Hazard"
+
+    def test_advances_to_scene_check_after_hazard(self):
+        runner = _make_runner(seed=42)
+        # Resolve the hazard; next open check should be the scene 1 engineering check.
+        runner.process_turn("I dock.")
+        runner.process_turn("/roll")
+        oc = runner.open_check
+        assert oc is not None
+        assert oc.kind == "check"
+        assert oc.skill in {"engineering", "science"}
+
+    def test_none_when_scene_fully_resolved(self):
+        data, state = _load()
+        # Seed flags so every hazard/check in scene 1 is already resolved.
+        state = state.model_copy(
+            update={
+                "scenario": state.scenario.model_copy(
+                    update={
+                        "flags": {
+                            "hazard:haz_docking_shear": "passed",
+                            "check:scene_1_approach:engineering": "passed",
+                            "check:scene_1_approach:science": "passed",
+                        }
+                    }
+                )
+            }
+        )
+        runner = SceneRunner(data, state, RulesEngine(seed=42), _stub_llm())
+        assert runner.open_check is None
+
+
+class TestSkillAbilitiesAccessor:
+    def test_exposes_scenario_mapping(self):
+        runner = _make_runner()
+        abilities = runner.skill_abilities
+        assert abilities["medical"] == "WIS"
+        assert abilities["command"] == "CHA"
+        assert abilities["engineering"] == "INT"
+
+    def test_returns_a_copy(self):
+        runner = _make_runner()
+        abilities = runner.skill_abilities
+        abilities["bogus"] = "ZZZ"
+        # Mutating the returned dict must not poison the runner's internal map.
+        assert "bogus" not in runner.skill_abilities
+
+
+class TestWrongSkillError:
+    def test_hazard_wrong_skill_uses_unified_error(self):
+        runner = _make_runner(seed=42)
+        runner.process_turn("I dock.")  # prompts for hazard
+        narrative, _ = runner.process_turn("/roll medical")
+        assert "Open check:" in narrative
+        assert "Intelligence (Engineering)" in narrative
+        assert "DC 13" in narrative
+        assert "/roll medical" in narrative
+        assert "describe a different action" in narrative
+
+    def test_correct_article_for_intelligence(self):
+        # "Make an Intelligence (...) check", not "Make a Intelligence (...) check".
+        runner = _make_runner(seed=42)
+        narrative, _ = runner.process_turn("I dock.")
+        assert "Make an Intelligence (Engineering)" in narrative
+
+    def test_correct_article_for_consonant_ability(self):
+        # Wisdom starts with a consonant → "Make a Wisdom (...) check".
+        data, state = _load()
+        # Fast-forward to scene 2's medical check (WIS).
+        state = state.model_copy(
+            update={
+                "scenario": state.scenario.model_copy(
+                    update={
+                        "current_scene": "scene_2_operations",
+                        "flags": {
+                            "hazard:haz_power_arc": "passed",
+                            "hazard:haz_signal_feedback": "passed",
+                            "check:scene_2_operations:science": "passed",
+                            "check:scene_2_operations:engineering": "passed",
+                        },
+                    }
+                )
+            }
+        )
+        runner = SceneRunner(data, state, RulesEngine(seed=42), _stub_llm())
+        narrative, _ = runner.process_turn("I triage.")
+        assert "Make a Wisdom (Medical)" in narrative
+
+
+class TestCheckLabelFallback:
+    def test_unlabeled_check_prompt_omits_redundant_header(self):
+        # scene_2_operations' third check (medical, DC 10) has no label.
+        data, state = _load()
+        state = state.model_copy(
+            update={
+                "scenario": state.scenario.model_copy(
+                    update={
+                        "current_scene": "scene_2_operations",
+                        "flags": {
+                            "hazard:haz_power_arc": "passed",
+                            "hazard:haz_signal_feedback": "passed",
+                            "check:scene_2_operations:science": "passed",
+                            "check:scene_2_operations:engineering": "passed",
+                        },
+                    }
+                )
+            }
+        )
+        runner = SceneRunner(data, state, RulesEngine(seed=42), _stub_llm())
+        narrative, _ = runner.process_turn("I triage.")
+        # The prompt should NOT lead with a bare skill-name header like "Medical\n".
+        first_line = narrative.splitlines()[0]
+        assert first_line.startswith("Make ")
+        assert "Medical" not in first_line or "(Medical)" in first_line
