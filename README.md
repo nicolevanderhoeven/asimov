@@ -9,21 +9,23 @@ This is a repository for the slides and code for the talk "Asimov's Zeroth Law o
 
 This repository consists of:
 - A D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
-- The OTel configuration, including authentication, in `otel-config.yml`
-- The Docker compose configuration to run the OTel Collector, in `docker-compose.yml`.
 - A k6 test to run against the AI app, in `test.js`.
 - A custom logging framework, in `loggingfw.py`.
 - A CLI wrapper for the game, in `cli_play.py`.
 - (new) A k6 test that uses AI to test the AI app, in `test-ai.js`.
+- (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
 ![A diagram of the architecture of the AI app, showing the D&D game, the OpenTelemetry Collector, and Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20Dutch%20Cloud%20Native%20Day%202025.svg)
 
 ## Setup
 
-Telemetry is now Sigil-only. The Sigil SDK handles both normalized generation export **and** `gen_ai.*` OTel metrics/traces, so OpenLIT is no longer needed. Two small modules wire this up:
+Telemetry is Sigil + OTel. The Sigil SDK handles normalized generation export, and OTel (configured by this app) handles `gen_ai.*` metrics, traces, and structured logs. OpenLIT is no longer needed. Three small modules wire this up:
 
 - `sigil_setup.py` — singleton Sigil client + LangChain callback helper (generations).
 - `otel_setup.py` — bootstraps the global OTel `TracerProvider` + `MeterProvider` with OTLP/HTTP exporters. Sigil's histograms (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`, `gen_ai.client.time_to_first_token`, `gen_ai.client.tool_calls_per_operation`) and spans flow through these.
+- `loggingfw.py` — exports structured logs (turn / session events) over OTLP/HTTP using the same `OTLP_ENDPOINT` / `OTLP_HEADERS` env vars.
+
+By default all three signals (traces, metrics, logs) go **directly** to Grafana Cloud's OTLP gateway. A local OTel Collector is **not required**. If you want to route through a Collector — for buffering, sampling, redaction, or fan-out — see the optional setup in [`collector/`](collector/).
 
 ### Steps
 
@@ -61,9 +63,10 @@ TTFT only populates for streaming calls. This app uses `.invoke()` (non-streamin
 ## Usage
 
 To replicate my setup as I demonstrate in the talk:
-1. Start the Docker daemon and deploy the OTel Collector by running: `docker compose up -d`.
-2. Run the D&D app by running: `python play.py`. Alternatively, you can run the CLI version of the game by running `python cli_play.py`.
-3. Interact with the game.
+1. Run the D&D app by running: `python play.py`. Alternatively, you can run the CLI version of the game by running `python cli_play.py`.
+2. Interact with the game.
+
+> **Note**: previous versions of this README told you to `docker compose up -d` first to start a local OTel Collector. That step is no longer required — telemetry now flows directly to Grafana Cloud via OTLP. The Collector is still available as an opt-in path (see [`collector/README.md`](collector/README.md)).
 
 If you're using the Flask app:
     - You can start the game by sending this to the command line: `curl -X GET http://localhost:5050/`.
@@ -76,8 +79,8 @@ If you're using the Flask app:
 
 If you're using the CLI version, type your input directly into the terminal after the welcome message. Type `exit` or `quit` to end the game.
 
-4. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
-5. Run the k6 test using `k6 run test.js`.
+3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
+4. Run the k6 test using `k6 run test.js`.
 
 ## Resources
 

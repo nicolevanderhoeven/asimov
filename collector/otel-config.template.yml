@@ -1,0 +1,44 @@
+# OpenTelemetry Collector Configuration Template
+#
+# Copy this file to `otel-config.yml` (in this same directory) before running
+# `docker compose up -d`. The Collector reads `GRAFANA_CLOUD_OTLP_ENDPOINT`
+# and `GRAFANA_CLOUD_OTLP_HEADERS` from its environment (passed through by
+# `docker-compose.yml`'s `env_file: ../.env`).
+#
+# `GRAFANA_CLOUD_OTLP_HEADERS` is the base64-encoded "<instance_id>:<token>"
+# string — same format as `OTLP_HEADERS` used by the app when exporting
+# directly. The Collector prepends "Basic " automatically below.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+exporters:
+  otlphttp/grafana_cloud:
+    endpoint: "${env:GRAFANA_CLOUD_OTLP_ENDPOINT}"
+    headers:
+      Authorization: "Basic ${env:GRAFANA_CLOUD_OTLP_HEADERS}"
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/grafana_cloud]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/grafana_cloud]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/grafana_cloud]

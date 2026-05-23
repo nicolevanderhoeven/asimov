@@ -20,8 +20,10 @@ def create_game():
 
     load_dotenv()  # Load .env file
 
-    # Set up logging
-    logFW = CustomLogFW(service_name='main_app', instance_id='1')
+    # Set up logging — service.name and instance.id match otel_setup.py so
+    # logs, traces, and metrics correlate under the same resource attributes.
+    import os as _os
+    logFW = CustomLogFW(service_name='asimov-dnd', instance_id=_os.getenv('HOSTNAME', 'local'))
     handler= logFW.setup_logging()
     logger = logging.getLogger()
     logger.addHandler(handler)
