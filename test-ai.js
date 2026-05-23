@@ -13,6 +13,10 @@ const anthropicApiKey = __ENV.ANTHROPIC_API_KEY; // Set via -e ANTHROPIC_API_KEY
 export const options = {
   vus: 5, // Reduced from 10 to be more rate-limit friendly
   duration: '3m',
+  cloud: {
+    projectID: 7624575,
+    name: 'Asimov AI hallucination test',
+  },
   thresholds: {
     http_req_failed: ['rate<0.05'], // Relaxed from 1% to 5% due to potential API rate limits
     http_req_duration: ['p(95)<5000'], // Increased to 5s to account for Anthropic API delays
