@@ -40,6 +40,50 @@ MAX_TRANSCRIPT_ENTRIES = 16
 # party to react to yet (Anthropic requires a non-empty user message).
 _PRIMER_USER_TEXT = "Begin the adventure."
 
+
+def build_storyteller_system_message(
+    game_description: str,
+    storyteller_name: str,
+    protagonist_name: str,
+    storyteller_description: str,
+) -> SystemMessage:
+    """Construct the storyteller's base system prompt.
+
+    The storyteller is a third-person narrator, not a character: no body,
+    no voice, no first-person speech, and no theatrical pauses. Brevity
+    is enforced (1–3 sentences) so the player isn't drowned in atmosphere
+    on every turn.
+    """
+    return SystemMessage(
+        content=(
+            f"""{game_description}
+You are the storyteller, {storyteller_name}. {protagonist_name} is the player.
+Storyteller description (for tone reference only, do not roleplay it): {storyteller_description}.
+{protagonist_name} will propose actions; describe what happens as a result.
+
+NARRATOR ROLE — read carefully:
+- You are a third-person narrator. You are NOT a character in the story.
+- You have no body, voice, gestures, expressions, pauses, or personality.
+- Never use first-person pronouns ('I', 'me', 'my', 'we', 'us', 'our').
+- Never narrate your own actions (e.g. "I gesture", "I pause", "I let the word settle").
+- Never wrap actions in '*' — you have no actions to describe.
+- Describe the world, events, NPCs, and {protagonist_name} from the outside.
+- When addressing {protagonist_name}, use second-person pronouns ('you', 'your').
+- Never speak from the perspective of {protagonist_name}.
+
+STYLE:
+- Be concise: 1–3 short sentences per turn.
+- Be plain and direct. No drama, purple prose, or atmospheric padding.
+- Do not restate what the player just said. Do not stall.
+- State facts and consequences; let the player infer mood.
+
+TURN END:
+- Always finish with exactly this line on its own: 'It is your turn, {protagonist_name}.'
+- Do not add anything after that line.
+"""
+        )
+    )
+
 _TRANSCRIPT_HEADER = "CONVERSATION SO FAR:"
 _TRANSCRIPT_FOOTER_TEMPLATE = (
     "Now continue the story in response to {other}'s latest action above. "
@@ -258,23 +302,11 @@ def create_game():
         )
     )
 
-    storyteller_system_message = SystemMessage(
-        content=(
-            f"""{game_description}
-    Never forget you are the storyteller, {storyteller_name}, and I am the protagonist, {protagonist_name}. 
-    Your character description is as follows: {storyteller_description}.
-    I will propose actions I plan to take and you will explain what happens when I take those actions.
-    Speak in the first person from the perspective of {storyteller_name}.
-    When you refer to me, use second person pronouns like 'you' and 'your'.
-    For describing your own body movements, wrap your description in '*'.
-    Do not change roles!
-    Do not speak from the perspective of {protagonist_name}.
-    Do not forget to finish speaking by saying, 'It is your turn, {protagonist_name}.'
-    Do not add anything else.
-    Remember you are the storyteller, {storyteller_name}.
-    Stop speaking the moment you finish speaking from your perspective.
-    """
-        )
+    storyteller_system_message = build_storyteller_system_message(
+        game_description=game_description,
+        storyteller_name=storyteller_name,
+        protagonist_name=protagonist_name,
+        storyteller_description=storyteller_description,
     )
 
     quest_specifier_prompt = [

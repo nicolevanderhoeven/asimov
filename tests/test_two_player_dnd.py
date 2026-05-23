@@ -22,6 +22,7 @@ from two_player_dnd import (
     MAX_TRANSCRIPT_ENTRIES,
     DialogueAgent,
     DialogueSimulator,
+    build_storyteller_system_message,
 )
 
 
@@ -322,3 +323,90 @@ class TestDialogueSimulatorFlow:
         system_content = msgs[0].content
         assert "Response 1." in system_content
         assert "Response 4." in system_content
+
+
+class TestStorytellerSystemMessage:
+    """The storyteller is a third-person narrator, not a character.
+
+    Regression: previously the prompt told the DM to "speak in the first
+    person" and to "wrap body movements in '*'", which led to verbose,
+    self-narrating responses like "*I pause with the serene patience of
+    a narrator...*". The narrator must have no body, no voice, no
+    first-person pronouns, and must keep turns short.
+    """
+
+    @pytest.fixture
+    def msg(self) -> str:
+        return build_storyteller_system_message(
+            game_description="Test game description.",
+            storyteller_name="Dungeon Master",
+            protagonist_name="Data",
+            storyteller_description="A neutral cosmic narrator.",
+        ).content
+
+    def test_returns_system_message(self):
+        result = build_storyteller_system_message(
+            game_description="Test game.",
+            storyteller_name="Dungeon Master",
+            protagonist_name="Data",
+            storyteller_description="A narrator.",
+        )
+        assert isinstance(result, SystemMessage)
+
+    def test_includes_role_and_player_names(self, msg: str):
+        assert "Dungeon Master" in msg
+        assert "Data" in msg
+
+    def test_no_body_movement_wrapping_instruction(self, msg: str):
+        """The '*body movements*' rule was the primary driver of the
+        narrator-as-character behavior. It must not return."""
+        assert "body movement" not in msg.lower()
+        assert "wrap your description in '*'" not in msg
+
+    def test_no_first_person_speech_license(self, msg: str):
+        """The old prompt said 'Speak in the first person from the
+        perspective of {storyteller_name}'. That license must be gone."""
+        assert "Speak in the first person" not in msg
+        assert "first person from the perspective" not in msg
+
+    def test_explicitly_bans_first_person_pronouns(self, msg: str):
+        lowered = msg.lower()
+        assert "first-person" in lowered or "first person" in lowered
+        assert "'i'" in lowered
+        assert "'me'" in lowered
+        assert "'my'" in lowered
+
+    def test_enforces_third_person_narrator_role(self, msg: str):
+        lowered = msg.lower()
+        assert "third-person narrator" in lowered or "third person narrator" in lowered
+        assert "not a character" in lowered
+
+    def test_enforces_brevity(self, msg: str):
+        lowered = msg.lower()
+        assert "1–3" in msg or "1-3" in msg
+        assert "concise" in lowered or "short sentences" in lowered
+
+    def test_keeps_turn_end_signoff(self, msg: str):
+        assert "It is your turn, Data." in msg
+
+    def test_still_uses_second_person_for_player(self, msg: str):
+        lowered = msg.lower()
+        assert "second-person" in lowered or "second person" in lowered
+        assert "'you'" in lowered
+
+    def test_does_not_speak_from_protagonist_perspective(self, msg: str):
+        assert "from the perspective of Data" in msg
+
+    def test_protagonist_name_substitutes_everywhere(self):
+        """Smoke test: the helper substitutes both names cleanly."""
+        msg = build_storyteller_system_message(
+            game_description="Other game.",
+            storyteller_name="Oracle",
+            protagonist_name="Riker",
+            storyteller_description="An oracle.",
+        ).content
+        assert "Oracle" in msg
+        assert "Riker" in msg
+        assert "It is your turn, Riker." in msg
+        assert "Dungeon Master" not in msg
+        assert "Data" not in msg
