@@ -3,43 +3,56 @@
 
 # # Two-Player Dungeons & Dragons
 #
-# Each ``DialogueAgent`` stores its own conversation as a list of LangChain
-# role-tagged messages (``HumanMessage`` / ``AIMessage``) from that agent's
-# point of view, rather than concatenating every line into one giant user
-# prompt. The role mapping is:
+# Each ``DialogueAgent`` tracks the conversation as a list of
+# ``(speaker, content)`` tuples and, on each ``send()``, sends the LLM
+# exactly two messages:
 #
-#   * messages this agent itself spoke      → ``AIMessage``
-#   * messages any other party spoke        → ``HumanMessage``
+#   1. a ``SystemMessage`` containing the agent's base character/behaviour
+#      prompt followed by a ``CONVERSATION SO FAR:`` block with the running
+#      transcript baked in;
+#   2. a single ``HumanMessage`` containing only the latest line spoken by
+#      the other party (the line this turn is responding to).
 #
-# That makes Sigil (and any other LLM observability layer) see the actual
-# per-turn player input rather than the full transcript-as-user-message.
+# This shape is what makes Sigil's per-generation panes meaningful: the
+# user input field shows only the latest player action (not the cumulative
+# history), and the assistant output shows only this turn's response. The
+# model still sees the full prior context — it just lives in the system
+# slot instead of being scattered across alternating role messages.
+#
+# Trade-off: Anthropic prompt-prefix caching cannot reuse the system
+# prefix across turns because the embedded transcript grows on every
+# turn. We accept that cost to keep Sigil traces readable per turn.
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Optional
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from sigil_setup import sigil_langchain_config
 
 logger = logging.getLogger(__name__)
 
-MAX_HISTORY_MESSAGES = 16
+MAX_TRANSCRIPT_ENTRIES = 16
 
-# Anthropic requires the first message in a request to be from the user.
-# If an agent's stored history starts with one of its own utterances (e.g.
-# the storyteller's quest opener), we prepend this transient primer only
-# on the wire — it is NOT stored in message_history.
-_PRIMER_USER_MESSAGE = HumanMessage(content="Begin the adventure.")
+# Sent as the HumanMessage when the agent has no message from the other
+# party to react to yet (Anthropic requires a non-empty user message).
+_PRIMER_USER_TEXT = "Begin the adventure."
+
+_TRANSCRIPT_HEADER = "CONVERSATION SO FAR:"
+_TRANSCRIPT_FOOTER_TEMPLATE = (
+    "Now continue the story in response to {other}'s latest action above. "
+    "Stay in character as {self_name}."
+)
 
 
 class DialogueAgent:
     """A single conversational role in the two-player simulator.
 
-    The agent tracks its own view of the conversation as a list of
-    ``BaseMessage`` objects, with the agent's own utterances as
-    ``AIMessage`` and everyone else's as ``HumanMessage``.
+    Internally keeps the conversation as ``(speaker_name, content)`` tuples
+    so that on each turn we can render the history into the system prompt
+    and send only the latest counterpart utterance as the ``HumanMessage``.
     """
 
     def __init__(
@@ -54,42 +67,66 @@ class DialogueAgent:
         self.reset()
 
     def reset(self) -> None:
-        self.message_history: list[BaseMessage] = []
+        self.transcript: list[tuple[str, str]] = []
 
-    def _append(self, message: BaseMessage) -> None:
-        """Append, merging consecutive same-role messages.
-
-        Anthropic rejects two consecutive ``user`` or two consecutive
-        ``assistant`` messages. Under the normal DM↔player flow this can't
-        happen, but defending here keeps the agent robust to callers that
-        inject two turns from the same speaker back-to-back.
-        """
-        if self.message_history and type(self.message_history[-1]) is type(message):
-            previous = self.message_history[-1]
-            merged_content = f"{previous.content}\n\n{message.content}"
-            self.message_history[-1] = type(message)(content=merged_content)
-        else:
-            self.message_history.append(message)
-
-    def _trim_history(self) -> None:
-        if len(self.message_history) <= MAX_HISTORY_MESSAGES:
+    def _trim_transcript(self) -> None:
+        if len(self.transcript) <= MAX_TRANSCRIPT_ENTRIES:
             return
-        trimmed = self.message_history[-MAX_HISTORY_MESSAGES:]
-        while trimmed and not isinstance(trimmed[0], HumanMessage):
-            trimmed.pop(0)
-        self.message_history = trimmed
+        before = len(self.transcript)
+        self.transcript = self.transcript[-MAX_TRANSCRIPT_ENTRIES:]
+        logger.info(
+            "Trimmed transcript for %s (%d → %d) to prevent context overflow",
+            self.name,
+            before,
+            len(self.transcript),
+        )
 
-    def _outgoing_messages(self) -> list[BaseMessage]:
-        history = list(self.message_history)
-        if not history or not isinstance(history[0], HumanMessage):
-            history.insert(0, _PRIMER_USER_MESSAGE)
-        return [self.system_message, *history]
+    def _split_latest_other(self) -> tuple[list[tuple[str, str]], Optional[tuple[str, str]]]:
+        """Return ``(prior, latest_other)``.
+
+        ``latest_other`` is the most recent entry whose speaker is not
+        this agent; ``prior`` is the transcript with that entry removed.
+        """
+        for idx in range(len(self.transcript) - 1, -1, -1):
+            speaker, _content = self.transcript[idx]
+            if speaker != self.name:
+                latest_other = self.transcript[idx]
+                prior = self.transcript[:idx] + self.transcript[idx + 1 :]
+                return prior, latest_other
+        return list(self.transcript), None
+
+    def _render_transcript_block(self, prior: list[tuple[str, str]]) -> str:
+        if not prior:
+            return ""
+        lines = [f"{speaker}: {content}" for speaker, content in prior]
+        # Derive the "other party" label from the full transcript, not just
+        # ``prior`` — when the latest other-message is the only utterance
+        # from the other party, ``prior`` contains only this agent's own
+        # messages and we'd otherwise lose the counterpart's name.
+        other_names = sorted(
+            {s for s, _ in self.transcript if s != self.name}
+        )
+        other_label = ", ".join(other_names) if other_names else "the other party"
+        footer = _TRANSCRIPT_FOOTER_TEMPLATE.format(
+            other=other_label, self_name=self.name
+        )
+        return f"\n\n{_TRANSCRIPT_HEADER}\n" + "\n".join(lines) + f"\n\n{footer}"
+
+    def _build_outgoing(self) -> list:
+        prior, latest_other = self._split_latest_other()
+        transcript_block = self._render_transcript_block(prior)
+        system_content = f"{self.system_message.content}{transcript_block}"
+        human_content = latest_other[1] if latest_other else _PRIMER_USER_TEXT
+        return [
+            SystemMessage(content=system_content),
+            HumanMessage(content=human_content),
+        ]
 
     def send(self) -> str:
         """Stream a response from this agent's LLM and return the full text."""
         chunks: list[str] = []
         for chunk in self.model.stream(
-            self._outgoing_messages(),
+            self._build_outgoing(),
             config=sigil_langchain_config(component="dialogue"),
         ):
             piece = getattr(chunk, "content", None)
@@ -98,23 +135,10 @@ class DialogueAgent:
         return "".join(chunks)
 
     def receive(self, name: str, message: str) -> None:
-        """Record a message from ``name`` into this agent's history."""
-        if name == self.name:
-            self._append(AIMessage(content=message))
-        else:
-            self._append(HumanMessage(content=message))
-
+        """Record a message from ``name`` into this agent's transcript."""
+        self.transcript.append((name, message))
         logger.info("%s received message: %s", self.name, message)
-
-        before = len(self.message_history)
-        self._trim_history()
-        if before > len(self.message_history):
-            logger.info(
-                "Trimmed conversation history for %s (%d → %d) to prevent context overflow",
-                self.name,
-                before,
-                len(self.message_history),
-            )
+        self._trim_transcript()
 
 
 class DialogueSimulator:
@@ -159,7 +183,7 @@ def create_game():
     from loggingfw import CustomLogFW
     from otel_setup import init as init_otel
 
-    load_dotenv()  # Load .env file
+    load_dotenv()
 
     # Set up logging — service.name and instance.id match otel_setup.py so
     # logs, traces, and metrics correlate under the same resource attributes.

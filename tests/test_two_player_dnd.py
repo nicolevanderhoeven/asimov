@@ -1,17 +1,25 @@
-"""Unit tests for the refactored DialogueAgent / DialogueSimulator.
+"""Unit tests for DialogueAgent / DialogueSimulator.
 
-These tests pin the new role-based message contract so that Sigil records
-genuine per-turn user input rather than the full transcript stitched into
-one giant ``HumanMessage``.
+The dialogue agent sends exactly two messages to the LLM per turn:
+
+1. A ``SystemMessage`` containing the agent's base character/behaviour
+   prompt with the running transcript appended under
+   ``CONVERSATION SO FAR:``.
+2. A single ``HumanMessage`` containing only the latest line spoken by
+   the other party — the line this turn is responding to.
+
+This shape is what makes Sigil's per-generation panes meaningful: the
+user input field shows only the latest player action, never the
+cumulative transcript or any DM narration.
 """
 
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from two_player_dnd import (
-    MAX_HISTORY_MESSAGES,
+    MAX_TRANSCRIPT_ENTRIES,
     DialogueAgent,
     DialogueSimulator,
 )
@@ -21,7 +29,7 @@ def make_streaming_llm(*responses: str) -> MagicMock:
     """Return a mock LLM whose ``.stream(...)`` yields the given responses in order.
 
     Mirrors ``mock_llm_with_responses`` in ``test_singleplayer_dnd.py`` so
-    Sigil's TTFT path (which depends on ``.stream``) is exercised.
+    the Sigil TTFT path (which depends on ``.stream``) stays exercised.
     """
     llm = MagicMock()
     iters = []
@@ -33,85 +41,46 @@ def make_streaming_llm(*responses: str) -> MagicMock:
     return llm
 
 
-def make_agent(name: str = "Dungeon Master", llm: MagicMock | None = None) -> DialogueAgent:
+def make_agent(
+    name: str = "Dungeon Master",
+    base_system: str = "You are the Dungeon Master.",
+    llm: MagicMock | None = None,
+) -> DialogueAgent:
     return DialogueAgent(
         name=name,
-        system_message=SystemMessage(content=f"You are {name}."),
+        system_message=SystemMessage(content=base_system),
         model=llm or MagicMock(),
     )
 
 
-class TestReceiveRoleMapping:
-    def test_own_name_recorded_as_ai_message(self):
-        agent = make_agent("Dungeon Master")
-        agent.receive("Dungeon Master", "You stand before a rift.")
-        assert len(agent.message_history) == 1
-        msg = agent.message_history[0]
-        assert isinstance(msg, AIMessage)
-        assert msg.content == "You stand before a rift."
+def outgoing(llm: MagicMock) -> list:
+    args, _kwargs = llm.stream.call_args
+    return args[0]
 
-    def test_other_name_recorded_as_human_message(self):
-        agent = make_agent("Dungeon Master")
-        agent.receive("Data", "I scan the rift.")
-        assert len(agent.message_history) == 1
-        msg = agent.message_history[0]
-        assert isinstance(msg, HumanMessage)
-        assert msg.content == "I scan the rift."
 
-    def test_no_speaker_prefix_leaks_into_content(self):
-        """Stored content must NOT include the legacy ``"Name: "`` prefix.
-
-        The whole point of this refactor is that role metadata carries the
-        speaker identity, so the literal ``"Dungeon Master: ..."`` strings
-        the old code wrote into a single user message must not reappear.
-        """
+class TestReceiveRecordsTranscript:
+    def test_receive_appends_tuple(self):
         agent = make_agent("Dungeon Master")
         agent.receive("Data", "I scan the rift.")
         agent.receive("Dungeon Master", "The rift pulses.")
-        for msg in agent.message_history:
-            assert not msg.content.startswith("Data:")
-            assert not msg.content.startswith("Dungeon Master:")
+        assert agent.transcript == [
+            ("Data", "I scan the rift."),
+            ("Dungeon Master", "The rift pulses."),
+        ]
 
-
-class TestConsecutiveSameRoleMerging:
-    def test_two_other_messages_merge_into_one_human(self):
+    def test_repeated_same_speaker_kept_as_separate_entries(self):
         agent = make_agent("Dungeon Master")
         agent.receive("Data", "I scan the rift.")
-        agent.receive("Data", "I draw my phaser.")
-        assert len(agent.message_history) == 1
-        merged = agent.message_history[0]
-        assert isinstance(merged, HumanMessage)
-        assert "I scan the rift." in merged.content
-        assert "I draw my phaser." in merged.content
-
-    def test_two_own_messages_merge_into_one_ai(self):
-        agent = make_agent("Dungeon Master")
-        agent.receive("Dungeon Master", "The rift opens.")
-        agent.receive("Dungeon Master", "Energy crackles.")
-        assert len(agent.message_history) == 1
-        merged = agent.message_history[0]
-        assert isinstance(merged, AIMessage)
-
-    def test_alternating_messages_not_merged(self):
-        agent = make_agent("Dungeon Master")
-        agent.receive("Dungeon Master", "The rift opens.")
-        agent.receive("Data", "I scan it.")
-        agent.receive("Dungeon Master", "It pulses brighter.")
-        assert len(agent.message_history) == 3
-        assert isinstance(agent.message_history[0], AIMessage)
-        assert isinstance(agent.message_history[1], HumanMessage)
-        assert isinstance(agent.message_history[2], AIMessage)
+        agent.receive("Data", "I scan it again.")
+        assert len(agent.transcript) == 2
+        assert all(s == "Data" for s, _ in agent.transcript)
 
 
 class TestSendOutgoingShape:
-    def _outgoing_from_call(self, llm: MagicMock) -> list:
-        args, _kwargs = llm.stream.call_args
-        return args[0]
-
     def test_send_uses_stream_not_invoke(self):
         """Streaming preserves Sigil's TTFT histogram path."""
         llm = make_streaming_llm("Some narration.")
-        agent = make_agent("Dungeon Master", llm)
+        agent = make_agent("Dungeon Master", llm=llm)
         agent.receive("Data", "I scan the rift.")
         agent.send()
         assert llm.stream.call_count == 1
@@ -125,88 +94,167 @@ class TestSendOutgoingShape:
             c.content = piece
             chunks.append(c)
         llm.stream.side_effect = lambda *_a, **_kw: iter(chunks)
-        agent = make_agent("Dungeon Master", llm)
+        agent = make_agent("Dungeon Master", llm=llm)
         agent.receive("Data", "Greet me.")
-        result = agent.send()
-        assert result == "Hello world."
+        assert agent.send() == "Hello world."
 
-    def test_outgoing_starts_with_system_message(self):
+    def test_outgoing_is_exactly_system_then_human(self):
         llm = make_streaming_llm("ok")
-        agent = make_agent("Dungeon Master", llm)
+        agent = make_agent("Dungeon Master", llm=llm)
         agent.receive("Data", "I scan the rift.")
         agent.send()
-        outgoing = self._outgoing_from_call(llm)
-        assert isinstance(outgoing[0], SystemMessage)
+        msgs = outgoing(llm)
+        assert len(msgs) == 2
+        assert isinstance(msgs[0], SystemMessage)
+        assert isinstance(msgs[1], HumanMessage)
 
-    def test_primer_prepended_when_history_starts_with_ai(self):
-        """Anthropic requires the first message after system to be user.
 
-        If the storyteller's history starts with its own quest opener
-        (``AIMessage``), ``send()`` must inject a transient user primer.
-        """
+class TestHumanMessageIsLatestPlayerTurnOnly:
+    """Core regression for the Sigil 'user input includes narration' bug."""
+
+    def test_human_message_is_just_latest_other_message(self):
         llm = make_streaming_llm("ok")
-        agent = make_agent("Dungeon Master", llm)
-        agent.receive("Dungeon Master", "You stand on the bridge.")
+        agent = make_agent("Dungeon Master", llm=llm)
+        agent.receive("Dungeon Master", "You awaken on the Enterprise.")
+        agent.receive("Data", "I scan the rift.")
+        agent.receive("Dungeon Master", "The rift pulses.")
+        agent.receive("Data", "I draw my phaser.")
         agent.send()
-        outgoing = self._outgoing_from_call(llm)
-        # outgoing = [SystemMessage, HumanMessage(primer), AIMessage(quest)]
-        assert isinstance(outgoing[0], SystemMessage)
-        assert isinstance(outgoing[1], HumanMessage)
-        assert isinstance(outgoing[2], AIMessage)
-        assert outgoing[2].content == "You stand on the bridge."
+        human = outgoing(llm)[1]
+        assert human.content == "I draw my phaser."
 
-    def test_primer_prepended_when_history_empty(self):
+    def test_human_message_does_not_contain_dm_narration(self):
         llm = make_streaming_llm("ok")
-        agent = make_agent("Dungeon Master", llm)
+        agent = make_agent("Dungeon Master", llm=llm)
+        agent.receive("Dungeon Master", "You awaken alone on the Enterprise.")
+        agent.receive("Data", "I scan the rift.")
+        agent.receive("Dungeon Master", "The rift pulses with bluish-green energy.")
+        agent.receive("Data", "I choose the Roman corridor!")
         agent.send()
-        outgoing = self._outgoing_from_call(llm)
-        assert isinstance(outgoing[0], SystemMessage)
-        assert isinstance(outgoing[1], HumanMessage)
-        assert len(outgoing) == 2
+        human_content = outgoing(llm)[1].content
+        assert "You awaken" not in human_content
+        assert "rift pulses" not in human_content
+        assert "Dungeon Master:" not in human_content
+        assert "Here is the conversation so far" not in human_content
 
-    def test_no_primer_when_history_starts_with_human(self):
+    def test_human_message_does_not_include_prior_player_inputs(self):
+        """Cumulative-history bug: Sigil should not see a stack of identical
+        player lines from prior turns mashed into one HumanMessage."""
         llm = make_streaming_llm("ok")
-        agent = make_agent("Dungeon Master", llm)
+        agent = make_agent("Dungeon Master", llm=llm)
+        for _ in range(4):
+            agent.receive("Data", "I do an internal scan of my brain.")
+            agent.receive("Dungeon Master", "Your scan reveals...")
+        agent.receive("Data", "I open the encrypted file.")
+        agent.send()
+        human_content = outgoing(llm)[1].content
+        assert human_content == "I open the encrypted file."
+        assert "internal scan of my brain" not in human_content
+
+
+class TestSystemMessageEmbedsHistory:
+    def test_base_system_prompt_preserved(self):
+        llm = make_streaming_llm("ok")
+        agent = make_agent(
+            "Dungeon Master",
+            base_system="You are the cosmic Dungeon Master.",
+            llm=llm,
+        )
         agent.receive("Data", "I scan the rift.")
         agent.send()
-        outgoing = self._outgoing_from_call(llm)
-        # outgoing = [SystemMessage, HumanMessage(Data's line)]
-        assert isinstance(outgoing[0], SystemMessage)
-        assert isinstance(outgoing[1], HumanMessage)
-        assert outgoing[1].content == "I scan the rift."
-        assert len(outgoing) == 2
+        system_content = outgoing(llm)[0].content
+        assert "You are the cosmic Dungeon Master." in system_content
 
-    def test_primer_is_not_stored_in_history(self):
+    def test_prior_transcript_lines_appear_in_system(self):
         llm = make_streaming_llm("ok")
-        agent = make_agent("Dungeon Master", llm)
+        agent = make_agent("Dungeon Master", llm=llm)
+        agent.receive("Dungeon Master", "You awaken on the Enterprise.")
+        agent.receive("Data", "I scan the rift.")
+        agent.receive("Dungeon Master", "The rift pulses with bluish-green energy.")
+        agent.receive("Data", "I draw my phaser.")
+        agent.send()
+        system_content = outgoing(llm)[0].content
+        assert "CONVERSATION SO FAR:" in system_content
+        assert "Dungeon Master: You awaken on the Enterprise." in system_content
+        assert "Data: I scan the rift." in system_content
+        assert "Dungeon Master: The rift pulses with bluish-green energy." in system_content
+
+    def test_latest_other_message_is_not_duplicated_in_system_block(self):
+        """The latest player line goes only in the HumanMessage; it must
+        not also appear inside the transcript block in the system prompt
+        (otherwise the model sees it twice)."""
+        llm = make_streaming_llm("ok")
+        agent = make_agent("Dungeon Master", llm=llm)
+        agent.receive("Dungeon Master", "You stand on the bridge.")
+        agent.receive("Data", "I look around.")
+        agent.send()
+        msgs = outgoing(llm)
+        system_block = msgs[0].content.split("CONVERSATION SO FAR:", 1)[1]
+        assert "I look around" not in system_block
+        assert msgs[1].content == "I look around."
+
+    def test_system_includes_continue_instruction(self):
+        llm = make_streaming_llm("ok")
+        agent = make_agent("Dungeon Master", llm=llm)
+        agent.receive("Dungeon Master", "You awaken.")
+        agent.receive("Data", "I look around.")
+        agent.send()
+        system_content = outgoing(llm)[0].content
+        assert "Now continue the story" in system_content
+        assert "Data" in system_content
+        assert "Dungeon Master" in system_content
+
+    def test_no_conversation_block_when_no_prior_history(self):
+        """If the only entry is the latest other message, the system
+        prompt should not have a stray empty 'CONVERSATION SO FAR:' block."""
+        llm = make_streaming_llm("ok")
+        agent = make_agent("Dungeon Master", llm=llm)
+        agent.receive("Data", "I look around.")
+        agent.send()
+        system_content = outgoing(llm)[0].content
+        assert "CONVERSATION SO FAR:" not in system_content
+
+
+class TestPrimerFallback:
+    def test_primer_used_when_transcript_empty(self):
+        llm = make_streaming_llm("ok")
+        agent = make_agent("Dungeon Master", llm=llm)
+        agent.send()
+        msgs = outgoing(llm)
+        assert isinstance(msgs[0], SystemMessage)
+        assert isinstance(msgs[1], HumanMessage)
+        assert msgs[1].content == "Begin the adventure."
+
+    def test_primer_used_when_only_self_messages_in_transcript(self):
+        """Edge case: agent has spoken but no other party has responded yet.
+        Anthropic still needs a non-empty user message."""
+        llm = make_streaming_llm("ok")
+        agent = make_agent("Dungeon Master", llm=llm)
         agent.receive("Dungeon Master", "You stand on the bridge.")
         agent.send()
-        assert len(agent.message_history) == 1
-        assert isinstance(agent.message_history[0], AIMessage)
+        msgs = outgoing(llm)
+        assert msgs[1].content == "Begin the adventure."
+        assert "Dungeon Master: You stand on the bridge." in msgs[0].content
 
 
 class TestTrimming:
-    def test_history_trimmed_to_max(self):
+    def test_transcript_trimmed_to_max(self):
         agent = make_agent("Dungeon Master")
-        # Alternate roles so nothing merges.
-        for i in range(MAX_HISTORY_MESSAGES + 4):
+        for i in range(MAX_TRANSCRIPT_ENTRIES + 4):
             sender = "Data" if i % 2 == 0 else "Dungeon Master"
             agent.receive(sender, f"line {i}")
-        assert len(agent.message_history) <= MAX_HISTORY_MESSAGES
+        assert len(agent.transcript) == MAX_TRANSCRIPT_ENTRIES
 
-    def test_trim_preserves_user_first(self):
-        """After trimming, history must still start with a HumanMessage so
-        the next ``send()`` call doesn't need to drop a primer mid-conversation."""
+    def test_trim_drops_oldest_first(self):
         agent = make_agent("Dungeon Master")
-        for i in range(MAX_HISTORY_MESSAGES + 6):
-            sender = "Dungeon Master" if i % 2 == 0 else "Data"
-            agent.receive(sender, f"line {i}")
-        assert agent.message_history, "history should not be empty after trim"
-        assert isinstance(agent.message_history[0], HumanMessage)
+        for i in range(MAX_TRANSCRIPT_ENTRIES + 3):
+            agent.receive("Data", f"line {i}")
+        assert agent.transcript[0][1] == "line 3"
+        assert agent.transcript[-1][1] == f"line {MAX_TRANSCRIPT_ENTRIES + 2}"
 
 
 class TestDialogueSimulatorFlow:
-    def _build(self, dm_responses: list[str]) -> tuple[DialogueSimulator, DialogueAgent, DialogueAgent, MagicMock]:
+    def _build(self, dm_responses: list[str]):
         llm = make_streaming_llm(*dm_responses)
         storyteller = DialogueAgent(
             name="Dungeon Master",
@@ -232,46 +280,45 @@ class TestDialogueSimulatorFlow:
         simulator.inject("Dungeon Master", "You awaken on the Enterprise.")
         simulator.inject("Data", "I scan the rift.")
 
-        # Storyteller view: AI(quest), H(Data line)
-        assert [type(m) for m in storyteller.message_history] == [AIMessage, HumanMessage]
-        # Protagonist view: H(quest), AI(Data line)
-        assert [type(m) for m in protagonist.message_history] == [HumanMessage, AIMessage]
+        assert storyteller.transcript == [
+            ("Dungeon Master", "You awaken on the Enterprise."),
+            ("Data", "I scan the rift."),
+        ]
+        assert protagonist.transcript == storyteller.transcript
 
         speaker, message = simulator.step()
         assert speaker == "Dungeon Master"
         assert "It is your turn" in message
 
-        # After step, both agents see the new DM line in their own POV.
-        assert [type(m) for m in storyteller.message_history] == [AIMessage, HumanMessage, AIMessage]
-        assert [type(m) for m in protagonist.message_history] == [HumanMessage, AIMessage, HumanMessage]
+        # Wire payload to Anthropic on the DM step.
+        msgs = outgoing(llm)
+        assert isinstance(msgs[0], SystemMessage)
+        assert isinstance(msgs[1], HumanMessage)
+        assert msgs[1].content == "I scan the rift."
+        system_content = msgs[0].content
+        assert "You are the DM." in system_content
+        assert "Dungeon Master: You awaken on the Enterprise." in system_content
 
-        # Wire payload to Anthropic on the DM step: [System, primer Human, AI(quest), Human(Data)].
-        args, _kwargs = llm.stream.call_args
-        outgoing = args[0]
-        assert isinstance(outgoing[0], SystemMessage)
-        assert isinstance(outgoing[1], HumanMessage)  # primer
-        assert isinstance(outgoing[2], AIMessage)     # quest
-        assert isinstance(outgoing[3], HumanMessage)  # Data's actual input
-        assert outgoing[3].content == "I scan the rift."
+    def test_per_turn_sigil_view_after_five_repeated_inputs(self):
+        """Regression for the cumulative-history Sigil bug.
 
-    def test_no_transcript_blob_in_outgoing_user_message(self):
-        """Regression test for the original Sigil bug.
-
-        The user-role payload that hits the LLM must NOT contain phrases
-        like ``"Here is the conversation so far."`` or the literal
-        ``"Dungeon Master: ..."`` transcript that the old implementation
-        produced.
+        After 5 identical /play calls, the 5th LLM call should still see a
+        single ``HumanMessage`` containing only the latest player line,
+        not five copies of it joined together.
         """
-        simulator, _storyteller, _protagonist, llm = self._build([
-            "You step forward. It is your turn, Data."
-        ])
-        simulator.inject("Dungeon Master", "You awaken on the Enterprise.")
-        simulator.inject("Data", "I choose the Roman corridor!")
-        simulator.step()
+        responses = [f"Response {i}. It is your turn, Data." for i in range(1, 6)]
+        simulator, _storyteller, _protagonist, llm = self._build(responses)
 
-        args, _kwargs = llm.stream.call_args
-        outgoing = args[0]
-        for msg in outgoing:
-            assert "Here is the conversation so far" not in msg.content
-            assert "Dungeon Master: " not in msg.content
-            assert "Data: " not in msg.content
+        simulator.inject("Dungeon Master", "You awaken on the Enterprise.")
+        for _ in range(5):
+            simulator.inject("Data", "I do an internal scan of my brain to determine its status.")
+            simulator.step()
+
+        msgs = outgoing(llm)
+        assert msgs[1].content == "I do an internal scan of my brain to determine its status."
+        # And the HumanMessage must not contain a cumulative pile.
+        assert msgs[1].content.count("internal scan") == 1
+        # The DM's prior responses live in the system block, not the user message.
+        system_content = msgs[0].content
+        assert "Response 1." in system_content
+        assert "Response 4." in system_content
