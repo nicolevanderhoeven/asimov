@@ -6,24 +6,25 @@ This is a repository for the slides and code for the talk "Asimov's Zeroth Law o
 - [KubeCon Europe 2025](https://nicolevanderhoeven.com/blog/20250402-asmiovs-zeroth-law-of-robotics/) in London, England ([video link](https://www.youtube.com/watch?v=x6EKTCAWtn8))
 - [Dutch Cloud Native Days 2025](https://nicolevanderhoeven.com/blog/20250703-asimovs-zeroth-law-dutch-cloud-native-day/) in Utrecht, the Netherlands
 - [Newcrafts 2025](https://nicolevanderhoeven.com/blog/20251106-asimovs-zeroth-law-newcrafts/) in Paris, France
+- ExpoQA 2026 in Madrid, Spain
 
 This repository consists of:
-- A D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
+- A two-player D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
 - A k6 test to run against the AI app, in `test.js`.
 - A custom logging framework, in `loggingfw.py`.
 - A CLI wrapper for the game, in `cli_play.py`.
-- (new) A k6 test that uses AI to test the AI app, in `test-ai.js`.
+- A k6 test that uses AI to test the AI app, in `test-ai.js`.
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
 ![A diagram of the architecture of the AI app, showing the D&D game, the OpenTelemetry Collector, and Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20Dutch%20Cloud%20Native%20Day%202025.svg)
 
 ## Setup
 
-Telemetry is Sigil + OTel. The Sigil SDK handles normalized generation export, and OTel (configured by this app) handles `gen_ai.*` metrics, traces, and structured logs. OpenLIT is no longer needed. Three small modules wire this up:
+Telemetry is Sigil + OTel. The Sigil SDK handles normalized generation export, and OTel (configured by this app) handles `gen_ai.*` metrics, traces, and structured logs. Three small modules wire this up:
 
 - `sigil_setup.py` — singleton Sigil client + LangChain callback helper (generations).
 - `otel_setup.py` — bootstraps the global OTel `TracerProvider` + `MeterProvider` with OTLP/HTTP exporters. Sigil's histograms (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`, `gen_ai.client.time_to_first_token`, `gen_ai.client.tool_calls_per_operation`) and spans flow through these.
-- `loggingfw.py` — exports structured logs (turn / session events) over OTLP/HTTP using the same `OTLP_ENDPOINT` / `OTLP_HEADERS` env vars.
+- `loggingfw.py` — exports structured logs over OTLP/HTTP using the same `OTLP_ENDPOINT` / `OTLP_HEADERS` env vars.
 
 By default all three signals (traces, metrics, logs) go **directly** to Grafana Cloud's OTLP gateway. A local OTel Collector is **not required**. If you want to route through a Collector — for buffering, sampling, redaction, or fan-out — see the optional setup in [`collector/`](collector/).
 
@@ -34,7 +35,6 @@ By default all three signals (traces, metrics, logs) go **directly** to Grafana 
 3. Copy `env.example` to `.env`: `cp env.example .env`.
 4. Fill in `.env`:
    - `ANTHROPIC_API_KEY` — your Anthropic API key.
-   - `OPENAI_API_KEY` — your OpenAI API key (if using OpenAI models).
    - **OTel (metrics + traces):**
      - `OTLP_ENDPOINT` — your stack's OTLP gateway, e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp`.
      - `OTLP_HEADERS` — base64-encoded `"<instance_id>:<otlp_write_token>"`. The app prefixes `Basic ` automatically.
@@ -50,15 +50,14 @@ By default all three signals (traces, metrics, logs) go **directly** to Grafana 
 
 ### What you get in the Sigil app
 
-- **Conversations** — every LLM call, grouped by `conversation_id`, with full inputs/outputs, tagged by `sigil.component` (`game_setup`, `dialogue`, `classifier`, `gm_qa`, `storyteller_single`, `storyteller_scenario`).
+- **Conversations** — every LLM call, grouped by `conversation_id`, with full inputs/outputs, tagged by `sigil.component` (`game_setup`, `dialogue`).
 - **Rollup metrics** — requests, error rate, p50/p95 latency, token consumption, tool calls per operation (from Sigil's `gen_ai.client.*` histograms).
 - **Traces** — one span per LLM call, with `gen_ai.*` semantic-convention attributes.
-- **DAG placeholder** — the scenario runner emits `sigil.run.id` on classifier generations and `sigil.run.parent_ids` on downstream `gm_qa` / `storyteller_scenario` generations, so multi-agent links can be rendered once Sigil exposes native DAG support.
 - **Request params** — `gen_ai.request.temperature` and `gen_ai.request.max_tokens` appear on each generation (read from LangChain's invocation params by `sigil-sdk-langchain`).
 
 ### Time to first token (TTFT)
 
-TTFT only populates for streaming calls. This app uses `.invoke()` (non-streaming), so TTFT panels stay empty. Switch specific call sites to `.stream()` if you want TTFT coverage.
+TTFT only populates for streaming calls. The dialogue agents in `two_player_dnd.py` use `.stream()`, so TTFT panels populate for `dialogue` generations. The one-off `game_setup` calls use `.invoke()` and don't contribute to TTFT.
 
 ## Usage
 
@@ -96,6 +95,8 @@ If you're using the CLI version, type your input directly into the terminal afte
 ## Slides
 
 You can find the slides [here](https://nicole.to/asimovslides).
+
+- ExpoQA 2026: [https://nicole.to/expoqa2026](https://nicole.to/expoqa2026)
 
 ## References
 

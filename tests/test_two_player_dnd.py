@@ -29,8 +29,8 @@ from two_player_dnd import (
 def make_streaming_llm(*responses: str) -> MagicMock:
     """Return a mock LLM whose ``.stream(...)`` yields the given responses in order.
 
-    Mirrors ``mock_llm_with_responses`` in ``test_singleplayer_dnd.py`` so
-    the Sigil TTFT path (which depends on ``.stream``) stays exercised.
+    The Sigil TTFT path depends on ``.stream``, so the dialogue agents'
+    streaming code path stays exercised in unit tests.
     """
     llm = MagicMock()
     iters = []

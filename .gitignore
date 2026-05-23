@@ -2,3 +2,4 @@
 __pycache__
 otel-config.yml
 logs/
+.DS_Store

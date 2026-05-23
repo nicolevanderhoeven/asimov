@@ -188,8 +188,7 @@ def sigil_langchain_config(
         Sigil's agent catalog can split per-component cost/latency rollups.
     extra_metadata : dict | None
         Arbitrary metadata dict forwarded to the generation recorder via the
-        handler. Used for opportunity 2c (multi-agent DAG placeholder links
-        under ``sigil.run.id`` / ``sigil.run.parent_ids``).
+        handler (e.g. for tagging multi-agent run links).
 
     When Sigil is disabled, returns ``extra`` unchanged (defensive copy).
     """

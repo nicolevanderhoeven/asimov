@@ -12,12 +12,9 @@ endpoint, which falls back to the OTel SDK default (``localhost:4318``).
 That keeps the optional local-collector path working without code changes.
 """
 
-import json
 import logging
 import os
-from datetime import datetime, timezone
 
-from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
@@ -73,49 +70,3 @@ class CustomLogFW:
 
         handler = LoggingHandler(level=logging.NOTSET, logger_provider=self.logger_provider)
         return handler
-
-
-# ---------------------------------------------------------------------------
-# Structured turn / session event helpers
-# ---------------------------------------------------------------------------
-
-_event_logger = logging.getLogger("dnd.events")
-
-
-def log_turn_event(
-    event: str,
-    session_id: str,
-    turn_number: int,
-    payload: dict,
-) -> None:
-    """Emit a structured JSON log record for a single turn event.
-
-    ``event`` should be ``"turn_complete"`` or ``"turn_error"``.
-    ``payload`` is merged with the envelope fields before serialisation.
-    """
-    record = {
-        "event": event,
-        "session_id": session_id,
-        "turn_number": turn_number,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        **payload,
-    }
-    _event_logger.info(json.dumps(record))
-
-
-def log_session_event(
-    event: str,
-    session_id: str,
-    payload: dict,
-) -> None:
-    """Emit a structured JSON log record for session lifecycle events.
-
-    ``event`` should be ``"session_start"`` or ``"session_end"``.
-    """
-    record = {
-        "event": event,
-        "session_id": session_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        **payload,
-    }
-    _event_logger.info(json.dumps(record))

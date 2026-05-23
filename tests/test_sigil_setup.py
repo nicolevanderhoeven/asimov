@@ -173,7 +173,7 @@ class TestMisconfiguration:
 
 
 class TestEnhancedHandlerConfig:
-    """Opportunities 1, 2c, 3: component tag, extra_metadata, explicit provider."""
+    """Handler config: component tag, extra_metadata pass-through, explicit provider."""
 
     def _enable(self, monkeypatch):
         _install_fake_sigil_sdk(monkeypatch)
