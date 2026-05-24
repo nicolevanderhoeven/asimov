@@ -30,7 +30,7 @@ from typing import Any, Callable, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from sigil_setup import sigil_langchain_config
+from scripts.sigil_setup import sigil_langchain_config
 
 logger = logging.getLogger(__name__)
 
@@ -224,8 +224,8 @@ class DialogueSimulator:
 def create_game():
     from langchain_anthropic import ChatAnthropic
     from dotenv import load_dotenv
-    from loggingfw import CustomLogFW
-    from otel_setup import init as init_otel
+    from scripts.loggingfw import CustomLogFW
+    from scripts.otel_setup import init as init_otel
 
     load_dotenv()
 

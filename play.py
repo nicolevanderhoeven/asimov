@@ -3,7 +3,7 @@ from flask import Flask, jsonify, request
 
 load_dotenv()
 
-from otel_setup import init as init_otel
+from scripts.otel_setup import init as init_otel
 
 init_otel()
 

@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -50,10 +49,8 @@ def _bootstrap_env() -> None:
 
 def _fire_one_failing_generation() -> None:
     """Make one .stream() call that will 401 so Sigil records an error."""
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-    from otel_setup import init as init_otel
-    from sigil_setup import sigil_langchain_config
+    from scripts.otel_setup import init as init_otel
+    from scripts.sigil_setup import sigil_langchain_config
     from langchain_anthropic import ChatAnthropic
     from langchain_core.messages import HumanMessage
 

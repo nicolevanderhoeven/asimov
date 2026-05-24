@@ -3,7 +3,7 @@ Tests for the OTel log exporter wiring in ``loggingfw``.
 """
 from unittest.mock import MagicMock, patch
 
-from loggingfw import _build_log_exporter
+from scripts.loggingfw import _build_log_exporter
 
 
 class TestBuildLogExporter:
@@ -23,7 +23,7 @@ class TestBuildLogExporter:
         monkeypatch.setenv("OTLP_HEADERS", "dGVzdDp0ZXN0")
 
         captured, fake = self._capture()
-        with patch("loggingfw.OTLPLogExporter", side_effect=fake):
+        with patch("scripts.loggingfw.OTLPLogExporter", side_effect=fake):
             _build_log_exporter()
 
         assert captured["endpoint"] == "https://otlp.example/otlp/v1/logs"
@@ -33,7 +33,7 @@ class TestBuildLogExporter:
         monkeypatch.setenv("OTLP_HEADERS", "dGVzdDp0ZXN0")
 
         captured, fake = self._capture()
-        with patch("loggingfw.OTLPLogExporter", side_effect=fake):
+        with patch("scripts.loggingfw.OTLPLogExporter", side_effect=fake):
             _build_log_exporter()
 
         assert captured["endpoint"] == "https://otlp.example/otlp/v1/logs"
@@ -43,7 +43,7 @@ class TestBuildLogExporter:
         monkeypatch.setenv("OTLP_HEADERS", "dGVzdDp0ZXN0")
 
         captured, fake = self._capture()
-        with patch("loggingfw.OTLPLogExporter", side_effect=fake):
+        with patch("scripts.loggingfw.OTLPLogExporter", side_effect=fake):
             _build_log_exporter()
 
         assert captured["headers"] == {"Authorization": "Basic dGVzdDp0ZXN0"}
@@ -54,7 +54,7 @@ class TestBuildLogExporter:
         monkeypatch.delenv("OTLP_HEADERS", raising=False)
 
         captured, fake = self._capture()
-        with patch("loggingfw.OTLPLogExporter", side_effect=fake):
+        with patch("scripts.loggingfw.OTLPLogExporter", side_effect=fake):
             _build_log_exporter()
 
         assert "endpoint" not in captured
@@ -66,7 +66,7 @@ class TestBuildLogExporter:
         monkeypatch.delenv("OTLP_HEADERS", raising=False)
 
         captured, fake = self._capture()
-        with patch("loggingfw.OTLPLogExporter", side_effect=fake):
+        with patch("scripts.loggingfw.OTLPLogExporter", side_effect=fake):
             _build_log_exporter()
 
         assert captured["endpoint"] == "http://localhost:4318/v1/logs"

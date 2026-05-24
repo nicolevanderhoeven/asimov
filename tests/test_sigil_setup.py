@@ -21,7 +21,7 @@ def _reset_sigil_state(monkeypatch):
     ):
         monkeypatch.delenv(var, raising=False)
 
-    import sigil_setup
+    from scripts import sigil_setup
     sigil_setup.reset_for_tests()
     yield
     sigil_setup.reset_for_tests()
@@ -72,15 +72,15 @@ class TestDisabledMode:
     """Without GRAFANA_CLOUD_SIGIL_ENDPOINT set, Sigil is a no-op."""
 
     def test_get_client_returns_none(self):
-        import sigil_setup
+        from scripts import sigil_setup
         assert sigil_setup.get_sigil_client() is None
 
     def test_langchain_config_returns_empty_dict(self):
-        import sigil_setup
+        from scripts import sigil_setup
         assert sigil_setup.sigil_langchain_config() == {}
 
     def test_langchain_config_passes_through_extra(self):
-        import sigil_setup
+        from scripts import sigil_setup
         extra = {"tags": ["a"], "callbacks": ["existing"]}
         result = sigil_setup.sigil_langchain_config(extra)
         assert result == extra
@@ -100,7 +100,7 @@ class TestEnabledMode:
         monkeypatch.setenv("GRAFANA_CLOUD_API_KEY", "glc_api_key_here")
 
         with patch("atexit.register") as atexit_register:
-            import sigil_setup
+            from scripts import sigil_setup
             client = sigil_setup.get_sigil_client()
 
         assert client is client_instance
@@ -124,7 +124,7 @@ class TestEnabledMode:
         monkeypatch.setenv("GRAFANA_CLOUD_INSTANCE_ID", "12345")
         monkeypatch.setenv("GRAFANA_CLOUD_API_KEY", "glc_api_key_here")
 
-        import sigil_setup
+        from scripts import sigil_setup
         c1 = sigil_setup.get_sigil_client()
         c2 = sigil_setup.get_sigil_client()
         assert c1 is c2
@@ -139,7 +139,7 @@ class TestEnabledMode:
         monkeypatch.setenv("GRAFANA_CLOUD_INSTANCE_ID", "12345")
         monkeypatch.setenv("GRAFANA_CLOUD_API_KEY", "glc_api_key_here")
 
-        import sigil_setup
+        from scripts import sigil_setup
         result = sigil_setup.sigil_langchain_config({"tags": ["a"]})
         assert result["tags"] == ["a"]
         assert "sigil-handler" in result["callbacks"]
@@ -157,7 +157,7 @@ class TestMisconfiguration:
         )
         monkeypatch.setenv("GRAFANA_CLOUD_API_KEY", "glc_api_key_here")
 
-        import sigil_setup
+        from scripts import sigil_setup
         assert sigil_setup.get_sigil_client() is None
 
     def test_missing_api_key_disables(self, monkeypatch):
@@ -168,7 +168,7 @@ class TestMisconfiguration:
         )
         monkeypatch.setenv("GRAFANA_CLOUD_INSTANCE_ID", "12345")
 
-        import sigil_setup
+        from scripts import sigil_setup
         assert sigil_setup.get_sigil_client() is None
 
 
@@ -186,7 +186,7 @@ class TestEnhancedHandlerConfig:
 
     def test_provider_is_explicit_anthropic(self, monkeypatch):
         self._enable(monkeypatch)
-        import sigil_setup
+        from scripts import sigil_setup
         result = sigil_setup.sigil_langchain_config()
         kwargs = result["_sigil_handler_kwargs"]
         assert kwargs["provider"] == "anthropic"
@@ -195,7 +195,7 @@ class TestEnhancedHandlerConfig:
     def test_agent_name_and_version_forwarded(self, monkeypatch):
         self._enable(monkeypatch)
         monkeypatch.setenv("ASIMOV_AGENT_VERSION", "v9.9.9")
-        import sigil_setup
+        from scripts import sigil_setup
         sigil_setup.reset_for_tests()
         result = sigil_setup.sigil_langchain_config()
         kwargs = result["_sigil_handler_kwargs"]
@@ -204,21 +204,21 @@ class TestEnhancedHandlerConfig:
 
     def test_component_becomes_sigil_component_tag(self, monkeypatch):
         self._enable(monkeypatch)
-        import sigil_setup
+        from scripts import sigil_setup
         result = sigil_setup.sigil_langchain_config(component="classifier")
         kwargs = result["_sigil_handler_kwargs"]
         assert kwargs["extra_tags"] == {"sigil.component": "classifier"}
 
     def test_no_component_omits_extra_tags(self, monkeypatch):
         self._enable(monkeypatch)
-        import sigil_setup
+        from scripts import sigil_setup
         result = sigil_setup.sigil_langchain_config()
         kwargs = result["_sigil_handler_kwargs"]
         assert "extra_tags" not in kwargs
 
     def test_extra_metadata_forwarded(self, monkeypatch):
         self._enable(monkeypatch)
-        import sigil_setup
+        from scripts import sigil_setup
         result = sigil_setup.sigil_langchain_config(
             component="gm_qa",
             extra_metadata={"sigil.run.parent_ids": ["abc123"]},
@@ -228,7 +228,7 @@ class TestEnhancedHandlerConfig:
 
     def test_extra_metadata_is_copied_not_aliased(self, monkeypatch):
         self._enable(monkeypatch)
-        import sigil_setup
+        from scripts import sigil_setup
         meta = {"sigil.run.id": "abc"}
         result = sigil_setup.sigil_langchain_config(extra_metadata=meta)
         meta["sigil.run.id"] = "mutated"
@@ -240,12 +240,12 @@ class TestAgentVersionResolver:
 
     def test_env_var_wins(self, monkeypatch):
         monkeypatch.setenv("ASIMOV_AGENT_VERSION", "v0.3.1")
-        import sigil_setup
+        from scripts import sigil_setup
         sigil_setup.reset_for_tests()
         assert sigil_setup._resolve_agent_version() == "v0.3.1"
 
     def test_git_sha_when_no_env(self, monkeypatch):
-        import sigil_setup
+        from scripts import sigil_setup
         sigil_setup.reset_for_tests()
         version = sigil_setup._resolve_agent_version()
         assert version.startswith("git-") or version == "1.0.0"
@@ -254,7 +254,7 @@ class TestAgentVersionResolver:
 
     def test_fallback_to_constant(self, monkeypatch, tmp_path):
         fake_head = tmp_path / ".git" / "HEAD"
-        import sigil_setup
+        from scripts import sigil_setup
         sigil_setup.reset_for_tests()
         assert sigil_setup._resolve_git_short_sha(tmp_path) is None
 
@@ -278,6 +278,6 @@ class TestSdkNotInstalled:
             return real_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=fake_import):
-            import sigil_setup
+            from scripts import sigil_setup
             assert sigil_setup.get_sigil_client() is None
             assert sigil_setup.sigil_langchain_config({"k": 1}) == {"k": 1}

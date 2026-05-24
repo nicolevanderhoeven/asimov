@@ -10,10 +10,12 @@ This is a repository for the slides and code for the talk "Asimov's Zeroth Law o
 
 This repository consists of:
 - A two-player D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
-- A k6 test to run against the AI app, in `test.js`.
-- A custom logging framework, in `loggingfw.py`.
 - A CLI wrapper for the game, in `cli_play.py`.
-- A k6 test that uses AI to test the AI app, in `test-ai.js`.
+- A k6 test to run against the AI app, in `tests/test.js`.
+- A k6 test that uses AI to test the AI app, in `tests/test-ai.js`.
+- A custom logging framework, in `scripts/loggingfw.py`.
+- Telemetry setup helpers in `scripts/sigil_setup.py` and `scripts/otel_setup.py`.
+- A one-off Sigil error-series seeder in `scripts/seed_error_metrics.py` (run as `python -m scripts.seed_error_metrics`).
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
 ![A diagram of the architecture of the AI app, showing play.py running in Flask sending traces, metrics, and logs to OpenTelemetry and generations to the Sigil API, with k6 driving load against the Flask app and everything terminating in Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20ExpoQA%202026.jpg)
@@ -22,9 +24,9 @@ This repository consists of:
 
 Telemetry is Sigil + OTel. The Sigil SDK handles normalized generation export, and OTel (configured by this app) handles `gen_ai.*` metrics, traces, and structured logs. Three small modules wire this up:
 
-- `sigil_setup.py` — singleton Sigil client + LangChain callback helper (generations).
-- `otel_setup.py` — bootstraps the global OTel `TracerProvider` + `MeterProvider` with OTLP/HTTP exporters. Sigil's histograms (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`, `gen_ai.client.time_to_first_token`, `gen_ai.client.tool_calls_per_operation`) and spans flow through these.
-- `loggingfw.py` — exports structured logs over OTLP/HTTP using the same `OTLP_ENDPOINT` / `OTLP_HEADERS` env vars.
+- `scripts/sigil_setup.py` — singleton Sigil client + LangChain callback helper (generations).
+- `scripts/otel_setup.py` — bootstraps the global OTel `TracerProvider` + `MeterProvider` with OTLP/HTTP exporters. Sigil's histograms (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`, `gen_ai.client.time_to_first_token`, `gen_ai.client.tool_calls_per_operation`) and spans flow through these.
+- `scripts/loggingfw.py` — exports structured logs over OTLP/HTTP using the same `OTLP_ENDPOINT` / `OTLP_HEADERS` env vars.
 
 By default all three signals (traces, metrics, logs) go **directly** to Grafana Cloud's OTLP gateway. A local OTel Collector is **not required**. If you want to route through a Collector — for buffering, sampling, redaction, or fan-out — see the optional setup in [`collector/`](collector/).
 
@@ -79,7 +81,7 @@ If you're using the Flask app:
 If you're using the CLI version, type your input directly into the terminal after the welcome message. Type `exit` or `quit` to end the game.
 
 3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
-4. Run the k6 test using `k6 run test.js`.
+4. Run the k6 test using `k6 run tests/test.js`.
 
 ## Resources
 
