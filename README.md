@@ -16,7 +16,7 @@ This repository consists of:
 - A k6 test that uses AI to test the AI app, in `test-ai.js`.
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
-![A diagram of the architecture of the AI app, showing the D&D game, the OpenTelemetry Collector, and Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20Dutch%20Cloud%20Native%20Day%202025.svg)
+![A diagram of the architecture of the AI app, showing play.py running in Flask sending traces, metrics, and logs to OpenTelemetry and generations to the Sigil API, with k6 driving load against the Flask app and everything terminating in Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20ExpoQA%202026.jpg)
 
 ## Setup
 
