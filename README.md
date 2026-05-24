@@ -94,8 +94,8 @@ If you're using the CLI version, type your input directly into the terminal afte
 
 ## Slides
 
-You can find the slides [here](https://nicole.to/asimovslides).
-
+I've updated the slides a few times.
+- Newcrafts 2026: [https://nicole.to/asimovslides](https://nicole.to/asimovslides)
 - ExpoQA 2026: [https://nicole.to/expoqa2026](https://nicole.to/expoqa2026)
 
 ## References
@@ -115,3 +115,8 @@ Pictures in presentation:
 - https://www.flickr.com/photos/elferrada/2708912082
 - https://memory-alpha.fandom.com/wiki/Locutus_of_Borg
 - https://ita.animalia-life.club/vero-acciaio-tutti-i-personaggi-dei-robot
+
+Quotes:
+- https://grafana.com/blog/going-beyond-ai-chat-response-how-were-building-an-agentic-system-to-drive-grafana
+- https://www.datadoghq.com/blog/engineering/bits-ai-eval-platform/#why-tool-level-testing-and-live-replay-werent-enough
+- https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
