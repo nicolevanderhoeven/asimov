@@ -1,6 +1,6 @@
 # Asimov's Zeroth Law of Robotics: Observability for AI
 
-Author: Nicole van der Hoeven ([Mastodon](https://pkm.social/@nicole))
+Author: Nicole van der Hoeven ([site](https://nicole.to/site), [Mastodon](https://pkm.social/@nicole), [email](mailto:nicole@grafana.com))
 
 This is a repository for the slides and code for the talk "Asimov's Zeroth Law of Robotics: Observability for AI" presented at:
 - [KubeCon Europe 2025](https://nicolevanderhoeven.com/blog/20250402-asmiovs-zeroth-law-of-robotics/) in London, England ([video link](https://www.youtube.com/watch?v=x6EKTCAWtn8))
