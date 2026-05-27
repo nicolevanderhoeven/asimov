@@ -5,8 +5,8 @@ Author: Nicole van der Hoeven ([Mastodon](https://pkm.social/@nicole))
 This is a repository for the slides and code for the talk "Asimov's Zeroth Law of Robotics: Observability for AI" presented at:
 - [KubeCon Europe 2025](https://nicolevanderhoeven.com/blog/20250402-asmiovs-zeroth-law-of-robotics/) in London, England ([video link](https://www.youtube.com/watch?v=x6EKTCAWtn8))
 - [Dutch Cloud Native Days 2025](https://nicolevanderhoeven.com/blog/20250703-asimovs-zeroth-law-dutch-cloud-native-day/) in Utrecht, the Netherlands
-- [Newcrafts 2025](https://nicolevanderhoeven.com/blog/20251106-asimovs-zeroth-law-newcrafts/) in Paris, France
-- ExpoQA 2026 in Madrid, Spain
+- [Newcrafts 2025](https://nicolevanderhoeven.com/blog/20251106-asimovs-zeroth-law-newcrafts/) in Paris, France ([slides](https://nicole.to/asimovslides))
+- ExpoQA 2026 in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
 
 This repository consists of:
 - A two-player D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
@@ -92,13 +92,6 @@ If you're using the CLI version, type your input directly into the terminal afte
 - [Prometheus](https://nicole.to/promrepo) for metrics
 - [Tempo](https://nicole.to/temporepo) for traces
 - [k6](https://nicole.to/k6repo) for testing
-
-
-## Slides
-
-I've updated the slides a few times.
-- Newcrafts 2026: [https://nicole.to/asimovslides](https://nicole.to/asimovslides)
-- ExpoQA 2026: [https://nicole.to/expoqa2026](https://nicole.to/expoqa2026)
 
 ## References
 
