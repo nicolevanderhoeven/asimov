@@ -9,6 +9,7 @@ This is a repository for the slides and code for the talk "Asimov's Zeroth Law o
 - ExpoQA 2026 in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
 
 This repository consists of:
+- An experimental Go version in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. The existing Python demo remains available below.
 - A two-player D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
 - A CLI wrapper for the game, in `cli_play.py`.
 - A k6 test to run against the AI app, in `tests/test.js`.
