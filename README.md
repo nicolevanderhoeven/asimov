@@ -9,10 +9,13 @@ This is a repository for the slides and code for the talk "Asimov's Zeroth Law o
 - ExpoQA 2026 in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
 
 This repository consists of:
+- An experimental Go version in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. The existing Python demo remains available below.
 - A two-player D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
 - A CLI wrapper for the game, in `cli_play.py`.
 - A k6 test to run against the AI app, in `tests/test.js`.
 - A k6 test that uses AI to test the AI app, in `tests/test-ai.js`.
+- A single-VU k6 functional test (scripted checks plus malformed-input edge cases) in `tests/test_functional.js`.
+- A ramping-VU k6 traffic generator, for populating metrics/logs/traces under sustained load, in `tests/test_traffic.js`.
 - A custom logging framework, in `scripts/loggingfw.py`.
 - Telemetry setup helpers in `scripts/sigil_setup.py` and `scripts/otel_setup.py`.
 - A one-off Sigil error-series seeder in `scripts/seed_error_metrics.py` (run as `python -m scripts.seed_error_metrics`).
@@ -81,7 +84,11 @@ If you're using the Flask app:
 If you're using the CLI version, type your input directly into the terminal after the welcome message. Type `exit` or `quit` to end the game.
 
 3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
-4. Run the k6 test using `k6 run tests/test.js`.
+4. Run the k6 tests, with the Flask app already running at `http://localhost:5050`:
+   - `k6 run tests/test.js` — the original scripted hallucination checks.
+   - `k6 run tests/test-ai.js` — AI-generated adversarial scenarios (needs `-e ANTHROPIC_API_KEY=...`).
+   - `k6 run tests/test_functional.js` — a single-VU run of the same scripted checks plus missing/empty/malformed-input edge cases. Single VU is intentional: `play.py` holds one global conversation, so concurrent VUs would interleave turns and make the checks meaningless.
+   - `k6 run tests/test_traffic.js` — a ramping-VU load (0→10 VUs over ~7 minutes) mixing intro fetches and play turns, with a small share of intentionally malformed requests, to generate steady traffic for viewing metrics, logs, and traces in Grafana. Checks here are limited to status/latency, not conversation content, for the same shared-state reason.
 
 ## Resources
 

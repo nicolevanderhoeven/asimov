@@ -22,8 +22,13 @@ app = Flask(__name__)
 
 @app.route("/play", methods=["POST"])
 def play():
-    data = request.get_json()
+    # silent=True: fall through to the message check below instead of
+    # letting Flask's own JSON-parse-failure path raise a separate 400,
+    # so every bad-input case returns the same {"error": ...} shape.
+    data = request.get_json(silent=True) or {}
     message = data.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return jsonify({"error": "'message' is required and must be a non-empty string"}), 400
     simulator.inject(protagonist_name, message)
     name, response = simulator.step()
     return jsonify({"speaker": name, "response": response})

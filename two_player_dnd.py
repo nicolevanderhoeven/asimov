@@ -202,7 +202,15 @@ class DialogueSimulator:
             agent.reset()
 
     def inject(self, name: str, message: str) -> None:
-        """Initiate or continue the conversation with a ``message`` from ``name``."""
+        """Initiate or continue the conversation with a ``message`` from ``name``.
+
+        Raises ``ValueError`` on a blank message rather than letting it reach
+        the model: an empty user turn passes straight through to Anthropic's
+        API, which rejects empty content, surfacing as a confusing crash
+        several calls downstream instead of a clear error at the source.
+        """
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("message must be a non-empty string")
         for agent in self.agents:
             logger.info("%s: %s", agent.name, message)
             agent.receive(name, message)
