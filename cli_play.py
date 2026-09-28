@@ -12,6 +12,9 @@ def run_interactive_game():
         if user_input.lower() in {"exit", "quit"}:
             print("👋 Ending game. Goodbye!")
             break
+        if not user_input:
+            print("Please enter an action.")
+            continue
 
         simulator.inject(protagonist_name, user_input)
         name, message = simulator.step()
