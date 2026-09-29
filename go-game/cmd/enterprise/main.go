@@ -28,16 +28,11 @@ func main() {
 func run() error {
 	offline := flag.Bool("offline", false, "Play using exact /do commands, without an LLM or network telemetry")
 	noTelemetry := flag.Bool("no-telemetry", false, "Explicitly disable Grafana export")
-	resume := flag.Bool("resume", false, "Resume the saved game")
-	save := flag.String("save", ".enterprise-save.json", "Local save file")
 	env := flag.String("env", "../.env", "Environment file; existing shell variables take precedence")
 	serve := flag.Bool("serve", false, "Run an HTTP API server (one isolated session per client) instead of the REPL")
 	addr := flag.String("addr", ":8080", "HTTP listen address; only used with --serve")
 	sessionTTL := flag.Duration("session-ttl", 30*time.Minute, "Idle session expiry; only used with --serve")
 	flag.Parse()
-	if *serve && *resume {
-		return fmt.Errorf("--resume is not supported with --serve; sessions are created per-request")
-	}
 	if err := godotenv.Load(*env); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read environment file: %w", err)
 	}
@@ -78,5 +73,5 @@ func run() error {
 	if *serve {
 		return runServe(ctx, &g, *addr, *sessionTTL, logger)
 	}
-	return runREPL(ctx, &g, *resume, *save, *offline, logger)
+	return runREPL(ctx, &g, *offline, logger)
 }

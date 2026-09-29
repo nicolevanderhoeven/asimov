@@ -1,8 +1,6 @@
 package game
 
 import (
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -181,18 +179,5 @@ func TestHazardAndSave(t *testing.T) {
 	r := s.Apply(Action{"isolate", "relay"}, sequence(t, 1, 6))
 	if !s.Isolated || s.HP != 18 || r.Damage != 6 {
 		t.Fatal(s, r)
-	}
-}
-
-func TestSaveRoundTrip(t *testing.T) {
-	s := New("test")
-	s.Clues["logs"] = true
-	path := filepath.Join(t.TempDir(), "save.json")
-	if err := Save(path, s); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(path)
-	if err != nil || !reflect.DeepEqual(got, s) {
-		t.Fatal(got, err)
 	}
 }

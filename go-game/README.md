@@ -39,13 +39,10 @@ telemetry network calls, use `--offline` and exact `/do` commands.
 
 ```sh
 go run ./cmd/enterprise --offline
-go run ./cmd/enterprise --resume
 ```
 
-The game saves locally to `.enterprise-save.json` after each resolved action.
-To start another game, choose a new `--save .enterprise-save-demo2.json` path.
-An existing save is never silently overwritten at startup. Save files are local,
-trusted data, not an anti-cheat mechanism.
+The game does not save progress: every run starts a new adventure from scratch,
+and state lives only in memory until you quit.
 
 ## Serve
 
@@ -66,9 +63,8 @@ go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve retur
 | `POST /session/{id}/actions` | Submit an exact `{"kind","target"}` action, as `/do` does |
 | `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does |
 
-`--resume` is not supported with `--serve`; sessions are created per-request,
-not loaded from a save file. `--session-ttl` (default `30m`) controls how long
-an idle session is kept before it's reclaimed.
+Sessions are created per-request and held only in memory. `--session-ttl`
+(default `30m`) controls how long an idle session is kept before it's reclaimed.
 
 ## Play
 
@@ -82,8 +78,7 @@ GM's narration, up to the last `gm.MaxHistoryMessages` messages) into every
 `Resolve`/`Narrate` call, so a session's recorded generations read as one
 continuous conversation rather than isolated exchanges — this is what backs
 Agent Observability's Conversations view. History lives only in memory (not in
-the save file, and not in `game.State`, which stays free of any LLM-specific
-type): `--resume` restores state but starts a fresh, empty transcript.
+`game.State`, which stays free of any LLM-specific type).
 
 | Command | Purpose |
 | --- | --- |
@@ -96,7 +91,7 @@ type): `--resume` restores state but starts a fresh, empty transcript.
 The `[Engine]` result and displayed rolls are authoritative. The model only
 interprets intent and narrates; it cannot set rolls, damage, DCs, inventory, or
 rescue flags. It receives only discovered scenario facts. A failed narration
-does not undo a saved action. Model interpretation and prose can still be wrong;
+does not undo a resolved action. Model interpretation and prose can still be wrong;
 direct `/do` commands bypass interpretation for reproducible demonstrations.
 
 ## Rules and adaptations
@@ -143,7 +138,7 @@ Rules references:
 The Agent Observability SDK records tools; OTel exports application/tool spans,
 dice events, SDK generation metrics, the custom `game.actions` counter, and
 structured logs, under `service.name=asimov-enterprise-go`. All requests in a
-saved game retain its conversation ID; over HTTP, the session ID doubles as
+game share its conversation ID; over HTTP, the session ID doubles as
 the conversation ID. Generation data goes to the Agent Observability endpoint;
 traces, metrics, and logs go to Grafana Cloud's OTLP gateway. Exporters flush
 on exit. Policy hooks are disabled: the local rules engine enforces game

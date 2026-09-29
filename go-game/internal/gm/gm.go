@@ -110,7 +110,7 @@ func withHistory(history []provider.Message, input string) []provider.Message {
 
 // Resolve calls the SDK's typed tool exactly once per player input. Candidate
 // state is committed only after a successful planning call, so a failed model
-// request cannot leave an invisible half-turn in the saved game. history is
+// request cannot leave an invisible half-turn in the game state. history is
 // the session's prior turns (see AppendTurn); it is replayed ahead of input
 // so this call's recorded generation reads as part of one continuous
 // conversation rather than an isolated exchange.

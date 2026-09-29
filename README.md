@@ -47,7 +47,7 @@ See [`go-game/README.md`](go-game/README.md) for full run instructions (CLI usag
 
 ## Usage
 
-1. Run the game: `cd go-game && go run ./cmd/enterprise`. See [`go-game/README.md`](go-game/README.md) for CLI commands (`/do`, natural language, `--offline`, `--resume`, etc.).
+1. Run the game: `cd go-game && go run ./cmd/enterprise`. See [`go-game/README.md`](go-game/README.md) for CLI commands (`/do`, natural language, `--offline`, etc.).
 2. Interact with the game.
 3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
 4. Run the k6 tests against the app's HTTP API instead of the CLI:

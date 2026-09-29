@@ -23,30 +23,15 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-func runREPL(ctx context.Context, g *gm.GM, resume bool, save string, offline bool, logger *slog.Logger) error {
+func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger) error {
+	// Every run starts a fresh game; state and dialogue history live only in
+	// memory for the lifetime of the process.
 	s := game.New(agentobservability.NewGenerationID())
-	// Dialogue history lives only in memory, not in the save file (game.State
-	// stays free of any LLM-specific type per its own package doc): a resumed
-	// game restores state but starts a fresh, empty conversation transcript.
 	var history []provider.Message
-	if resume {
-		var err error
-		s, err = game.Load(save)
-		if err != nil {
-			return err
-		}
-	} else if _, err := os.Stat(save); err == nil {
-		return fmt.Errorf("save already exists; use --resume or choose a new --save path")
-	}
 	ctx = agento11y.WithConversationID(ctx, s.ConversationID)
 	ctx = agento11y.WithConversationTitle(ctx, game.Title)
-	if err := game.Save(save, s); err != nil {
-		return err
-	}
 	fmt.Printf("\n%s\n2014 5e subset with Star Trek adaptations. Type /help for commands.\n\n", game.Title)
-	if !resume {
-		fmt.Println(game.Opening)
-	}
+	fmt.Println(game.Opening)
 	show(s)
 	// Read input in a goroutine so Ctrl-C also shuts down exporters while idle.
 	lines := make(chan string)
@@ -83,7 +68,7 @@ func runREPL(ctx context.Context, g *gm.GM, resume bool, save string, offline bo
 		case "quit", "exit", "/quit":
 			return nil
 		case "/help":
-			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\nState autosaves after every resolved action. Use --resume next time.")
+			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\nProgress is not saved; each run starts a new game.")
 			continue
 		case "/status", "/actions":
 			show(s)
@@ -98,7 +83,7 @@ func runREPL(ctx context.Context, g *gm.GM, resume bool, save string, offline bo
 			continue
 		}
 		if s.Won || s.HP <= 0 {
-			fmt.Println("This adventure has ended. Use a new --save path to start again.")
+			fmt.Println("This adventure has ended. Restart the game to play again.")
 			continue
 		}
 		turnCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -131,13 +116,6 @@ func runREPL(ctx context.Context, g *gm.GM, resume bool, save string, offline bo
 			cancel()
 			continue
 		}
-		// Persist authoritative state before optional narration, so an interrupted
-		// stream or provider outage cannot undo or repeat a completed action.
-		if err = game.Save(save, s); err != nil {
-			span.End()
-			cancel()
-			return fmt.Errorf("save resolved turn: %w", err)
-		}
 		fmt.Println("\n[Engine]", result.Message)
 		for _, r := range result.Rolls {
 			fmt.Printf("  %s: %v %+d = %d", r.Label, r.Dice, r.Modifier, r.Total)
@@ -155,7 +133,7 @@ func runREPL(ctx context.Context, g *gm.GM, resume bool, save string, offline bo
 			if err = g.Narrate(turnCtx, history, input, result, io.MultiWriter(os.Stdout, &narration)); err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, "narration failed")
-				fmt.Fprintln(os.Stderr, "\nNarration interrupted; the engine result above is saved:", err)
+				fmt.Fprintln(os.Stderr, "\nNarration interrupted; the engine result above still stands:", err)
 			}
 			// Recorded for the next turn regardless of a mid-stream error above:
 			// AppendTurn only skips a turn whose narration is entirely empty, and
