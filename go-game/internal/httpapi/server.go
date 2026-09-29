@@ -9,7 +9,7 @@ import (
 
 // Server adapts gm.GM and a per-session Store to HTTP. offline mirrors
 // cmd/enterprise's --offline flag: when true, gm.Model is nil and /resolve
-// (the only endpoint that needs an LLM) is refused up front.
+// (and a narrated /roll), which need an LLM, are refused up front.
 type Server struct {
 	gm      *gm.GM
 	store   *Store
@@ -27,5 +27,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /session/{id}", s.handleGetSession)
 	mux.HandleFunc("POST /session/{id}/actions", s.handleAction)
 	mux.HandleFunc("POST /session/{id}/resolve", s.handleResolve)
+	mux.HandleFunc("POST /session/{id}/roll", s.handleRoll)
 	return mux
 }

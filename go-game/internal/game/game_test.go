@@ -22,6 +22,16 @@ func sequence(t *testing.T, values ...int) Roller {
 	}
 }
 
+// play applies a and, if it calls for a check, rolls it the way the player
+// would with /roll.
+func play(s *State, a Action, roll Roller) Result {
+	r := s.Apply(a, roll)
+	if r.RollRequired != nil {
+		return s.Roll(r.RollRequired.Ability, roll)
+	}
+	return r
+}
+
 func TestModifiers(t *testing.T) {
 	for score, want := range map[int]int{1: -5, 3: -4, 8: -1, 9: -1, 10: 0, 11: 0, 18: 4, 20: 5} {
 		if got := Modifier(score); got != want {
@@ -78,7 +88,7 @@ func TestRejectWithoutMutation(t *testing.T) {
 func TestCompleteRescueWithoutCombat(t *testing.T) {
 	s := New("test")
 	for _, a := range []Action{{"inspect", "logs"}, {"scan", "sensors"}, {"move", "sickbay"}, {"inspect", "medical_records"}, {"move", "bridge"}, {"move", "engineering"}, {"inspect", "relay"}, {"bypass", "drone"}, {"isolate", "relay"}, {"rescue", "crew"}} {
-		r := s.Apply(a, func(int) int { return 15 })
+		r := play(&s, a, func(int) int { return 15 })
 		if !r.Allowed {
 			t.Fatalf("%+v: %s", a, r.Message)
 		}
@@ -113,11 +123,11 @@ func TestRescueRequiresEvidence(t *testing.T) {
 
 func TestFailureCanBeRetried(t *testing.T) {
 	s := New("test")
-	s.Apply(Action{"scan", "sensors"}, sequence(t, 1))
+	play(&s,Action{"scan", "sensors"}, sequence(t, 1))
 	if s.Clues["frequency"] {
 		t.Fatal("failed check revealed frequency")
 	}
-	s.Apply(Action{"scan", "sensors"}, sequence(t, 10))
+	play(&s,Action{"scan", "sensors"}, sequence(t, 10))
 	if !s.Clues["frequency"] {
 		t.Fatal("retry did not reveal frequency")
 	}
@@ -127,7 +137,7 @@ func TestCombatAndCriticalDamage(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	// Player wins initiative, critically hits, and deals 6+4+2 damage.
-	r := s.Apply(Action{"attack", "drone"}, sequence(t, 15, 1, 20, 6, 4))
+	r := play(&s,Action{"attack", "drone"}, sequence(t, 15, 1, 20, 6, 4))
 	if s.DroneHP != 0 || s.Combat || s.HP != 24 || len(r.Rolls) != 3 {
 		t.Fatalf("bad critical or retaliation after defeat: %+v %+v", s, r)
 	}
@@ -137,7 +147,7 @@ func TestDroneActsFirstAndCanDisableData(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	s.HP = 1
-	r := s.Apply(Action{"attack", "drone"}, sequence(t, 1, 20, 20, 4, 4))
+	r := play(&s,Action{"attack", "drone"}, sequence(t, 1, 20, 20, 4, 4))
 	if s.HP != 0 || s.DroneHP != 10 || r.State.Status != "disabled" {
 		t.Fatal(s, r)
 	}
@@ -163,7 +173,7 @@ func TestDodgeAndRetreat(t *testing.T) {
 func TestBypassFailureStartsCombat(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
-	s.Apply(Action{"bypass", "drone"}, sequence(t, 1, 15, 1))
+	play(&s,Action{"bypass", "drone"}, sequence(t, 1, 15, 1))
 	if !s.Combat || s.DroneHP != 10 {
 		t.Fatal(s)
 	}
@@ -176,8 +186,62 @@ func TestHazardAndSave(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	s.DroneHP = 0
-	r := s.Apply(Action{"isolate", "relay"}, sequence(t, 1, 6))
+	r := play(&s,Action{"isolate", "relay"}, sequence(t, 1, 6))
 	if !s.Isolated || s.HP != 18 || r.Damage != 6 {
 		t.Fatal(s, r)
+	}
+}
+
+func TestRollRequiresPlayerCommand(t *testing.T) {
+	s := New("test")
+	r := s.Apply(Action{"scan", "sensors"}, sequence(t))
+	if !r.Allowed || r.RollRequired == nil || r.RollRequired.Command != "/roll Intelligence" || s.Turn != 0 || len(r.Rolls) != 0 {
+		t.Fatalf("scan should wait for /roll without rolling: %+v", r)
+	}
+	if r.State.Pending == nil {
+		t.Fatal("view does not show the pending roll")
+	}
+	for _, wrong := range []string{"", "Strength", "intelligence strength"} {
+		if r := s.Roll(wrong, sequence(t)); r.Allowed || s.Pending == nil {
+			t.Fatalf("/roll %q should be rejected without rolling: %+v", wrong, r)
+		}
+	}
+	r = s.Roll("int (Investigation)", sequence(t, 10))
+	if !r.Allowed || !s.Clues["frequency"] || s.Pending != nil || s.Turn != 1 || len(r.Rolls) != 1 || !r.Rolls[0].Manual || r.Rolls[0].Total != 16 {
+		t.Fatalf("roll did not resolve the scan: %+v", r)
+	}
+	if r := s.Roll("Intelligence", sequence(t)); r.Allowed {
+		t.Fatal("rolled with nothing pending")
+	}
+}
+
+func TestOtherActionCancelsPendingRoll(t *testing.T) {
+	s := New("test")
+	s.Apply(Action{"scan", "sensors"}, sequence(t))
+	s.Apply(Action{"move", "sickbay"}, sequence(t))
+	if s.Pending != nil || s.Location != "sickbay" {
+		t.Fatal(s)
+	}
+	if s.Roll("Intelligence", sequence(t)).Allowed {
+		t.Fatal("abandoned roll still resolved")
+	}
+}
+
+func TestOnlyPlayerRollIsManual(t *testing.T) {
+	s := New("test")
+	s.Location = "engineering"
+	// Data wins initiative and misses; the drone then fires and misses.
+	r := play(&s, Action{"attack", "drone"}, sequence(t, 15, 1, 2, 1))
+	manual := 0
+	for _, x := range r.Rolls {
+		if x.Manual {
+			manual++
+			if x.Label != "Phaser attack" {
+				t.Fatalf("engine roll marked manual: %+v", x)
+			}
+		}
+	}
+	if manual != 1 || len(r.Rolls) != 4 {
+		t.Fatalf("%+v", r.Rolls)
 	}
 }

@@ -179,9 +179,16 @@ func TestActionAfterEndedSessionIs409(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		var result game.Result
+		err = json.NewDecoder(res.Body).Decode(&result)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			t.Fatalf("action %s: status = %d, want 200", body, res.StatusCode)
+		if res.StatusCode != http.StatusOK || err != nil {
+			t.Fatalf("action %s: status = %d, want 200 (%v)", body, res.StatusCode, err)
+		}
+		if result.RollRequired != nil {
+			if status, _ := postRoll(t, ts.URL, id, `{"ability":"`+result.RollRequired.Ability+`"}`); status != http.StatusOK {
+				t.Fatalf("roll for %s: status = %d, want 200", body, status)
+			}
 		}
 	}
 	res, err := http.Post(ts.URL+"/session/"+id+"/actions", "application/json", bytes.NewBufferString(`{"kind":"inspect","target":"logs"}`))
@@ -282,6 +289,76 @@ func TestResolveHistoryAccumulatesAcrossTurns(t *testing.T) {
 	}
 	if m.params.Prompt[1].Role != provider.RoleUser || m.params.Prompt[2].Role != provider.RoleAssistant {
 		t.Fatalf("replayed history out of order: %+v", m.params.Prompt)
+	}
+}
+
+func postRoll(t *testing.T, base, id, body string) (int, resolveResponse) {
+	t.Helper()
+	res, err := http.Post(base+"/session/"+id+"/roll", "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out resolveResponse
+	if res.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return res.StatusCode, out
+}
+
+func TestRollResolvesPendingAction(t *testing.T) {
+	ts := newTestServer(t, &fakeModel{})
+	defer ts.Close()
+	id := createSession(t, ts.URL)
+	res, err := http.Post(ts.URL+"/session/"+id+"/actions", "application/json", bytes.NewBufferString(`{"kind":"scan","target":"sensors"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pending game.Result
+	err = json.NewDecoder(res.Body).Decode(&pending)
+	res.Body.Close()
+	if err != nil || pending.RollRequired == nil || pending.State.Turn != 0 {
+		t.Fatalf("scan should wait for a roll: %+v %v", pending, err)
+	}
+	if status, _ := postRoll(t, ts.URL, id, `{}`); status != http.StatusBadRequest {
+		t.Fatalf("missing ability: status = %d, want 400", status)
+	}
+	status, body := postRoll(t, ts.URL, id, `{"ability":"Intelligence","narrate":true}`)
+	if status != http.StatusOK || !body.Result.Allowed || body.Result.State.Turn != 1 || len(body.Result.Rolls) != 1 || !body.Result.Rolls[0].Manual || body.Narration == "" {
+		t.Fatalf("unexpected roll response: %d %+v", status, body)
+	}
+}
+
+func TestResolveRoutesRollCommandToEngine(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"scan","target":"sensors"}`}}
+	ts := newTestServer(t, m)
+	defer ts.Close()
+	id := createSession(t, ts.URL)
+	for i, input := range []string{"Scan the sensor buffer", "/roll Intelligence"} {
+		res, err := http.Post(ts.URL+"/session/"+id+"/resolve", "application/json", bytes.NewBufferString(`{"input":"`+input+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body resolveResponse
+		err = json.NewDecoder(res.Body).Decode(&body)
+		res.Body.Close()
+		if err != nil || res.StatusCode != http.StatusOK {
+			t.Fatalf("%q: status %d %v", input, res.StatusCode, err)
+		}
+		if (i == 0) != (body.Result.RollRequired != nil) || body.Result.State.Turn != i {
+			t.Fatalf("%q: unexpected result %+v", input, body.Result)
+		}
+	}
+}
+
+func TestNarratedRollOfflineIs503(t *testing.T) {
+	ts := newTestServer(t, nil)
+	defer ts.Close()
+	id := createSession(t, ts.URL)
+	if status, _ := postRoll(t, ts.URL, id, `{"ability":"Intelligence","narrate":true}`); status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", status)
 	}
 }
 

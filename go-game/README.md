@@ -61,7 +61,8 @@ go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve retur
 | `POST /session` | Create a new session; returns its id and initial state |
 | `GET /session/{id}` | Current state |
 | `POST /session/{id}/actions` | Submit an exact `{"kind","target"}` action, as `/do` does |
-| `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does |
+| `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does; an input of `/roll ABILITY` rolls the pending check |
+| `POST /session/{id}/roll` | Roll the pending check: `{"ability"}`, plus `"narrate": true` for GM narration (needs an LLM) |
 
 Sessions are created per-request and held only in memory. `--session-ttl`
 (default `30m`) controls how long an idle session is kept before it's reclaimed.
@@ -84,9 +85,19 @@ Agent Observability's Conversations view. History lives only in memory (not in
 | --- | --- |
 | `/actions` | Show the current supported actions and their mechanics |
 | `/do inspect logs` | Execute a supported action directly |
+| `/roll Intelligence` | Roll the check the GM just asked for |
 | `/status` | Show location, health, and discovered evidence |
 | `/sheet` | Show Data's fixed character sheet |
 | `/quit` | Flush telemetry and exit |
+
+Actions that call for a check (scanning the sensors, bypassing or attacking
+the drone, isolating the relay) don't resolve right away. The GM names the
+check and waits for you to roll it yourself, for example `/roll Intelligence`
+or `/roll Dexterity`. The engine then draws the d20, shows it, and resolves the
+action, and the GM narrates what happens. Until then the turn hasn't advanced,
+and choosing a different action drops the pending roll. The engine still rolls
+initiative and the drone's attacks for you. Over HTTP, a response with
+`roll_required` means the action is waiting on `POST /session/{id}/roll`.
 
 The `[Engine]` result and displayed rolls are authoritative. The model only
 interprets intent and narrates; it cannot set rolls, damage, DCs, inventory, or

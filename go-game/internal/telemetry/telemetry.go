@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"os"
@@ -81,7 +82,9 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func Init(ctx context.Context, c Config) (_ *Runtime, err error) {
+// Init sets up exporters. diag receives the local copy of asynchronous export
+// diagnostics (see Diagnostics); pass os.Stderr for straight-through output.
+func Init(ctx context.Context, c Config, diag io.Writer) (_ *Runtime, err error) {
 	if err = c.Validate(); err != nil {
 		return nil, err
 	}
@@ -115,15 +118,22 @@ func Init(ctx context.Context, c Config) (_ *Runtime, err error) {
 	lp := sdklog.NewLoggerProvider(sdklog.WithResource(res), sdklog.WithProcessor(sdklog.NewBatchProcessor(le)))
 	r.shutdown = append(r.shutdown, lp.Shutdown)
 	otel.SetTracerProvider(tp)
+	// The OTel SDK's default error handler writes batch export failures to
+	// stderr from background goroutines; send them to diag instead.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		fmt.Fprintln(diag, "telemetry export error:", err)
+	}))
 	otel.SetMeterProvider(mp)
 	r.Logger = slog.New(otelslog.NewHandler(Service, otelslog.WithLoggerProvider(lp)))
 	cfg := agento11y.DefaultConfig()
 	// agento11y logs its own export failures (rejected/failed generation
 	// sends, flush errors) through this logger rather than returning them to
-	// the caller. Fan it out to stderr in addition to r.Logger's normal Loki
+	// the caller. Fan it out to diag in addition to r.Logger's normal Loki
 	// destination, so those diagnostics are visible locally in real time
 	// instead of requiring a round trip through Grafana Cloud to discover.
-	cfg.Logger = slog.NewLogLogger(fanOutHandler{r.Logger.Handler(), slog.NewTextHandler(os.Stderr, nil)}, slog.LevelInfo)
+	// Routine per-batch success lines still go to Loki but not to diag.
+	local := dropMessages{slog.NewTextHandler(diag, nil), sdkSuccessPrefixes}
+	cfg.Logger = slog.NewLogLogger(fanOutHandler{r.Logger.Handler(), local}, slog.LevelInfo)
 	cfg.AgentName = Service
 	cfg.AgentVersion = c.Version
 	cfg.GenerationExport.Protocol = agento11y.GenerationExportProtocolHTTP
@@ -131,6 +141,38 @@ func Init(ctx context.Context, c Config) (_ *Runtime, err error) {
 	cfg.GenerationExport.Auth = agento11y.AuthConfig{Mode: agento11y.ExportAuthModeBasic, TenantID: c.Instance, BasicPassword: c.Token}
 	r.Client = agento11y.NewClient(cfg)
 	return r, nil
+}
+
+// sdkSuccessPrefixes are agento11y's routine per-export success messages. The
+// SDK logs these at the same level as its failures, so they're filtered by
+// message rather than level.
+var sdkSuccessPrefixes = []string{
+	"agento11y generation export response",
+	"agento11y workflow step export response",
+}
+
+// dropMessages wraps a handler, discarding records whose message starts with
+// any of the given prefixes.
+type dropMessages struct {
+	slog.Handler
+	prefixes []string
+}
+
+func (d dropMessages) Handle(ctx context.Context, record slog.Record) error {
+	for _, p := range d.prefixes {
+		if strings.HasPrefix(record.Message, p) {
+			return nil
+		}
+	}
+	return d.Handler.Handle(ctx, record)
+}
+
+func (d dropMessages) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return dropMessages{d.Handler.WithAttrs(attrs), d.prefixes}
+}
+
+func (d dropMessages) WithGroup(name string) slog.Handler {
+	return dropMessages{d.Handler.WithGroup(name), d.prefixes}
 }
 
 // fanOutHandler dispatches every record to each of its handlers in order,

@@ -106,7 +106,7 @@ function playActionSequence(sessionId, initialState) {
     }
     const chosen = chooseAction(state.available_actions);
     const beforeTurn = state.turn;
-    const res = postAction(sessionId, chosen, headers);
+    const res = rollIfRequired(sessionId, postAction(sessionId, chosen, headers), headers);
     const success = check(res, {
       'status is 200': (res) => res.status === 200,
       [`turn${turn}_allowed`]: (res) => res.body && JSON.parse(res.body).allowed === true,
@@ -131,4 +131,17 @@ function playActionSequence(sessionId, initialState) {
 
 function postAction(sessionId, action, headers) {
   return http.post(`${BASE_URL}/session/${sessionId}/actions`, JSON.stringify({ kind: action.kind, target: action.target }), { headers, tags: { name: 'app' } });
+}
+
+// Actions that call for a check wait for the player's own /roll before they
+// resolve (and before the turn advances), so roll the named ability right
+// away. /roll answers {result, narration}; the returned response carries just
+// the result, the same shape /actions returns, so callers' checks read either.
+function rollIfRequired(sessionId, res, headers) {
+  if (res.status !== 200) return res;
+  const pending = JSON.parse(res.body).roll_required;
+  if (!pending) return res;
+  const rollRes = http.post(`${BASE_URL}/session/${sessionId}/roll`, JSON.stringify({ ability: pending.ability }), { headers, tags: { name: 'app' } });
+  if (rollRes.status !== 200) return rollRes;
+  return { status: rollRes.status, body: JSON.stringify(JSON.parse(rollRes.body).result) };
 }

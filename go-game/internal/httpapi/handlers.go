@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/grafana/agento11y/go/agento11y"
 	"github.com/grafana/ai-sdk/middleware/agentobservability"
@@ -120,8 +121,11 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		ctx, span := otel.Tracer(telemetry.Service).Start(turnContext(r.Context(), state), "game.turn")
 		defer span.End()
 		span.SetAttributes(attribute.String("gen_ai.conversation.id", state.ConversationID), attribute.Int("game.turn", state.Turn+1))
-		result, resolveErr = s.gm.Resolve(ctx, state, data.History, req.Input)
-		if resolveErr != nil {
+		// A typed /roll is the player's own roll, not an action for the model
+		// to interpret, so it goes straight to the engine.
+		if text, ok := strings.CutPrefix(req.Input, "/roll"); ok && (text == "" || text[0] == ' ') {
+			result = s.gm.RollPending(ctx, state, strings.TrimSpace(text), agentobservability.NewGenerationID())
+		} else if result, resolveErr = s.gm.Resolve(ctx, state, data.History, req.Input); resolveErr != nil {
 			return
 		}
 		// A broken narration stream doesn't invalidate an already-committed
@@ -139,6 +143,58 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "adventure has ended")
 	case resolveErr != nil:
 		writeError(w, http.StatusUnprocessableEntity, resolveErr.Error())
+	default:
+		resp := resolveResponse{Result: result, Narration: narration.String()}
+		if narrateErr != nil {
+			resp.NarrationError = narrateErr.Error()
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req rollRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Ability == "" {
+		writeError(w, http.StatusBadRequest, "ability is required")
+		return
+	}
+	if req.Narrate && s.offline {
+		writeError(w, http.StatusServiceUnavailable, "narration requires an LLM; server was started with --offline")
+		return
+	}
+	var (
+		result     game.Result
+		narration  bytes.Buffer
+		narrateErr error
+		ended      bool
+	)
+	found := s.store.WithSession(id, func(data *SessionData) {
+		state := data.State
+		if state.Won || state.HP <= 0 {
+			ended = true
+			return
+		}
+		ctx, span := otel.Tracer(telemetry.Service).Start(turnContext(r.Context(), state), "game.turn")
+		defer span.End()
+		span.SetAttributes(attribute.String("gen_ai.conversation.id", state.ConversationID), attribute.Int("game.turn", state.Turn+1))
+		result = s.gm.RollPending(ctx, state, req.Ability, agentobservability.NewGenerationID())
+		if !req.Narrate {
+			return
+		}
+		input := "/roll " + req.Ability
+		narrateErr = s.gm.Narrate(ctx, data.History, input, result, &narration)
+		data.History = gm.AppendTurn(data.History, input, narration.String())
+	})
+	switch {
+	case !found:
+		writeError(w, http.StatusNotFound, "session not found")
+	case ended:
+		writeError(w, http.StatusConflict, "adventure has ended")
 	default:
 		resp := resolveResponse{Result: result, Narration: narration.String()}
 		if narrateErr != nil {

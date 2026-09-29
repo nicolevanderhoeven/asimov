@@ -32,6 +32,9 @@ type Roll struct {
 	Target   int    `json:"target"`
 	Success  bool   `json:"success"`
 	Critical bool   `json:"critical,omitempty"`
+	// Manual marks the roll the player made with /roll, as opposed to one the
+	// engine made for the drone or for initiative.
+	Manual bool `json:"manual,omitempty"`
 }
 
 func Check(roll Roller, label string, bonus, target int, advantage, disadvantage, attack bool) Roll {

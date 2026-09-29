@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 const Title = "The Silent Enterprise"
@@ -21,6 +22,23 @@ type State struct {
 	Clues          map[string]bool `json:"clues"`
 	Isolated       bool            `json:"isolated"`
 	Won            bool            `json:"won"`
+	// Pending is the chosen action waiting on the player's own /roll. It is
+	// cleared when the roll resolves it or when any other action is chosen.
+	Pending *PendingRoll `json:"pending_roll,omitempty"`
+}
+
+// A PendingRoll names the check the player must roll for with /roll before
+// the engine resolves Action. The engine still rolls the die; the player only
+// decides when, and must name the ability the check calls for.
+type PendingRoll struct {
+	Action  Action `json:"action"`
+	Ability string `json:"ability"`
+	Check   string `json:"check"`
+	Target  int    `json:"target"`
+	Command string `json:"command"`
+	// aliases are the other words /roll accepts for this check, such as the
+	// skill name or the ability's abbreviation.
+	aliases []string
 }
 
 func New(id string) State {
@@ -40,17 +58,18 @@ type Option struct {
 }
 
 type View struct {
-	Title       string    `json:"title"`
-	Character   Character `json:"character"`
-	Location    string    `json:"location"`
-	Description string    `json:"description"`
-	HP          int       `json:"hp"`
-	Combat      bool      `json:"combat"`
-	DroneHP     int       `json:"drone_hp,omitempty"`
-	Turn        int       `json:"turn"`
-	Discovered  []string  `json:"discovered"`
-	Actions     []Option  `json:"available_actions"`
-	Status      string    `json:"status"`
+	Title       string       `json:"title"`
+	Character   Character    `json:"character"`
+	Location    string       `json:"location"`
+	Description string       `json:"description"`
+	HP          int          `json:"hp"`
+	Combat      bool         `json:"combat"`
+	DroneHP     int          `json:"drone_hp,omitempty"`
+	Turn        int          `json:"turn"`
+	Discovered  []string     `json:"discovered"`
+	Actions     []Option     `json:"available_actions"`
+	Pending     *PendingRoll `json:"pending_roll,omitempty"`
+	Status      string       `json:"status"`
 }
 
 var clueText = map[string]string{
@@ -80,6 +99,7 @@ func (s State) View() View {
 		v.Description = "Data is disabled. Restart to attempt the rescue again."
 		return v
 	}
+	v.Pending = s.Pending
 	add := func(k, t, d string) { v.Actions = append(v.Actions, Option{Action: Action{k, t}, Description: d}) }
 	if s.Combat {
 		v.DroneHP = s.DroneHP
@@ -121,7 +141,48 @@ type Result struct {
 	Message string `json:"message"`
 	Rolls   []Roll `json:"rolls,omitempty"`
 	Damage  int    `json:"damage,omitempty"`
-	State   View   `json:"state"`
+	// RollRequired is set when the chosen action is waiting on /roll; the
+	// action has not been resolved and the turn has not advanced yet.
+	RollRequired *PendingRoll `json:"roll_required,omitempty"`
+	State        View         `json:"state"`
+}
+
+// pendingRoll reports the player-rolled check that action a calls for, or nil
+// if a resolves without one. Rolls made on the drone's behalf, and initiative
+// when combat starts, stay with the engine.
+func pendingRoll(a Action) *PendingRoll {
+	p := &PendingRoll{Action: a}
+	switch a.Kind {
+	case "scan":
+		p.Ability, p.Check, p.Target, p.aliases = "Intelligence", "Intelligence (Investigation)", 12, []string{"int", "investigation"}
+	case "bypass":
+		p.Ability, p.Check, p.Target, p.aliases = "Intelligence", "Intelligence (Arcana): tricorder bypass", 13, []string{"int", "arcana"}
+	case "isolate":
+		p.Ability, p.Check, p.Target, p.aliases = "Dexterity", "Dexterity saving throw", 12, []string{"dex", "save", "saving", "throw"}
+	case "attack":
+		p.Ability, p.Check, p.Target, p.aliases = "Dexterity", "Phaser attack", 12, []string{"dex", "attack", "phaser"}
+	default:
+		return nil
+	}
+	p.Command = "/roll " + p.Ability
+	return p
+}
+
+// accepts reports whether the text after /roll names this check: every word
+// must be the ability, its abbreviation, or another word from the check's
+// name, so "/roll Intelligence" and "/roll int (investigation)" both work but
+// "/roll Strength" does not.
+func (p *PendingRoll) accepts(text string) bool {
+	words := strings.Fields(strings.ToLower(strings.NewReplacer("(", " ", ")", " ", ":", " ").Replace(text)))
+	if len(words) == 0 {
+		return false
+	}
+	for _, w := range words {
+		if w != strings.ToLower(p.Ability) && !slices.Contains(p.aliases, w) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *State) Apply(a Action, roll Roller) Result {
@@ -135,6 +196,42 @@ func (s *State) Apply(a Action, roll Roller) Result {
 		return finish("Transport is not ready. Recover the bridge frequency, sickbay biopatterns, and relay diagnostics first.")
 	}
 	r.Allowed = true
+	// Choosing another action abandons any roll that was still pending.
+	s.Pending = pendingRoll(a)
+	if s.Pending != nil {
+		r.RollRequired = s.Pending
+		return finish(fmt.Sprintf("This needs a roll: %s, target %d. Type %s to roll.", s.Pending.Check, s.Pending.Target, s.Pending.Command))
+	}
+	return s.resolve(a, roll)
+}
+
+// Roll resolves the pending action using the die rolled now. text is what the
+// player typed after /roll, and must name the ability the check calls for.
+func (s *State) Roll(text string, roll Roller) Result {
+	finish := func(msg string) Result { return Result{Message: msg, State: s.View()} }
+	p := s.Pending
+	switch {
+	case s.Won || s.HP <= 0:
+		return finish("This adventure has ended; there is nothing left to roll for.")
+	case p == nil:
+		return finish("No roll is needed right now. Choose an action first; the GM will ask for a roll if it calls for one.")
+	case strings.TrimSpace(text) == "":
+		return finish(fmt.Sprintf("Name the ability you are rolling: type %s.", p.Command))
+	case !p.accepts(text):
+		return finish(fmt.Sprintf("The GM asked for %s, not %s. Type %s.", p.Check, strings.TrimSpace(text), p.Command))
+	}
+	s.Pending = nil
+	r := s.resolve(p.Action, roll)
+	for i := range r.Rolls {
+		r.Rolls[i].Manual = r.Rolls[i].Label == p.Check
+	}
+	return r
+}
+
+// resolve applies an action already validated against the current view.
+func (s *State) resolve(a Action, roll Roller) Result {
+	r := Result{Allowed: true}
+	finish := func(msg string) Result { r.Message = msg; r.State = s.View(); return r }
 	s.Turn++
 	check := func(label string, bonus, dc int, adv, dis, attack bool) Roll {
 		x := Check(roll, label, bonus, dc, adv, dis, attack)

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -39,13 +40,18 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Background telemetry diagnostics, and anything a dependency writes via
+	// the standard log package, go through diag so the REPL can keep them
+	// off its input prompt.
+	diag := telemetry.NewDiagnostics(os.Stderr)
+	log.SetOutput(diag)
 	var client *agento11y.Client
 	cfg := telemetry.FromEnv()
 	if !*offline && os.Getenv("ANTHROPIC_API_KEY") == "" {
 		return fmt.Errorf("ANTHROPIC_API_KEY is required (or use --offline)")
 	}
 	if !*offline && !*noTelemetry {
-		r, err := telemetry.Init(ctx, cfg)
+		r, err := telemetry.Init(ctx, cfg, diag)
 		if err != nil {
 			return err
 		}
@@ -58,9 +64,10 @@ func run() error {
 				fmt.Fprintln(os.Stderr, "Telemetry flush failed:", err)
 			}
 		}()
-		fmt.Println("Grafana export configured: generations, traces, metrics, and logs.")
-	} else {
-		fmt.Println("Grafana telemetry is disabled for this run.")
+	}
+	telemetryNote := "Grafana export on: generations, traces, metrics, and logs."
+	if client == nil {
+		telemetryNote = "Grafana telemetry is off for this run."
 	}
 	g := gm.GM{Client: client, Logger: logger, Roll: game.RandomRoll}
 	if !*offline {
@@ -68,10 +75,11 @@ func run() error {
 		if model == "" {
 			model = "claude-sonnet-4-6"
 		}
-		g.Model = gm.Wrap(anthropic.New(os.Getenv("ANTHROPIC_API_KEY"), model), client, cfg.Version)
+		g.Model = gm.Wrap(anthropic.New(os.Getenv("ANTHROPIC_API_KEY"), model), client, cfg.Version, diag)
 	}
 	if *serve {
+		fmt.Println(telemetryNote)
 		return runServe(ctx, &g, *addr, *sessionTTL, logger)
 	}
-	return runREPL(ctx, &g, *offline, logger)
+	return runREPL(ctx, &g, *offline, logger, diag, telemetryNote)
 }
