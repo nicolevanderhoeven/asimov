@@ -1,6 +1,9 @@
 // Package trajeval grades a dicegm turn by its path, not its prose: it
 // compares what the narration claims the dice did with the roll_dice calls
 // the trace says actually happened.
+//
+// tests/lib/trajectory-grader.js is a JavaScript copy for k6. Both are held
+// to tests/fixtures/trajectory-graders.json; add cases there.
 package trajeval
 
 import (

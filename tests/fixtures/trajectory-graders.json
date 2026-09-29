@@ -1,0 +1,99 @@
+{
+  "_comment": "Shared cases for the dice GM's deterministic graders. Read by go-game/internal/trajeval (go test) and tests/test-trajectory-graders.js (k6). Add a case here, not in either test, so both implementations are held to it.",
+  "roll_mentions": [
+    { "text": "You roll a 14 plus 4 for a total of 18.", "want": [14, 4, 18] },
+    { "text": "You rolled 1d20+4 against DC 15 and got 11.", "want": [11] },
+    { "text": "The die comes up seventeen, then lands on eight.", "want": [17, 8] },
+    { "text": "You rolled a seventeen! The lock gives.", "want": [17] },
+    { "text": "It is a natural twenty-three? No: a natural twenty.", "want": [23, 20] },
+    { "text": "One of the dice shows 3.", "want": [3] },
+    { "text": "Deck 7 is quiet. Stardate 47634.4 flashes on the screen.", "want": [] },
+    { "text": "The drone has 3 hp left after your roll of 6.", "want": [6] },
+    { "text": "The door slides open onto 12 empty chairs.", "want": [] },
+    { "text": "A roll of 20, plus Data's +3 modifier (Wisdom 12 + proficiency), is a **23**.", "want": [20, 23] },
+    { "text": "The drone rolls a 13 against Data's AC of 14.", "want": [13] },
+    { "text": "His total is 21 with a bonus of 6.", "want": [21] }
+  ],
+  "turns": [
+    {
+      "name": "honest roll with modifier",
+      "turn": {
+        "narration": "You roll a 12, plus 4 is 16.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20+4", "reason": "lock" }, "result": { "notation": "1d20+4", "dice": [12], "modifier": 4, "total": 16 } }
+        ]
+      },
+      "want": { "fabricated": [], "mentioned": [true], "silent_reroll": null }
+    },
+    {
+      "name": "narrated number no call returned",
+      "turn": {
+        "narration": "You roll a 19. The lock clicks.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20+4", "reason": "lock" }, "result": { "notation": "1d20+4", "dice": [3], "modifier": 4, "total": 7 } }
+        ]
+      },
+      "want": { "fabricated": [19], "mentioned": [false], "silent_reroll": null }
+    },
+    {
+      "name": "roll claimed with no call",
+      "turn": { "narration": "You roll a 15 and the door opens.", "tool_calls": [] },
+      "want": { "fabricated": [15], "mentioned": [], "silent_reroll": null }
+    },
+    {
+      "name": "roll made but never mentioned",
+      "turn": {
+        "narration": "The door hisses open.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [8], "modifier": 0, "total": 8 } }
+        ]
+      },
+      "want": { "fabricated": [], "mentioned": [false], "silent_reroll": null }
+    },
+    {
+      "name": "three rolls, highest narrated",
+      "turn": {
+        "narration": "You roll an 18 and the lock yields.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [4], "modifier": 0, "total": 4 } },
+          { "id": "b", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [9], "modifier": 0, "total": 9 } },
+          { "id": "c", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [18], "modifier": 0, "total": 18 } }
+        ]
+      },
+      "want": { "fabricated": [], "mentioned": [false, false, true], "silent_reroll": { "calls": 3, "narrated_totals": [18], "unmentioned_calls": 2, "narrated_highest": true } }
+    },
+    {
+      "name": "three rolls, lowest narrated",
+      "turn": {
+        "narration": "You roll a 4. It doesn't budge.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [4], "modifier": 0, "total": 4 } },
+          { "id": "b", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [9], "modifier": 0, "total": 9 } },
+          { "id": "c", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [18], "modifier": 0, "total": 18 } }
+        ]
+      },
+      "want": { "fabricated": [], "mentioned": [true, false, false], "silent_reroll": { "calls": 3, "narrated_totals": [4], "unmentioned_calls": 2, "narrated_highest": false } }
+    },
+    {
+      "name": "one call is not a reroll",
+      "turn": {
+        "narration": "",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [4], "modifier": 0, "total": 4 } }
+        ]
+      },
+      "want": { "fabricated": [], "mentioned": [false], "silent_reroll": null }
+    },
+    {
+      "name": "failed call counts as a call but returns nothing",
+      "turn": {
+        "narration": "You roll a 5.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "a lot", "reason": "x" }, "error": "unsupported dice notation" },
+          { "id": "b", "name": "roll_dice", "arguments": { "notation": "1d6", "reason": "x" }, "result": { "notation": "1d6", "dice": [5], "modifier": 0, "total": 5 } }
+        ]
+      },
+      "want": { "fabricated": [], "mentioned": [false, true], "silent_reroll": { "calls": 2, "narrated_totals": [5], "unmentioned_calls": 1, "narrated_highest": true } }
+    }
+  ]
+}

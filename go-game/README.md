@@ -245,8 +245,12 @@ total, each model step, the narration, and the checks. The checks are:
   question "Does the following text report the result of a die roll?"
 
 `tests/test-trajectory.js` runs the same script and checks through k6 against
-the `/dm` routes of `--serve`, grading in JavaScript that mirrors
-`internal/trajeval`; keep the two in step.
+the `/dm` routes of `--serve`, grading with `tests/lib/trajectory-grader.js`, a
+JavaScript copy of `internal/trajeval`. Both copies are tested against the same
+cases in `tests/fixtures/trajectory-graders.json`: `go test ./internal/trajeval`
+and `k6 run tests/test-trajectory-graders.js` (no server or API key needed).
+Add new grader cases to that file, so a change to one copy that the other
+doesn't match fails a test.
 
 With telemetry on, each harness invocation is also an Agent Observability
 experiment. Every turn's checks become scores on the turn's final generation
