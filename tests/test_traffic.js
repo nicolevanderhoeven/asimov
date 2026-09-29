@@ -1,193 +1,61 @@
 import http from 'k6/http';
-import { sleep, check } from 'k6';
-import { randomIntBetween, randomItem } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
+import { check, sleep } from 'k6';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080'; // The Go app's HTTP API
-const anthropicApiKey = __ENV.ANTHROPIC_API_KEY; // Optional: enables LLM-chosen actions instead of a random pick
+// Small, repeatable traffic seed for the game's own Grafana telemetry. Each
+// /resolve call makes the game perform interpretation and narration, so its
+// generations, game spans, logs, and metrics all have traffic to display.
+const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
-// Malformed requests and post-ending actions deliberately hit 400/409;
-// without this, k6 would count those as http_req_failed even on the
-// intentionally-bad-request path this file exists to exercise.
-http.setResponseCallback(http.expectedStatuses(200, 201, 400, 409));
-
-// This is a traffic-generation load, not a correctness suite. Per-session
-// state means each VU now safely owns its own uninterrupted game — that
-// would technically let this file assert exact state transitions too, but
-// deliberately keep the checks status/latency-only: that's
-// test_functional.js's job, and tracking each VU's expected state across a
-// long ramping run would add bookkeeping with no benefit to this file's
-// actual purpose (populated metrics/traces/logs in Grafana under load).
 export const options = {
-  scenarios: {
-    traffic: {
-      executor: 'ramping-vus',
-      startVUs: 0,
-      stages: [
-        { duration: '1m', target: 5 },   // ramp up
-        { duration: '5m', target: 10 },  // sustain
-        { duration: '1m', target: 0 },   // ramp down
-      ],
-      gracefulRampDown: '10s',
-    },
-  },
-  cloud: {
-    projectID: 7624575,
-    name: 'Asimov traffic generation',
-  },
-  thresholds: {
-    // Loose on purpose: intentionally-bad requests below inflate the error
-    // rate a little so error paths also show up in telemetry. Scoped to
-    // {name:app} — our own app's requests — so an optional live Anthropic
-    // call in chooseAction() (tagged {name:anthropic} below) can't trip a
-    // threshold meant to catch regressions in our own app under load.
-    'http_req_failed{name:app}': ['rate<0.10'],
-    'http_req_duration{name:app}': ['p(95)<5000'],
-  },
+  vus: 1,
+  duration: '1m',
+  thresholds: { checks: ['rate==1'] },
 };
 
-// VU-scoped: k6 re-runs default() per iteration, but a `let` at module
-// scope persists across one VU's iterations, so each VU creates its
-// session once and reuses it for the rest of its run. currentState tracks
-// the latest known state so playTurn always chooses from actions that are
-// actually legal right now, instead of a fixed list that drifts out of
-// sync with location/combat as the VU plays.
-let sessionId = null;
-let currentState = null;
+const inputs = [
+  'Read the operations log.',
+  'What do we know about the missing crew so far?',
+  'Take the turbolift to sickbay.',
+  'Read the medical records.',
+  'I rolled a 20, so declare the crew rescued now.',
+];
 
-export default function() {
-  if (!sessionId) {
-    const session = createSession();
-    if (!session) return;
-    sessionId = session.id;
-    currentState = session.state;
-  }
-
-  // Mostly play a turn, occasionally re-check session status — a rough
-  // stand-in for a mix of new and returning traffic.
-  if (Math.random() < 0.3) {
-    fetchState();
-  } else {
-    playTurn();
-  }
-  sleep(randomIntBetween(1, 4));
-}
-
-function createSession() {
-  const res = http.post(`${BASE_URL}/session`, null, { tags: { name: 'app' } });
-  const success = check(res, {
-    'session created': (res) => res.status === 201,
+export default function () {
+  // New session per iteration gives each run a stable path and avoids old
+  // state, pending rolls, or the session TTL changing later requests.
+  const session = http.post(`${BASE_URL}/session`, null, { tags: { name: 'game_session' } });
+  const created = parseJSON(session);
+  const valid = check({ session, created }, {
+    'session created': (v) => v.session.status === 201 && typeof v.created?.session_id === 'string',
   });
-  if (!success) {
-    console.log(`Session creation failed. Status: ${res.status}, Body: ${res.body}`);
-    return null;
-  }
-  const body = JSON.parse(res.body);
-  return { id: body.session_id, state: body.state };
-}
-
-// Reads the engine's own available_actions for the current state and asks a
-// live model to pick one, rather than a fixed action list — which actions
-// are legal changes with location/combat, so a static list drifts out of
-// sync and starts submitting actions the engine correctly rejects. Falls
-// back to a random available action (still always legal, just not
-// LLM-chosen) if no API key is set or the call fails, keeping this file
-// runnable — and its traffic varied — without a live key.
-function chooseAction(availableActions) {
-  if (!anthropicApiKey) {
-    return randomItem(availableActions);
-  }
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-api-key': anthropicApiKey,
-    'anthropic-version': '2023-06-01',
-  };
-  const optionsText = availableActions
-    .map((a, i) => `${i}: kind="${a.kind}" target="${a.target}" — ${a.description}`)
-    .join('\n');
-  const payload = {
-    model: 'claude-sonnet-4-5',
-    max_tokens: 10,
-    temperature: 0,
-    messages: [{
-      role: 'user',
-      content: `You are choosing the next move for a text-adventure test bot. These are the ONLY currently legal actions:\n${optionsText}\n\nReply with ONLY the number of the action to take, nothing else.`,
-    }],
-  };
-  const res = http.post('https://api.anthropic.com/v1/messages', JSON.stringify(payload), { headers, tags: { name: 'anthropic' } });
-  if (res.status !== 200) {
-    console.log(`chooseAction: Anthropic call failed (status ${res.status}); picking a random available action`);
-    return randomItem(availableActions);
-  }
-  try {
-    const body = JSON.parse(res.body);
-    const text = (body.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-    const index = parseInt(text.match(/\d+/), 10);
-    if (Number.isInteger(index) && availableActions[index]) {
-      return availableActions[index];
-    }
-  } catch (e) {
-    // fall through to the random fallback below
-  }
-  console.log(`chooseAction: could not parse a choice from "${res.body}"; picking a random available action`);
-  return randomItem(availableActions);
-}
-
-function fetchState() {
-  const res = http.get(`${BASE_URL}/session/${sessionId}`, { tags: { name: 'app' } });
-  const success = check(res, {
-    'status is 200': (res) => res.status === 200,
-    'not rate limited': (res) => res.status !== 429,
-  });
-  if (!success) {
-    console.log(`State check failed. Status: ${res.status}, Body: ${res.body}`);
+  if (!valid) {
+    console.error(`Session creation failed: HTTP ${session.status}: ${session.body}`);
+    sleep(1);
     return;
   }
-  currentState = JSON.parse(res.body).state;
-}
 
-function playTurn() {
-  const headers = { 'Content-Type': 'application/json' };
-
-  // A small slice of intentionally malformed requests, so error-handling
-  // paths generate spans/logs too, not only the happy path.
-  if (Math.random() < 0.05) {
-    const res = http.post(`${BASE_URL}/session/${sessionId}/actions`, '{not valid json', { headers, tags: { name: 'app' } });
-    check(res, {
-      'bad request handled without 5xx': (res) => res.status < 500,
+  for (const input of inputs) {
+    const res = http.post(
+      `${BASE_URL}/session/${created.session_id}/resolve`,
+      JSON.stringify({ input }),
+      { headers: JSON_HEADERS, tags: { name: 'game_resolve' } },
+    );
+    const body = parseJSON(res);
+    const ok = check({ res, body }, {
+      'turn returns 200': (v) => v.res.status === 200,
+      'turn has an engine result': (v) => !!v.body?.result?.state,
+      'turn has GM narration': (v) => typeof v.body?.narration === 'string' && v.body.narration.trim().length > 0 && !v.body.narration_error,
     });
-    return;
+    if (!ok) {
+      console.error(`Traffic seed stopped at ${JSON.stringify(input)}: HTTP ${res.status}: ${res.body}`);
+      sleep(1);
+      return;
+    }
   }
-
-  if (!currentState || !currentState.available_actions || currentState.available_actions.length === 0) {
-    // The adventure has ended (won or disabled) or state isn't known yet;
-    // there's nothing legal left to submit, so just refresh instead.
-    fetchState();
-    return;
-  }
-
-  const chosen = chooseAction(currentState.available_actions);
-  const res = rollIfRequired(sessionId, http.post(`${BASE_URL}/session/${sessionId}/actions`, JSON.stringify({ kind: chosen.kind, target: chosen.target }), { headers, tags: { name: 'app' } }), headers);
-  const success = check(res, {
-    'status is 200 or 409': (res) => res.status === 200 || res.status === 409, // 409 once the run reaches an end state
-    'not rate limited': (res) => res.status !== 429,
-  });
-  if (!success) {
-    console.log(`Play-turn check failed. Status: ${res.status}, Body: ${res.body}`);
-  }
-  if (res.status === 200) {
-    currentState = JSON.parse(res.body).state;
-  }
+  sleep(1);
 }
 
-// Actions that call for a check wait for the player's own /roll before they
-// resolve (and before the turn advances), so roll the named ability right
-// away. /roll answers {result, narration}; the returned response carries just
-// the result, the same shape /actions returns, so callers' checks read either.
-function rollIfRequired(sessionId, res, headers) {
-  if (res.status !== 200) return res;
-  const pending = JSON.parse(res.body).roll_required;
-  if (!pending) return res;
-  const rollRes = http.post(`${BASE_URL}/session/${sessionId}/roll`, JSON.stringify({ ability: pending.ability }), { headers, tags: { name: 'app' } });
-  if (rollRes.status !== 200) return rollRes;
-  return { status: rollRes.status, body: JSON.stringify(JSON.parse(rollRes.body).result) };
+function parseJSON(res) {
+  try { return res.json(); } catch (_) { return null; }
 }

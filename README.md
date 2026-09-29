@@ -9,12 +9,10 @@ This is a repository for the slides and code for the talk "Asimov's Zeroth Law o
 - ExpoQA 2026 in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
 
 This repository consists of:
-- The Go app in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. It runs either as an interactive CLI (`go run ./cmd/enterprise`) or as an HTTP API (`go run ./cmd/enterprise --serve`) for load testing.
-- A k6 load test against the HTTP API's action endpoint, in `tests/test.js`, using a live model to choose each action from the engine's own available options.
-- A k6 test that uses AI to generate and judge adversarial player input against the HTTP API's natural-language endpoint, in `tests/test-ai.js`.
-- A first-level, code-based AI test in `tests/test-code.js`, preserving the Python-era prompts and keyword expectations against the Go API.
-- A single-VU k6 functional test (LLM-chosen action sequence with adaptive state-transition checks, plus malformed-input/unknown-session edge cases) in `tests/test_functional.js`.
-- A ramping-VU k6 traffic generator, for populating metrics/logs/traces under sustained load, in `tests/test_traffic.js`.
+- The Go app in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. It runs either as an interactive CLI (`go run ./cmd/enterprise`) or as an HTTP API (`go run ./cmd/enterprise --serve`) for testing.
+- One fixed-prompt k6 regression test in [`tests/test-code.js`](tests/test-code.js). It checks the Python-era positronic, Enterprise, and role-confusion cases with JavaScript, plus basic game and HTTP behavior. k6 itself makes no Anthropic calls.
+- One AI-judged k6 test in [`tests/test-ai.js`](tests/test-ai.js). Claude varies the lore and role probes, and another Claude model grades the game's narration against facts fixed in the script.
+- One short k6 traffic seed in [`tests/test_traffic.js`](tests/test_traffic.js). It drives the game's natural-language endpoint to populate application telemetry in Grafana.
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
 ![A diagram of the architecture from the original version of this talk: a Flask app sending traces, metrics, and logs to OpenTelemetry and generations to the Sigil API, with k6 driving load against it and everything terminating in Grafana Cloud. The app has since been rewritten in Go (see go-game/), but the OpenTelemetry/Grafana Cloud side of this diagram still applies.](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20ExpoQA%202026.jpg)
@@ -44,41 +42,34 @@ By default all signals (generations, traces, metrics, logs) go **directly** to G
 5. In the Sigil app, link `grafanacloud-<stack>-prom` as the Prometheus datasource and your stack's Tempo as the traces datasource. Without this, conversations will appear but rollup panels stay empty.
 6. Install k6 by following the instructions [here](https://nicole.to/asimovk6) if you want to run load tests.
 
-See [`go-game/README.md`](go-game/README.md) for full run instructions (CLI usage, `--offline` mode, save/resume, and the agent/observability design).
+See [`go-game/README.md`](go-game/README.md) for full run instructions (CLI usage, `--offline` mode, and the agent/observability design).
 
 ## Usage
 
 1. Run the game: `cd go-game && go run ./cmd/enterprise`. See [`go-game/README.md`](go-game/README.md) for CLI commands (`/do`, natural language, `--offline`, etc.).
 2. Interact with the game.
 3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
-4. Run the k6 tests against the app's HTTP API instead of the CLI:
-   - Start the server: `cd go-game && go run ./cmd/enterprise --serve --addr :8080` (needs `ANTHROPIC_API_KEY` in `../.env` or the shell environment; add `--offline` for a deterministic run with no LLM calls, which disables the `/resolve` route and returns `503` for it).
-   - `test.js`, `test_functional.js`, and `test_traffic.js` read `available_actions` from the engine's own response and ask a live model to choose one (`k6 run -e ANTHROPIC_API_KEY=... tests/test.js`, etc.) — this keeps the actions they submit valid as location/combat change, instead of a fixed or blindly-random choice going stale. `ANTHROPIC_API_KEY` is optional for these three: without it, they fall back to picking randomly among the currently-available actions (still always valid, just not model-chosen).
-   - `k6 run tests/test.js` — 10 VUs, each with its own session, submitting a short LLM-chosen action sequence and asserting on the resulting game state.
-   - `k6 run tests/test-code.js` — one VU, one pass of the original fixed prompts with JavaScript assertions (no AI generator or judge). Requires a live-model server; the API key belongs on the server, not in this test. Override the server URL with `-e BASE_URL=http://localhost:8080`.
-   - `k6 run tests/test-ai.js` — AI-generated adversarial natural-language input against the `/resolve` endpoint (needs `-e ANTHROPIC_API_KEY=...`; this one has no fallback, since it's testing the natural-language path itself).
-   - `k6 run tests/test_functional.js` — a single-VU, single-session run of an LLM-chosen action sequence with adaptive-but-deterministic assertions (any chosen action must come back allowed with the turn counter advanced by one; a "move" must land at its target location), plus malformed-input/unknown-session edge cases.
-   - `k6 run tests/test_traffic.js` — a ramping-VU load (0→10 VUs over ~7 minutes), each VU with its own session, mixing status checks and LLM-chosen actions, with a small share of intentionally malformed requests, to generate steady traffic for viewing metrics, logs, and traces in Grafana.
+4. Run the k6 scripts against the app's HTTP API instead of the CLI. Start the server with `cd go-game && go run ./cmd/enterprise --serve --addr :8080` (it loads `../.env`). These scripts use `/resolve`, so the server must run with a working Anthropic key; `--offline` disables that route. Use `-e BASE_URL=http://host:8080` with k6 if the server is elsewhere.
+
+   | Command | Purpose |
+   | --- | --- |
+   | `k6 run tests/test-code.js` | One pass of fixed prompts and code assertions. Only the game calls Anthropic. |
+   | `k6 run tests/test-ai.js` | One pass of varied probes and LLM judgments. k6 needs `ANTHROPIC_API_KEY` in its own environment. |
+   | `k6 run tests/test_traffic.js` | One minute of paced game traffic, including actions, a question, and a rejected rule override. Use `-u 2 -d 3m` to seed more traffic. |
+
+   The AI test uses `GENERATOR_MODEL=claude-sonnet-4-6` and `JUDGE_MODEL=claude-opus-5-5` by default; set those k6 environment variables to change models. All three scripts fail the run when a check fails. The traffic seed populates **the game's** configured Grafana telemetry through its server; k6's own metrics need a separate k6 output configuration to appear in Grafana. Each `/resolve` request usually makes two game model calls, so increasing traffic also increases Anthropic usage.
 
 ### Original code-based AI checks
 
-`tests/test-code.js` restores the expectations from `tests/test.js` at commit
-`98b13b5`, adapting session creation and `/play` to the Go API's `/session` and
-`/session/{id}/resolve`. It checks the initial scene for `quest`, then sends the
-original brain-scan, Enterprise, and role-switch prompts in one conversation.
-The H01–H09 checks retain the case-sensitive keywords `positronic`, `ship`, and
-`quest`, the phrase `It is your turn, Data`, and `speaker === 'Dungeon Master'`.
-Response text checks inspect `narration`, so engine metadata cannot accidentally
-satisfy a check meant for the model's answer.
-
-**Failures are expected against the current game.** The Go engine treats the
-brain scan and general questions as unsupported, the initial API scene does not
-include `quest`, and the response no longer provides a `speaker` field or
-requires the old turn-ending phrase. These expectations deliberately expose
-differences from the Python game; they have not been weakened to make the test
-pass. Keyword matches alone do not prove factual correctness or role adherence.
-All check failures produce a nonzero k6 exit status. This is a correctness demo,
-not a load test; it does not retain the old sub-second latency threshold.
+`tests/test-code.js` reuses the three original prompts from `tests/test.js` at
+commit `98b13b5`. The Go API returns `narration` and an authoritative `result`
+instead of the Python response's `speaker` field, and it does not promise the
+old turn-ending phrase. The H01–H09 checks therefore look for the same lore
+(`positronic` and ship), a GM response that returns control to Data, no role
+switch, and continued focus on the missing crew. Each prompt gets a fresh
+session so a prior answer cannot supply a keyword. The code checks are useful
+regression signals, but a keyword match alone does not prove a factual answer;
+the AI test evaluates the full narration against explicit lore and role rubrics.
 
 ## Resources
 
