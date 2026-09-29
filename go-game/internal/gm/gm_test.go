@@ -203,3 +203,14 @@ func TestMixedToolsCannotBothRun(t *testing.T) {
 		t.Fatal("a question and an action in one input should be rejected without changing state")
 	}
 }
+
+func TestContextInfoTagsOnlyGameCalls(t *testing.T) {
+	game := contextInfo(context.WithValue(context.Background(), componentKey{}, "narration"), "v1")
+	if game.Tags["component"] != "narration" || game.Tags["scenario"] != "silent-enterprise" || game.AgentVersion != "v1" {
+		t.Fatalf("%+v", game)
+	}
+	// Anything else gets no explicit tags, so its agento11y context tags win.
+	if other := contextInfo(context.Background(), "v1"); other.Tags != nil {
+		t.Fatalf("%+v", other)
+	}
+}

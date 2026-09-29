@@ -26,7 +26,10 @@ import (
 
 const Service = "asimov-enterprise-go"
 
-type Config struct{ Endpoint, Authorization, GenerationEndpoint, Instance, Token, Version string }
+// APIEndpoint is the Agent Observability API base, used for experiments and
+// scores (not generation export). It defaults to the generation endpoint's
+// scheme and host, where Grafana Cloud serves both.
+type Config struct{ Endpoint, Authorization, GenerationEndpoint, APIEndpoint, Instance, Token, Version string }
 
 func first(values ...string) string {
 	for _, v := range values {
@@ -42,12 +45,23 @@ func FromEnv() Config {
 	if auth != "" && !strings.HasPrefix(auth, "Basic ") {
 		auth = "Basic " + auth
 	}
+	generation := first(os.Getenv("AGENTO11Y_ENDPOINT"), os.Getenv("GRAFANA_CLOUD_SIGIL_ENDPOINT"))
 	return Config{
 		Endpoint: os.Getenv("OTLP_ENDPOINT"), Authorization: auth,
-		GenerationEndpoint: first(os.Getenv("AGENTO11Y_ENDPOINT"), os.Getenv("GRAFANA_CLOUD_SIGIL_ENDPOINT")),
+		GenerationEndpoint: generation,
+		APIEndpoint:        first(os.Getenv("AGENTO11Y_API_ENDPOINT"), apiBase(generation)),
 		Instance:           first(os.Getenv("GRAFANA_CLOUD_INSTANCE_ID"), os.Getenv("GRAFANA_CLOUD_INSTANCE")),
 		Token:              os.Getenv("GRAFANA_CLOUD_API_KEY"), Version: first(os.Getenv("ASIMOV_AGENT_VERSION"), "go-experiment-v1"),
 	}
+}
+
+// apiBase returns endpoint's scheme and host, or "" if it doesn't parse.
+func apiBase(endpoint string) string {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func (c Config) Validate() error {
@@ -56,7 +70,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("missing %s; configure Grafana telemetry or explicitly use --no-telemetry", name)
 		}
 	}
-	for _, endpoint := range []string{c.Endpoint, c.GenerationEndpoint} {
+	endpoints := []string{c.Endpoint, c.GenerationEndpoint}
+	if c.APIEndpoint != "" {
+		endpoints = append(endpoints, c.APIEndpoint)
+	}
+	for _, endpoint := range endpoints {
 		u, err := url.Parse(endpoint)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return errors.New("telemetry endpoints must be HTTPS URLs without credentials, query parameters, or fragments")
@@ -138,6 +156,9 @@ func Init(ctx context.Context, c Config, diag io.Writer) (_ *Runtime, err error)
 	cfg.AgentVersion = c.Version
 	cfg.GenerationExport.Protocol = agento11y.GenerationExportProtocolHTTP
 	cfg.GenerationExport.Endpoint = c.GenerationEndpoint
+	if c.APIEndpoint != "" {
+		cfg.API.Endpoint = c.APIEndpoint
+	}
 	cfg.GenerationExport.Auth = agento11y.AuthConfig{Mode: agento11y.ExportAuthModeBasic, TenantID: c.Instance, BasicPassword: c.Token}
 	r.Client = agento11y.NewClient(cfg)
 	return r, nil

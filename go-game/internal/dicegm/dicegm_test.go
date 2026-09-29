@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/grafana/agento11y/go/agento11y"
+	"github.com/grafana/ai-sdk/middleware/agentobservability"
 	"github.com/grafana/ai-sdk/provider"
 )
 
@@ -20,6 +22,9 @@ type reply struct {
 type scriptedModel struct {
 	replies  []reply
 	requests []provider.CallOptions
+	tags     []map[string]string
+	ids      []string
+	parents  [][]string
 }
 
 func (*scriptedModel) SpecificationVersion() string               { return "v4" }
@@ -29,8 +34,11 @@ func (*scriptedModel) SupportedURLs() map[string][]*regexp.Regexp { return nil }
 func (m *scriptedModel) DoGenerate(context.Context, provider.CallOptions) (*provider.GenerateResult, error) {
 	return nil, errors.New("not used")
 }
-func (m *scriptedModel) DoStream(_ context.Context, p provider.CallOptions) (*provider.StreamResult, error) {
+func (m *scriptedModel) DoStream(ctx context.Context, p provider.CallOptions) (*provider.StreamResult, error) {
 	m.requests = append(m.requests, p)
+	m.tags = append(m.tags, agento11y.TagsFromContext(ctx))
+	m.ids = append(m.ids, agentobservability.GenerationIDFromContext(ctx))
+	m.parents = append(m.parents, agentobservability.ParentGenerationIDsFromContext(ctx))
 	if len(m.replies) == 0 {
 		return nil, errors.New("script exhausted")
 	}
@@ -166,5 +174,26 @@ func TestPlayStopsAtIterationCap(t *testing.T) {
 	}
 	if d.history != nil {
 		t.Error("an unfinished turn should not enter the history")
+	}
+}
+
+func TestPlayTagsAndChainsEveryGeneration(t *testing.T) {
+	m := &scriptedModel{replies: []reply{{calls: []string{`{"notation":"1d20","reason":"x"}`}}, {text: "Done."}}}
+	turn := (&DM{Model: m, Roll: fixed(1)}).Play(context.Background(), 3, "go")
+	if len(m.tags) != 2 {
+		t.Fatal(m.tags)
+	}
+	// Each call is recorded under the ID the trace reports, chained to the
+	// call before it.
+	if m.ids[0] == "" || m.ids[0] == m.ids[1] || turn.Steps[0].GenerationID != m.ids[0] || turn.Steps[1].GenerationID != m.ids[1] {
+		t.Fatalf("ids %v, steps %+v", m.ids, turn.Steps)
+	}
+	if len(m.parents[0]) != 0 || len(m.parents[1]) != 1 || m.parents[1][0] != m.ids[0] {
+		t.Fatalf("parents %v", m.parents)
+	}
+	for _, tags := range m.tags {
+		if tags["component"] != Component || tags["turn"] != "3" || tags["scenario"] != "dice-gm" {
+			t.Errorf("tags %v", tags)
+		}
 	}
 }

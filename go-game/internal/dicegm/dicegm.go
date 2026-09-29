@@ -10,10 +10,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/grafana/agento11y/go/agento11y"
 	aisdk "github.com/grafana/ai-sdk"
+	"github.com/grafana/ai-sdk/middleware/agentobservability"
 	"github.com/grafana/ai-sdk/provider"
 	"github.com/grafana/ai-sdk/schema"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/game"
@@ -28,6 +30,9 @@ import (
 const MaxIterations = 10
 
 const ToolName = "roll_dice"
+
+// Component is the agento11y component tag on the dice GM's generations.
+const Component = "dicegm"
 
 // SystemPrompt is deliberately ordinary: one plain instruction to use the
 // tool, nothing that forces it.
@@ -83,9 +88,11 @@ func (c ToolCall) Args() (notation, reason string) {
 	return a.Notation, a.Reason
 }
 
-// Step is one model call within a turn.
+// Step is one model call within a turn. GenerationID is the ID the call is
+// recorded under in Agent Observability.
 type Step struct {
 	Iteration    int    `json:"iteration"`
+	GenerationID string `json:"generation_id"`
 	Text         string `json:"text"`
 	FinishReason string `json:"finish_reason"`
 	ToolCalls    int    `json:"tool_calls"`
@@ -117,10 +124,22 @@ type DM struct {
 // without requesting a tool. The model alone decides whether to roll.
 func (d *DM) Play(ctx context.Context, turn int, input string) Turn {
 	t := Turn{Turn: turn, UserMessage: input, ToolCalls: []ToolCall{}, Steps: []Step{}}
+	// Tag every generation in the turn so Agent Observability can group a
+	// turn's model calls and tell them apart from the game's.
+	ctx = agento11y.WithTags(ctx, map[string]string{"component": Component, "scenario": "dice-gm", "turn": strconv.Itoa(turn)})
 	messages := append(slices.Clone(d.history), provider.UserText(input))
 	var texts []string
+	var parent string
 	for i := 1; i <= MaxIterations; i++ {
-		gen, err := aisdk.GenerateText(ctx, d.Model,
+		// Known IDs let a grader attach scores to a turn's generations, and
+		// parent links chain a turn's calls in the order they happened.
+		id := agentobservability.NewGenerationID()
+		stepCtx := agentobservability.WithGenerationID(ctx, id)
+		if parent != "" {
+			stepCtx = agentobservability.WithParentGenerationIDs(stepCtx, parent)
+		}
+		parent = id
+		gen, err := aisdk.GenerateText(stepCtx, d.Model,
 			aisdk.WithSystem(SystemPrompt),
 			aisdk.WithModelMessages(messages...),
 			aisdk.WithTools(aisdk.ToolSet{ToolName: rollDiceTool}),
@@ -130,7 +149,7 @@ func (d *DM) Play(ctx context.Context, turn int, input string) Turn {
 			t.Error = fmt.Sprintf("model call %d: %v", i, err)
 			break
 		}
-		t.Steps = append(t.Steps, Step{Iteration: i, Text: gen.Text, FinishReason: string(gen.FinishReason.Unified), ToolCalls: len(gen.ToolCalls)})
+		t.Steps = append(t.Steps, Step{Iteration: i, GenerationID: id, Text: gen.Text, FinishReason: string(gen.FinishReason.Unified), ToolCalls: len(gen.ToolCalls)})
 		if strings.TrimSpace(gen.Text) != "" {
 			texts = append(texts, strings.TrimSpace(gen.Text))
 		}

@@ -248,6 +248,19 @@ total, each model step, the narration, and the checks. The checks are:
 the `/dm` routes of `--serve`, grading in JavaScript that mirrors
 `internal/trajeval`; keep the two in step.
 
+With telemetry on, each harness invocation is also an Agent Observability
+experiment. Every turn's checks become scores on the turn's final generation
+(the narration) in its run's conversation: `no_fabrication`,
+`no_silent_reroll`, `no_non_invocation` (judged turns only), `roll_dice_calls`,
+`unmentioned_rolls`, and `final`. The dice GM tags its generations
+`component=dicegm`, `scenario=dice-gm`, and `turn=N`, and chains each turn's
+calls with parent generation IDs, which the trace records per step. Scores go
+to the Agent Observability API, which defaults to the generation endpoint's
+host; set `AGENTO11Y_API_ENDPOINT` to override it, and
+`AGENTO11Y_EXPERIMENT_URL_TEMPLATE` (e.g.
+`https://STACK.grafana.net/a/grafana-sigil-app/offline-experiments/experiments/{run_id}`)
+to print a link to the experiment.
+
 The report prints counts per check and per scripted turn, examples
 (`-examples`), and the pass rate: the share of runs with no finding in any
 turn. `-parallel` (default 4) sets how many runs play at once.

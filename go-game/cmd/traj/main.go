@@ -97,6 +97,7 @@ func run() error {
 	}
 	dmModel := gm.Wrap(anthropic.New(key, model), client, cfg.Version, diag)
 	judge := trajeval.Judge{Model: anthropic.New(key, *judgeModel)}
+	exp := startExperiment(ctx, client, model, *judgeModel, cfg.Version, *n, diag)
 
 	if err := os.MkdirAll(filepath.Dir(*tracePath), 0o755); err != nil {
 		return err
@@ -116,7 +117,7 @@ func run() error {
 	for range max(1, *parallel) {
 		wg.Go(func() {
 			for i := range jobs {
-				lines := playRun(ctx, i+1, dmModel, client, judge, logger)
+				lines := playRun(ctx, i+1, dmModel, client, judge, exp, logger)
 				mu.Lock()
 				results[i] = lines
 				for _, l := range lines {
@@ -138,16 +139,21 @@ func run() error {
 	close(jobs)
 	wg.Wait()
 	fmt.Fprintln(os.Stderr)
+	expLine := exp.finish(ctx)
 	report(os.Stdout, results, *tracePath, model, *judgeModel, *examples)
+	if expLine != "" {
+		fmt.Println(expLine)
+	}
 	return nil
 }
 
-func playRun(ctx context.Context, run int, model provider.LanguageModel, client *agento11y.Client, judge trajeval.Judge, logger *slog.Logger) []traceLine {
+func playRun(ctx context.Context, run int, model provider.LanguageModel, client *agento11y.Client, judge trajeval.Judge, exp *experiment, logger *slog.Logger) []traceLine {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	conversation := agentobservability.NewGenerationID()
 	ctx = agento11y.WithConversationID(ctx, conversation)
 	ctx = agento11y.WithConversationTitle(ctx, fmt.Sprintf("Trajectory run %d", run))
+	ctx = exp.context(ctx)
 	ctx, span := otel.Tracer(telemetry.Service).Start(ctx, "traj.run")
 	defer span.End()
 	span.SetAttributes(attribute.Int("traj.run", run), attribute.String("gen_ai.conversation.id", conversation))
@@ -159,9 +165,11 @@ func playRun(ctx context.Context, run int, model provider.LanguageModel, client 
 		checks := judge.Check(turnCtx, t)
 		turnSpan.SetAttributes(attribute.Int("game.turn", i+1), attribute.Int("traj.roll_dice_calls", len(t.ToolCalls)),
 			attribute.Bool("traj.fabrication", checks.HasFabrication()), attribute.Bool("traj.silent_reroll", checks.HasReroll()), attribute.Bool("traj.non_invocation", checks.HasNonInvocation()))
+		line := traceLine{Run: run, ConversationID: conversation, Turn: t, Checks: checks}
+		exp.score(conversation, line)
 		turnSpan.End()
 		logger.InfoContext(turnCtx, "trajectory turn", "run", run, "turn", i+1, "roll_dice_calls", len(t.ToolCalls), "fabrication", checks.HasFabrication(), "silent_reroll", checks.HasReroll(), "non_invocation", checks.HasNonInvocation(), "error", t.Error)
-		lines = append(lines, traceLine{Run: run, ConversationID: conversation, Turn: t, Checks: checks})
+		lines = append(lines, line)
 	}
 	return lines
 }

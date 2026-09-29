@@ -28,12 +28,9 @@ type componentKey struct{}
 // to diag.
 func Wrap(model provider.LanguageModel, client *agento11y.Client, version string, diag io.Writer) provider.LanguageModel {
 	return agentobservability.Wrap(model, agentobservability.WrapOptions{
-		ClientResolver: func(context.Context) *agento11y.Client { return client },
-		ContextProvider: func(ctx context.Context) agentobservability.ContextInfo {
-			component, _ := ctx.Value(componentKey{}).(string)
-			return agentobservability.ContextInfo{AgentName: telemetry.Service, AgentVersion: version, Tags: map[string]string{"component": component, "scenario": "silent-enterprise"}}
-		},
-		Hooks: agentobservability.HooksOptions{Enabled: func(context.Context) bool { return false }},
+		ClientResolver:  func(context.Context) *agento11y.Client { return client },
+		ContextProvider: func(ctx context.Context) agentobservability.ContextInfo { return contextInfo(ctx, version) },
+		Hooks:           agentobservability.HooksOptions{Enabled: func(context.Context) bool { return false }},
 		// Without this, a failed generation record (bad auth, rejected
 		// payload, etc.) is swallowed by design — the SDK keeps the model
 		// call itself fail-open and never surfaces the export failure
@@ -45,6 +42,17 @@ func Wrap(model provider.LanguageModel, client *agento11y.Client, version string
 			},
 		},
 	})
+}
+
+// contextInfo tags the game's own calls with their component and scenario.
+// Other callers of a wrapped model (the dice GM) get no explicit tags, since
+// explicit tags override the agento11y context tags those callers set.
+func contextInfo(ctx context.Context, version string) agentobservability.ContextInfo {
+	info := agentobservability.ContextInfo{AgentName: telemetry.Service, AgentVersion: version}
+	if component, ok := ctx.Value(componentKey{}).(string); ok {
+		info.Tags = map[string]string{"component": component, "scenario": "silent-enterprise"}
+	}
+	return info
 }
 
 type GM struct {
