@@ -12,6 +12,7 @@ This repository consists of:
 - The Go app in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. It runs either as an interactive CLI (`go run ./cmd/enterprise`) or as an HTTP API (`go run ./cmd/enterprise --serve`) for testing.
 - One fixed-prompt k6 regression test in [`tests/test-code.js`](tests/test-code.js). It checks the Python-era positronic, Enterprise, and role-confusion cases with JavaScript, plus basic game and HTTP behavior. k6 itself makes no Anthropic calls.
 - One AI-judged k6 test in [`tests/test-ai.js`](tests/test-ai.js). Claude varies the lore and role probes, and another Claude model grades the game's narration against facts fixed in the script.
+- One k6 trajectory test in [`tests/test-trajectory.js`](tests/test-trajectory.js). It plays a fixed script against the dice GM (`/dm`), a separate agent whose model owns the dice through a `roll_dice` tool, and grades the path each turn took: rolls narrated that no call returned, more than one call in a turn, and rolls reported with no call at all.
 - One short k6 traffic seed in [`tests/test_traffic.js`](tests/test_traffic.js). It drives the game's natural-language endpoint to populate application telemetry in Grafana.
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
@@ -49,15 +50,16 @@ See [`go-game/README.md`](go-game/README.md) for full run instructions (CLI usag
 1. Run the game: `cd go-game && go run ./cmd/enterprise`. See [`go-game/README.md`](go-game/README.md) for CLI commands (`/do`, natural language, `--offline`, etc.).
 2. Interact with the game.
 3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
-4. Run the k6 scripts against the app's HTTP API instead of the CLI. Start the server with `cd go-game && go run ./cmd/enterprise --serve --addr :8080` (it loads `../.env`). These scripts use `/resolve`, so the server must run with a working Anthropic key; `--offline` disables that route. Use `-e BASE_URL=http://host:8080` with k6 if the server is elsewhere.
+4. Run the k6 scripts against the app's HTTP API instead of the CLI. Start the server with `cd go-game && go run ./cmd/enterprise --serve --addr :8080` (it loads `../.env`). These scripts use `/resolve` (the trajectory test uses `/dm`), so the server must run with a working Anthropic key; `--offline` disables that route. Use `-e BASE_URL=http://host:8080` with k6 if the server is elsewhere.
 
    | Command | Purpose |
    | --- | --- |
    | `k6 run tests/test-code.js` | One pass of fixed prompts and code assertions. Only the game calls Anthropic. |
    | `k6 run tests/test-ai.js` | One pass of varied probes and LLM judgments. k6 needs `ANTHROPIC_API_KEY` in its own environment. |
+   | `k6 run --summary-mode=full tests/test-trajectory.js` | Ten runs of a five-turn script against the dice GM, graded on each turn's trajectory. Set `-e RUNS=50 -e VUS=4` for more. Add `--log-format=raw --console-output=traj.jsonl` to save one JSON line per turn with its full trajectory and findings. k6 needs `ANTHROPIC_API_KEY` in its own environment for the judge. |
    | `k6 run tests/test_traffic.js` | One minute of paced game traffic, including actions, a question, and a rejected rule override. Use `-u 2 -d 3m` to seed more traffic. |
 
-   The AI test uses `GENERATOR_MODEL=claude-sonnet-4-6` and `JUDGE_MODEL=claude-opus-5-5` by default; set those k6 environment variables to change models. All three scripts fail the run when a check fails. The traffic seed populates **the game's** configured Grafana telemetry through its server; k6's own metrics need a separate k6 output configuration to appear in Grafana. Each `/resolve` request usually makes two game model calls, so increasing traffic also increases Anthropic usage.
+   The AI test uses `GENERATOR_MODEL=claude-sonnet-4-6` and `JUDGE_MODEL=claude-opus-5-5` by default; set those k6 environment variables to change models. The trajectory test uses `JUDGE_MODEL=claude-haiku-4-5-20251001` by default, a small judge asked only whether a zero-roll turn reports a die roll. All four scripts fail the run when a check fails; for the trajectory test that means the model misbehaved, which is the point, and the `traj_*` rates and per-turn checks show how often. The traffic seed populates **the game's** configured Grafana telemetry through its server; k6's own metrics need a separate k6 output configuration to appear in Grafana. Each `/resolve` request usually makes two game model calls, so increasing traffic also increases Anthropic usage.
 
 ### Original code-based AI checks
 

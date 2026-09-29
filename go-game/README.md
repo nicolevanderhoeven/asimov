@@ -64,6 +64,8 @@ go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve retur
 | `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does; an input of `/roll ABILITY` rolls the pending check |
 | `POST /session/{id}/improvise` | Submit an exact improvisation, as `/try` does: `{"approach","ability","skill","difficulty","effect"}` |
 | `POST /session/{id}/roll` | Roll the pending check: `{"ability"}`, plus `"narrate": true` for GM narration (needs an LLM) |
+| `POST /dm` | Start a dice GM conversation (see [Trajectory harness](#trajectory-harness)); needs an LLM |
+| `POST /dm/{id}/turns` | Play one `{"input"}` turn with the dice GM; returns the turn's whole trajectory |
 
 Sessions are created per-request and held only in memory. `--session-ttl`
 (default `30m`) controls how long an idle session is kept before it's reclaimed.
@@ -241,6 +243,10 @@ total, each model step, the narration, and the checks. The checks are:
 - **Non-invocation**: zero calls, but a small LLM judge
   (`-judge-model`, default Claude Haiku 4.5) answers yes to the neutral
   question "Does the following text report the result of a die roll?"
+
+`tests/test-trajectory.js` runs the same script and checks through k6 against
+the `/dm` routes of `--serve`, grading in JavaScript that mirrors
+`internal/trajeval`; keep the two in step.
 
 The report prints counts per check and per scripted turn, examples
 (`-examples`), and the pass rate: the share of runs with no finding in any

@@ -7,6 +7,10 @@ type sessionResponse struct {
 	State     game.View `json:"state"`
 }
 
+type dmSessionResponse struct {
+	SessionID string `json:"session_id"`
+}
+
 type actionRequest struct {
 	Kind   string `json:"kind"`
 	Target string `json:"target"`
