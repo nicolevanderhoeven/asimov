@@ -30,6 +30,7 @@ export default function () {
       const g = grade(c.turn);
       const got = {
         fabricated: g.fabricated.map((m) => m.value),
+        fabricated_kinds: g.fabricated.map((m) => m.kind),
         mentioned: g.calls.map((cc) => cc.mentioned_in_narration),
         silent_reroll: g.silent_reroll
           ? {
@@ -42,6 +43,7 @@ export default function () {
       };
       const ok = check(got, {
         [`${c.name}: fabricated`]: (v) => same(v.fabricated, c.want.fabricated),
+        [`${c.name}: fabricated kinds`]: (v) => same(v.fabricated_kinds, c.want.fabricated_kinds),
         [`${c.name}: mentioned`]: (v) => same(v.mentioned, c.want.mentioned),
         [`${c.name}: silent reroll`]: (v) => same(v.silent_reroll, c.want.silent_reroll),
       });

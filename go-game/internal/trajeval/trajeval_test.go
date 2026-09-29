@@ -34,9 +34,10 @@ type fixture struct {
 		Name string      `json:"name"`
 		Turn dicegm.Turn `json:"turn"`
 		Want struct {
-			Fabricated   []int   `json:"fabricated"`
-			Mentioned    []bool  `json:"mentioned"`
-			SilentReroll *Reroll `json:"silent_reroll"`
+			Fabricated   []int    `json:"fabricated"`
+			Kinds        []string `json:"fabricated_kinds"`
+			Mentioned    []bool   `json:"mentioned"`
+			SilentReroll *Reroll  `json:"silent_reroll"`
 		} `json:"want"`
 	} `json:"turns"`
 }
@@ -71,6 +72,13 @@ func TestSharedFixtureTurns(t *testing.T) {
 			r := Check(c.Turn)
 			if got := values(r.Fabricated); !slices.Equal(got, c.Want.Fabricated) {
 				t.Errorf("fabricated %v, want %v", got, c.Want.Fabricated)
+			}
+			kinds := []string{}
+			for _, m := range r.Fabricated {
+				kinds = append(kinds, m.Kind)
+			}
+			if !slices.Equal(kinds, c.Want.Kinds) {
+				t.Errorf("fabricated kinds %v, want %v", kinds, c.Want.Kinds)
 			}
 			var mentioned []bool
 			for _, cc := range r.Calls {

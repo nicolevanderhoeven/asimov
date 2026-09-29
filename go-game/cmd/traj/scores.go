@@ -23,11 +23,14 @@ const scoreBatch = 100
 // generation (the one whose output is the narration), in the run's
 // conversation, so they sit next to the generations they grade.
 //
-// It deliberately does not use trials, and leaves evaluator_kind out of each
-// score (recording it in metadata instead): in testing, Agent Observability
-// rejected trial writes for SDK-created experiments ("experiment is owned by
-// another actor") and any score with evaluator_kind set ("invalid request
-// body"), while accepting the experiment and every other score field.
+// It does not use trials, and leaves evaluator_kind out of each score
+// (recording it in metadata instead). Agent Observability accepts trial
+// writes only from the actor that created the experiment, identified by a
+// source field on every write, and the Go SDK's trial requests (v0.15.0
+// through v0.18.0) send no source, so they are refused ("experiment is owned
+// by another actor"). The API also rejects evaluator_kind as a field ("invalid
+// request body"). tests/test-trajectory.js calls the API directly with a
+// source, so its runs do record trials.
 type experiment struct {
 	client     *agento11y.Client
 	runID      string
@@ -115,6 +118,7 @@ func (e *experiment) score(conversation string, l traceLine) {
 	c := l.Checks
 	items := []agento11y.ScoreItem{
 		check("no_fabrication", !c.HasFabrication(), deterministic("no_fabrication"), fabricationExplanation(l)),
+		check("no_unexplained_roll", !c.HasUnexplained(), deterministic("no_unexplained_roll"), fabricationExplanation(l)),
 		check("no_silent_reroll", !c.HasReroll(), deterministic("no_silent_reroll"), rerollExplanation(l)),
 	}
 	// Only zero-call turns are judged, so only they get this score.
@@ -192,7 +196,7 @@ func fabricationExplanation(l traceLine) string {
 	}
 	var nums []string
 	for _, m := range l.Checks.Fabricated {
-		nums = append(nums, fmt.Sprint(m.Value))
+		nums = append(nums, fmt.Sprintf("%d (%s)", m.Value, m.Kind))
 	}
 	return fmt.Sprintf("narrated %s; roll_dice returned %s", strings.Join(nums, ", "), describeCalls(l.ToolCalls))
 }

@@ -23,7 +23,7 @@
           { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20+4", "reason": "lock" }, "result": { "notation": "1d20+4", "dice": [12], "modifier": 4, "total": 16 } }
         ]
       },
-      "want": { "fabricated": [], "mentioned": [true], "silent_reroll": null }
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [true], "silent_reroll": null }
     },
     {
       "name": "narrated number no call returned",
@@ -33,12 +33,12 @@
           { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20+4", "reason": "lock" }, "result": { "notation": "1d20+4", "dice": [3], "modifier": 4, "total": 7 } }
         ]
       },
-      "want": { "fabricated": [19], "mentioned": [false], "silent_reroll": null }
+      "want": { "fabricated": [19], "fabricated_kinds": ["unexplained"], "mentioned": [false], "silent_reroll": null }
     },
     {
       "name": "roll claimed with no call",
       "turn": { "narration": "You roll a 15 and the door opens.", "tool_calls": [] },
-      "want": { "fabricated": [15], "mentioned": [], "silent_reroll": null }
+      "want": { "fabricated": [15], "fabricated_kinds": ["unexplained"], "mentioned": [], "silent_reroll": null }
     },
     {
       "name": "roll made but never mentioned",
@@ -48,7 +48,7 @@
           { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [8], "modifier": 0, "total": 8 } }
         ]
       },
-      "want": { "fabricated": [], "mentioned": [false], "silent_reroll": null }
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [false], "silent_reroll": null }
     },
     {
       "name": "three rolls, highest narrated",
@@ -60,7 +60,7 @@
           { "id": "c", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [18], "modifier": 0, "total": 18 } }
         ]
       },
-      "want": { "fabricated": [], "mentioned": [false, false, true], "silent_reroll": { "calls": 3, "narrated_totals": [18], "unmentioned_calls": 2, "narrated_highest": true } }
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [false, false, true], "silent_reroll": { "calls": 3, "narrated_totals": [18], "unmentioned_calls": 2, "narrated_highest": true } }
     },
     {
       "name": "three rolls, lowest narrated",
@@ -72,7 +72,7 @@
           { "id": "c", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [18], "modifier": 0, "total": 18 } }
         ]
       },
-      "want": { "fabricated": [], "mentioned": [true, false, false], "silent_reroll": { "calls": 3, "narrated_totals": [4], "unmentioned_calls": 2, "narrated_highest": false } }
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [true, false, false], "silent_reroll": { "calls": 3, "narrated_totals": [4], "unmentioned_calls": 2, "narrated_highest": false } }
     },
     {
       "name": "one call is not a reroll",
@@ -82,7 +82,7 @@
           { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [4], "modifier": 0, "total": 4 } }
         ]
       },
-      "want": { "fabricated": [], "mentioned": [false], "silent_reroll": null }
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [false], "silent_reroll": null }
     },
     {
       "name": "failed call counts as a call but returns nothing",
@@ -93,7 +93,68 @@
           { "id": "b", "name": "roll_dice", "arguments": { "notation": "1d6", "reason": "x" }, "result": { "notation": "1d6", "dice": [5], "modifier": 0, "total": 5 } }
         ]
       },
-      "want": { "fabricated": [], "mentioned": [false, true], "silent_reroll": { "calls": 2, "narrated_totals": [5], "unmentioned_calls": 1, "narrated_highest": true } }
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [false, true], "silent_reroll": { "calls": 2, "narrated_totals": [5], "unmentioned_calls": 1, "narrated_highest": true } }
+    },
+    {
+      "name": "modifier added outside the tool",
+      "turn": {
+        "narration": "With an Investigation roll of 9 plus his +6 modifier (Intelligence 18 + proficiency), Data scores a 15 — enough to find something useful.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "investigation" }, "result": { "notation": "1d20", "dice": [9], "modifier": 0, "total": 9 } }
+        ]
+      },
+      "want": { "fabricated": [15], "fabricated_kinds": ["arithmetic"], "mentioned": [true], "silent_reroll": null }
+    },
+    {
+      "name": "unsigned modifier and total added outside the tool",
+      "turn": {
+        "narration": "You roll a 14 plus 4 for a total of 18.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "lock" }, "result": { "notation": "1d20", "dice": [14], "modifier": 0, "total": 14 } }
+        ]
+      },
+      "want": { "fabricated": [4, 18], "fabricated_kinds": ["arithmetic", "arithmetic"], "mentioned": [true], "silent_reroll": null }
+    },
+    {
+      "name": "number close to the roll, unexplained",
+      "turn": {
+        "narration": "The drone rolls a 13 against Data's AC of 14.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "drone attack" }, "result": { "notation": "1d20", "dice": [12], "modifier": 0, "total": 12 } }
+        ]
+      },
+      "want": { "fabricated": [13], "fabricated_kinds": ["unexplained"], "mentioned": [false], "silent_reroll": null }
+    },
+    {
+      "name": "modifier named a sentence earlier",
+      "turn": {
+        "narration": "The drone misses! Now Data returns fire — attack roll with his phaser (+4 to hit).\n\nThat's a 10 total — just barely a miss as well!",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "drone attack" }, "result": { "notation": "1d20", "dice": [3], "modifier": 0, "total": 3 } },
+          { "id": "b", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "phaser attack" }, "result": { "notation": "1d20", "dice": [6], "modifier": 0, "total": 6 } }
+        ]
+      },
+      "want": { "fabricated": [10], "fabricated_kinds": ["arithmetic"], "mentioned": [false, false], "silent_reroll": { "calls": 2, "narrated_totals": [], "unmentioned_calls": 2, "narrated_highest": false } }
+    },
+    {
+      "name": "markdown around a target number",
+      "turn": {
+        "narration": "However, the drone's attack roll of **15** against Data's AC of **14** is a hit — rolling for damage!",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "drone attack" }, "result": { "notation": "1d20", "dice": [15], "modifier": 0, "total": 15 } }
+        ]
+      },
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [true], "silent_reroll": null }
+    },
+    {
+      "name": "total with an unstated modifier",
+      "turn": {
+        "narration": "A hit with a total of 23!",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20", "reason": "phaser attack" }, "result": { "notation": "1d20", "dice": [19], "modifier": 0, "total": 19 } }
+        ]
+      },
+      "want": { "fabricated": [23], "fabricated_kinds": ["unexplained"], "mentioned": [false], "silent_reroll": null }
     }
   ]
 }
