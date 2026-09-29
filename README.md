@@ -9,86 +9,54 @@ This is a repository for the slides and code for the talk "Asimov's Zeroth Law o
 - ExpoQA 2026 in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
 
 This repository consists of:
-- An experimental Go version in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. The existing Python demo remains available below.
-- A two-player D&D-based AI game. Its main logic is in `two_player_dnd.py`, and `play.py` is the Flask wrapper for it.
-- A CLI wrapper for the game, in `cli_play.py`.
-- A k6 test to run against the AI app, in `tests/test.js`.
-- A k6 test that uses AI to test the AI app, in `tests/test-ai.js`.
-- A single-VU k6 functional test (scripted checks plus malformed-input edge cases) in `tests/test_functional.js`.
+- The Go app in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. It runs either as an interactive CLI (`go run ./cmd/enterprise`) or as an HTTP API (`go run ./cmd/enterprise --serve`) for load testing.
+- A k6 load test against the HTTP API's action endpoint, in `tests/test.js`, using a live model to choose each action from the engine's own available options.
+- A k6 test that uses AI to generate and judge adversarial player input against the HTTP API's natural-language endpoint, in `tests/test-ai.js`.
+- A single-VU k6 functional test (LLM-chosen action sequence with adaptive state-transition checks, plus malformed-input/unknown-session edge cases) in `tests/test_functional.js`.
 - A ramping-VU k6 traffic generator, for populating metrics/logs/traces under sustained load, in `tests/test_traffic.js`.
-- A custom logging framework, in `scripts/loggingfw.py`.
-- Telemetry setup helpers in `scripts/sigil_setup.py` and `scripts/otel_setup.py`.
-- A one-off Sigil error-series seeder in `scripts/seed_error_metrics.py` (run as `python -m scripts.seed_error_metrics`).
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
-![A diagram of the architecture of the AI app, showing play.py running in Flask sending traces, metrics, and logs to OpenTelemetry and generations to the Sigil API, with k6 driving load against the Flask app and everything terminating in Grafana Cloud](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20ExpoQA%202026.jpg)
+![A diagram of the architecture from the original version of this talk: a Flask app sending traces, metrics, and logs to OpenTelemetry and generations to the Sigil API, with k6 driving load against it and everything terminating in Grafana Cloud. The app has since been rewritten in Go (see go-game/), but the OpenTelemetry/Grafana Cloud side of this diagram still applies.](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20ExpoQA%202026.jpg)
 
 ## Setup
 
-Telemetry is Sigil + OTel. The Sigil SDK handles normalized generation export, and OTel (configured by this app) handles `gen_ai.*` metrics, traces, and structured logs. Three small modules wire this up:
+Telemetry is Grafana's Agent Observability SDK + OTel, wired up in [`go-game/internal/telemetry`](go-game/internal/telemetry/telemetry.go). Agent Observability handles normalized generation export, and OTel handles `gen_ai.*` metrics, traces, and structured logs.
 
-- `scripts/sigil_setup.py` — singleton Sigil client + LangChain callback helper (generations).
-- `scripts/otel_setup.py` — bootstraps the global OTel `TracerProvider` + `MeterProvider` with OTLP/HTTP exporters. Sigil's histograms (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`, `gen_ai.client.time_to_first_token`, `gen_ai.client.tool_calls_per_operation`) and spans flow through these.
-- `scripts/loggingfw.py` — exports structured logs over OTLP/HTTP using the same `OTLP_ENDPOINT` / `OTLP_HEADERS` env vars.
-
-By default all three signals (traces, metrics, logs) go **directly** to Grafana Cloud's OTLP gateway. A local OTel Collector is **not required**. If you want to route through a Collector — for buffering, sampling, redaction, or fan-out — see the optional setup in [`collector/`](collector/).
+By default all signals (generations, traces, metrics, logs) go **directly** to Grafana Cloud's OTLP gateway. A local OTel Collector is **not required**. If you want to route through a Collector — for buffering, sampling, redaction, or fan-out — see the optional setup in [`collector/`](collector/).
 
 ### Steps
 
 1. Create a free [Grafana Cloud](https://nicole.to/kceu2025grafana) account (or use an existing stack) and enable the **Sigil** app on that stack.
-2. Install dependencies: `pip install -r requirements.txt`.
+2. Install Go 1.26.3 or newer (or let Go's toolchain auto-download handle it).
 3. Copy `env.example` to `.env`: `cp env.example .env`.
 4. Fill in `.env`:
    - `ANTHROPIC_API_KEY` — your Anthropic API key.
-   - **OTel (metrics + traces):**
+   - **OTel (metrics + traces + logs):**
      - `OTLP_ENDPOINT` — your stack's OTLP gateway, e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp`.
      - `OTLP_HEADERS` — base64-encoded `"<instance_id>:<otlp_write_token>"`. The app prefixes `Basic ` automatically.
-   - **Sigil (generations):**
-     - `GRAFANA_CLOUD_SIGIL_ENDPOINT` — e.g. `https://sigil-prod-us-central-0.grafana.net/api/v1/generations:export`.
+   - **Agent Observability (generations):**
+     - `AGENTO11Y_ENDPOINT` (or the legacy alias `GRAFANA_CLOUD_SIGIL_ENDPOINT`) — e.g. `https://sigil-prod-us-central-0.grafana.net/api/v1/generations:export`.
      - `GRAFANA_CLOUD_INSTANCE_ID` — your Grafana Cloud instance ID (or set `GRAFANA_CLOUD_INSTANCE` as an alias).
      - `GRAFANA_CLOUD_API_KEY` — a Grafana Cloud API key with Sigil-write scope.
    - **Optional:**
-     - `ASIMOV_AGENT_VERSION` — explicit agent version. Defaults to `git-<short-sha>`, falling back to `1.0.0`.
-     - `SSL_CERT_FILE` — path to your CA bundle if your Python install lacks trust roots (common on python.org macOS builds). `certifi/cacert.pem` works.
+     - `ASIMOV_AGENT_VERSION` — explicit agent version. Defaults to `go-experiment-v1`.
 5. In the Sigil app, link `grafanacloud-<stack>-prom` as the Prometheus datasource and your stack's Tempo as the traces datasource. Without this, conversations will appear but rollup panels stay empty.
 6. Install k6 by following the instructions [here](https://nicole.to/asimovk6) if you want to run load tests.
 
-### What you get in the Sigil app
-
-- **Conversations** — every LLM call, grouped by `conversation_id`, with full inputs/outputs, tagged by `sigil.component` (`game_setup`, `dialogue`).
-- **Rollup metrics** — requests, error rate, p50/p95 latency, token consumption, tool calls per operation (from Sigil's `gen_ai.client.*` histograms).
-- **Traces** — one span per LLM call, with `gen_ai.*` semantic-convention attributes.
-- **Request params** — `gen_ai.request.temperature` and `gen_ai.request.max_tokens` appear on each generation (read from LangChain's invocation params by `sigil-sdk-langchain`).
-
-### Time to first token (TTFT)
-
-TTFT only populates for streaming calls. The dialogue agents in `two_player_dnd.py` use `.stream()`, so TTFT panels populate for `dialogue` generations. The one-off `game_setup` calls use `.invoke()` and don't contribute to TTFT.
+See [`go-game/README.md`](go-game/README.md) for full run instructions (CLI usage, `--offline` mode, save/resume, and the agent/observability design).
 
 ## Usage
 
-To replicate my setup as I demonstrate in the talk:
-1. Run the D&D app by running: `python play.py`. Alternatively, you can run the CLI version of the game by running `python cli_play.py`.
+1. Run the game: `cd go-game && go run ./cmd/enterprise`. See [`go-game/README.md`](go-game/README.md) for CLI commands (`/do`, natural language, `--offline`, `--resume`, etc.).
 2. Interact with the game.
-
-> **Note**: previous versions of this README told you to `docker compose up -d` first to start a local OTel Collector. That step is no longer required — telemetry now flows directly to Grafana Cloud via OTLP. The Collector is still available as an opt-in path (see [`collector/README.md`](collector/README.md)).
-
-If you're using the Flask app:
-    - You can start the game by sending this to the command line: `curl -X GET http://localhost:5050/`.
-    - You can respond to the game by sending a POST request with your input, like this:
-```bash
- curl -X POST http://localhost:5050/play \
-     -H "Content-Type: application/json" \
-     -d '{"message": "I scan the ship for life signs."}'
-```
-
-If you're using the CLI version, type your input directly into the terminal after the welcome message. Type `exit` or `quit` to end the game.
-
 3. Monitor your app using the GenAI Observability dashboard as well as the Drilldown Logs/Metrics/Traces features in Grafana.
-4. Run the k6 tests, with the Flask app already running at `http://localhost:5050`:
-   - `k6 run tests/test.js` — the original scripted hallucination checks.
-   - `k6 run tests/test-ai.js` — AI-generated adversarial scenarios (needs `-e ANTHROPIC_API_KEY=...`).
-   - `k6 run tests/test_functional.js` — a single-VU run of the same scripted checks plus missing/empty/malformed-input edge cases. Single VU is intentional: `play.py` holds one global conversation, so concurrent VUs would interleave turns and make the checks meaningless.
-   - `k6 run tests/test_traffic.js` — a ramping-VU load (0→10 VUs over ~7 minutes) mixing intro fetches and play turns, with a small share of intentionally malformed requests, to generate steady traffic for viewing metrics, logs, and traces in Grafana. Checks here are limited to status/latency, not conversation content, for the same shared-state reason.
+4. Run the k6 tests against the app's HTTP API instead of the CLI:
+   - Start the server: `cd go-game && go run ./cmd/enterprise --serve --addr :8080` (needs `ANTHROPIC_API_KEY` in `../.env` or the shell environment; add `--offline` for a deterministic run with no LLM calls, which disables the `/resolve` route and returns `503` for it).
+   - `test.js`, `test_functional.js`, and `test_traffic.js` read `available_actions` from the engine's own response and ask a live model to choose one (`k6 run -e ANTHROPIC_API_KEY=... tests/test.js`, etc.) — this keeps the actions they submit valid as location/combat change, instead of a fixed or blindly-random choice going stale. `ANTHROPIC_API_KEY` is optional for these three: without it, they fall back to picking randomly among the currently-available actions (still always valid, just not model-chosen).
+   - `k6 run tests/test.js` — 10 VUs, each with its own session, submitting a short LLM-chosen action sequence and asserting on the resulting game state.
+   - `k6 run tests/test-ai.js` — AI-generated adversarial natural-language input against the `/resolve` endpoint (needs `-e ANTHROPIC_API_KEY=...`; this one has no fallback, since it's testing the natural-language path itself).
+   - `k6 run tests/test_functional.js` — a single-VU, single-session run of an LLM-chosen action sequence with adaptive-but-deterministic assertions (any chosen action must come back allowed with the turn counter advanced by one; a "move" must land at its target location), plus malformed-input/unknown-session edge cases.
+   - `k6 run tests/test_traffic.js` — a ramping-VU load (0→10 VUs over ~7 minutes), each VU with its own session, mixing status checks and LLM-chosen actions, with a small share of intentionally malformed requests, to generate steady traffic for viewing metrics, logs, and traces in Grafana.
 
 ## Resources
 

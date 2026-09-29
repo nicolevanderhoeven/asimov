@@ -64,7 +64,7 @@ func TestSDKExecutesTypedAction(t *testing.T) {
 	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"logs"}`}}
 	g := newGM(m)
 	s := game.New("test")
-	r, err := g.Resolve(context.Background(), &s, "Read the logs")
+	r, err := g.Resolve(context.Background(), &s, nil, "Read the logs")
 	if err != nil || !r.Allowed || !s.Clues["logs"] || s.Turn != 1 {
 		t.Fatal(r, s, err)
 	}
@@ -72,7 +72,7 @@ func TestSDKExecutesTypedAction(t *testing.T) {
 func TestModelCannotCreateActions(t *testing.T) {
 	m := &fakeModel{calls: []string{`{"kind":"cast","target":"fireball"}`}}
 	s := game.New("test")
-	r, err := newGM(m).Resolve(context.Background(), &s, "Cast fireball")
+	r, err := newGM(m).Resolve(context.Background(), &s, nil, "Cast fireball")
 	if err != nil || r.Allowed || s.Turn != 0 {
 		t.Fatal(r, s, err)
 	}
@@ -80,7 +80,7 @@ func TestModelCannotCreateActions(t *testing.T) {
 func TestMultipleToolsCannotAdvanceMultipleTurns(t *testing.T) {
 	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"logs"}`, `{"kind":"move","target":"sickbay"}`}}
 	s := game.New("test")
-	_, err := newGM(m).Resolve(context.Background(), &s, "Read logs")
+	_, err := newGM(m).Resolve(context.Background(), &s, nil, "Read logs")
 	if err == nil || s.Turn != 0 {
 		t.Fatal("multiple model actions should be rejected without changing state")
 	}
@@ -89,7 +89,7 @@ func TestProviderFailureDoesNotChangeState(t *testing.T) {
 	m := &fakeModel{fail: true}
 	s := game.New("test")
 	before := s.View().JSON()
-	_, err := newGM(m).Resolve(context.Background(), &s, "Read logs")
+	_, err := newGM(m).Resolve(context.Background(), &s, nil, "Read logs")
 	if err == nil || s.View().JSON() != before {
 		t.Fatal("provider failure mutated state")
 	}
@@ -100,8 +100,56 @@ func TestNarrationHasNoTools(t *testing.T) {
 	s := game.New("test")
 	r := g.Execute(context.Background(), &s, game.Action{Kind: "inspect", Target: "logs"}, "test")
 	var out strings.Builder
-	err := g.Narrate(context.Background(), "Read logs", r, &out)
+	err := g.Narrate(context.Background(), nil, "Read logs", r, &out)
 	if err != nil || out.Len() == 0 || len(m.params.Tools) != 0 {
 		t.Fatal(out.String(), err)
+	}
+}
+
+func TestResolveAndNarrateReplayHistory(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"logs"}`}}
+	g := newGM(m)
+	s := game.New("test")
+	history := []provider.Message{provider.UserText("Where am I?"), provider.AssistantText("On the bridge.")}
+	if _, err := g.Resolve(context.Background(), &s, history, "Read the logs"); err != nil {
+		t.Fatal(err)
+	}
+	// Prompt = [system, ...history, current input]: history must be
+	// replayed ahead of the new turn, not dropped.
+	if got := len(m.params.Prompt); got != 4 {
+		t.Fatalf("Resolve prompt length = %d, want 4 (system + 2 history + input): %+v", got, m.params.Prompt)
+	}
+	if m.params.Prompt[1].Role != provider.RoleUser || m.params.Prompt[2].Role != provider.RoleAssistant {
+		t.Fatalf("history messages out of order: %+v", m.params.Prompt)
+	}
+
+	var out strings.Builder
+	r := g.Execute(context.Background(), &s, game.Action{Kind: "inspect", Target: "logs"}, "test")
+	if err := g.Narrate(context.Background(), history, "Read the logs", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(m.params.Prompt); got != 4 {
+		t.Fatalf("Narrate prompt length = %d, want 4: %+v", got, m.params.Prompt)
+	}
+}
+
+func TestAppendTurnCapsHistoryLength(t *testing.T) {
+	var history []provider.Message
+	for i := 0; i < MaxHistoryMessages; i++ {
+		history = AppendTurn(history, "input", "narration")
+	}
+	if len(history) != MaxHistoryMessages {
+		t.Fatalf("history length = %d, want %d", len(history), MaxHistoryMessages)
+	}
+	history = AppendTurn(history, "one more", "narration")
+	if len(history) != MaxHistoryMessages {
+		t.Fatalf("history exceeded cap: %d", len(history))
+	}
+}
+
+func TestAppendTurnSkipsEmptyNarration(t *testing.T) {
+	history := AppendTurn(nil, "input", "")
+	if len(history) != 0 {
+		t.Fatalf("empty narration should not be recorded: %+v", history)
 	}
 }

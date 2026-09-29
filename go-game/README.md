@@ -4,10 +4,10 @@ A single-player Star Trek adventure: you play Data; an Anthropic-backed Game
 Master narrates an original mystery aboard an empty Enterprise. Investigate the
 bridge, sickbay, and engineering, discover what happened, and recover the crew.
 
-This is the Go experiment alongside the existing Python app. It uses Grafana's
-**AI SDK** for model calls and a typed action tool, and the **Agent Observability
-Go SDK** for generation and tool recording. It is a first playable prototype,
-with a bounded **2014 5e rules subset and explicit Star Trek homebrew**.
+It uses Grafana's **AI SDK** for model calls and a typed action tool, and the
+**Agent Observability Go SDK** for generation and tool recording. It is a first
+playable prototype, with a bounded **2014 5e rules subset and explicit Star
+Trek homebrew**.
 
 ## Run
 
@@ -21,9 +21,9 @@ cd go-game
 go run ./cmd/enterprise
 ```
 
-By default this reads `../.env`, using the same credentials as the Python app.
-Shell environment variables take precedence. Alternatively, copy `.env.example`
-to `.env`, fill it in, and run `go run ./cmd/enterprise --env .env`.
+By default this reads `../.env`. Shell environment variables take precedence.
+Alternatively, copy `.env.example` to `.env`, fill it in, and run
+`go run ./cmd/enterprise --env .env`.
 
 - `ANTHROPIC_API_KEY`: required for the AI GM.
 - `ANTHROPIC_MODEL`: defaults to `claude-sonnet-4-6`.
@@ -47,12 +47,43 @@ To start another game, choose a new `--save .enterprise-save-demo2.json` path.
 An existing save is never silently overwritten at startup. Save files are local,
 trusted data, not an anti-cheat mechanism.
 
+## Serve
+
+`--serve` runs an HTTP API instead of the REPL, giving each client its own
+in-memory session — useful for load testing (see `../tests/*.js`) since
+concurrent clients never interleave turns into the same game state the way a
+single shared session would.
+
+```sh
+go run ./cmd/enterprise --serve --addr :8080
+go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve returns 503
+```
+
+| Method & path | Purpose |
+| --- | --- |
+| `POST /session` | Create a new session; returns its id and initial state |
+| `GET /session/{id}` | Current state |
+| `POST /session/{id}/actions` | Submit an exact `{"kind","target"}` action, as `/do` does |
+| `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does |
+
+`--resume` is not supported with `--serve`; sessions are created per-request,
+not loaded from a save file. `--session-ttl` (default `30m`) controls how long
+an idle session is kept before it's reclaimed.
+
 ## Play
 
 Type natural language, such as “Read the operations log” or “Take the turbolift
-to sickbay.” One input resolves at most one action. The first version uses the
-current state and discovered evidence as memory, rather than a chat transcript;
-refer to objects explicitly instead of relying on “do that again.”
+to sickbay.” One input resolves at most one action. Legal outcomes always come
+from the current authoritative state, never from the model's memory of past
+turns — the game cannot be talked into an outcome it didn't actually resolve.
+
+Each session also replays its own dialogue history (the player's input and the
+GM's narration, up to the last `gm.MaxHistoryMessages` messages) into every
+`Resolve`/`Narrate` call, so a session's recorded generations read as one
+continuous conversation rather than isolated exchanges — this is what backs
+Agent Observability's Conversations view. History lives only in memory (not in
+the save file, and not in `game.State`, which stays free of any LLM-specific
+type): `--resume` restores state but starts a fresh, empty transcript.
 
 | Command | Purpose |
 | --- | --- |
@@ -111,11 +142,12 @@ Rules references:
 
 The Agent Observability SDK records tools; OTel exports application/tool spans,
 dice events, SDK generation metrics, the custom `game.actions` counter, and
-structured logs. `service.name=asimov-enterprise-go` distinguishes this app from
-the Python demo. All requests in a saved game retain its conversation ID.
-Generation data goes to the Agent Observability endpoint; traces, metrics, and
-logs go to Grafana Cloud's OTLP gateway. Exporters flush on exit. Policy hooks
-are disabled: the local rules engine enforces game actions.
+structured logs, under `service.name=asimov-enterprise-go`. All requests in a
+saved game retain its conversation ID; over HTTP, the session ID doubles as
+the conversation ID. Generation data goes to the Agent Observability endpoint;
+traces, metrics, and logs go to Grafana Cloud's OTLP gateway. Exporters flush
+on exit. Policy hooks are disabled: the local rules engine enforces game
+actions.
 
 Candidate tool attempts can appear in telemetry even if a malformed multi-action
 model response is ultimately discarded. The saved state remains authoritative.

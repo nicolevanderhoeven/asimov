@@ -118,7 +118,12 @@ func Init(ctx context.Context, c Config) (_ *Runtime, err error) {
 	otel.SetMeterProvider(mp)
 	r.Logger = slog.New(otelslog.NewHandler(Service, otelslog.WithLoggerProvider(lp)))
 	cfg := agento11y.DefaultConfig()
-	cfg.Logger = slog.NewLogLogger(r.Logger.Handler(), slog.LevelInfo)
+	// agento11y logs its own export failures (rejected/failed generation
+	// sends, flush errors) through this logger rather than returning them to
+	// the caller. Fan it out to stderr in addition to r.Logger's normal Loki
+	// destination, so those diagnostics are visible locally in real time
+	// instead of requiring a round trip through Grafana Cloud to discover.
+	cfg.Logger = slog.NewLogLogger(fanOutHandler{r.Logger.Handler(), slog.NewTextHandler(os.Stderr, nil)}, slog.LevelInfo)
 	cfg.AgentName = Service
 	cfg.AgentVersion = c.Version
 	cfg.GenerationExport.Protocol = agento11y.GenerationExportProtocolHTTP
@@ -126,4 +131,44 @@ func Init(ctx context.Context, c Config) (_ *Runtime, err error) {
 	cfg.GenerationExport.Auth = agento11y.AuthConfig{Mode: agento11y.ExportAuthModeBasic, TenantID: c.Instance, BasicPassword: c.Token}
 	r.Client = agento11y.NewClient(cfg)
 	return r, nil
+}
+
+// fanOutHandler dispatches every record to each of its handlers in order,
+// joining their errors. It exists only to give a single slog.Logger two
+// destinations (here: the existing OTel/Loki handler plus stderr).
+type fanOutHandler []slog.Handler
+
+func (f fanOutHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	for _, h := range f {
+		if h.Enabled(ctx, level) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f fanOutHandler) Handle(ctx context.Context, record slog.Record) error {
+	var errs []error
+	for _, h := range f {
+		if h.Enabled(ctx, record.Level) {
+			errs = append(errs, h.Handle(ctx, record.Clone()))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (f fanOutHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	out := make(fanOutHandler, len(f))
+	for i, h := range f {
+		out[i] = h.WithAttrs(attrs)
+	}
+	return out
+}
+
+func (f fanOutHandler) WithGroup(name string) slog.Handler {
+	out := make(fanOutHandler, len(f))
+	for i, h := range f {
+		out[i] = h.WithGroup(name)
+	}
+	return out
 }

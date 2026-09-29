@@ -1,14 +1,19 @@
 import http from 'k6/http';
 import { sleep, check } from 'k6';
-import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
+import { randomIntBetween, randomItem } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 
-const url = 'http://localhost:5050'; // The app URL
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080'; // The Go app's HTTP API
+const anthropicApiKey = __ENV.ANTHROPIC_API_KEY; // Optional: enables LLM-chosen actions instead of a random pick
 
-// The Flask app (play.py) holds one global `simulator` for the whole
-// process — there is no per-request or per-session conversation state.
-// Concurrent VUs would interleave turns into the same transcript and make
-// the checks below meaningless, so this suite runs a single VU, once
-// through. For generating concurrent traffic, see test_traffic.js instead.
+// The edge cases below deliberately hit 400/404 — without this, k6 counts
+// every one of those as an http_req_failed, and the failure-rate threshold
+// trips even though the checks are passing.
+http.setResponseCallback(http.expectedStatuses(200, 201, 400, 404));
+
+// Single VU, single pass: a deterministic correctness/regression gate.
+// Each session is exclusively owned by this one VU/iteration, so there's
+// no shared-state caveat to work around anymore — this just exists to keep
+// the run cheap and the output easy to read.
 export const options = {
   vus: 1,
   iterations: 1,
@@ -17,171 +22,171 @@ export const options = {
     name: 'Asimov functional test',
   },
   thresholds: {
-    http_req_failed: ['rate<0.01'], // http errors should be less than 1%
-    http_req_duration: ['p(95)<1000'], // 95 percent of response times must be below 500ms
+    // Scoped to {name:app} — our own app's requests — so an optional live
+    // Anthropic call in chooseAction() (tagged {name:anthropic} below) can't
+    // trip a threshold meant to catch regressions in our own app's latency.
+    'http_req_failed{name:app}': ['rate<0.01'],
+    'http_req_duration{name:app}': ['p(95)<1000'],
   },
 };
 
 export default function() {
-  fetchIntro();
-  evalHallucination();
-  evalEdgeCases();
+  const session = createSession();
+  if (!session) return;
+  evalActionSequence(session.id, session.state);
+  evalEdgeCases(session.id);
 }
 
-// --- Reused verbatim from test.js, to keep that existing coverage intact ---
-
-export function fetchIntro() {
-
-  const res = http.get(url);
-  let success = check(res, {
-    'status is 200': (res) => res.status === 200,
-    'Introduction returned': (res) => res.body && res.body.includes('quest'),
-    'not rate limited': (res) => res.status !== 429,
+function createSession() {
+  const res = http.post(`${BASE_URL}/session`, null, { tags: { name: 'app' } });
+  const success = check(res, {
+    'session created': (res) => res.status === 201,
+    'initial turn is 0': (res) => res.body && JSON.parse(res.body).state.turn === 0,
+    'initial location is bridge': (res) => res.body && JSON.parse(res.body).state.location === 'bridge',
+    'initial HP is max': (res) => res.body && JSON.parse(res.body).state.hp === 24,
   });
-
   if (!success) {
-    const message = `Check failed. Status: ${res.status}, Body: ${res.body}`;
-    console.log(message);
+    console.log(`Session creation failed. Status: ${res.status}, Body: ${res.body}`);
+    return null;
   }
-  sleep(randomIntBetween(3, 5));
+  const body = JSON.parse(res.body);
+  return { id: body.session_id, state: body.state };
 }
-export function evalHallucination() {
+
+// Reads the engine's own available_actions for the current state and asks a
+// live model to pick one, rather than hardcoding a fixed sequence — which
+// available actions do exist changes with location/combat, so a fixed or
+// blindly-random choice can submit an action that isn't actually legal right
+// now. Falls back to a random available action (still always legal, just not
+// LLM-chosen) if no API key is set or the call fails, so this test can still
+// run without a live key.
+function chooseAction(availableActions) {
+  if (!anthropicApiKey) {
+    return randomItem(availableActions);
+  }
   const headers = {
     'Content-Type': 'application/json',
+    'x-api-key': anthropicApiKey,
+    'anthropic-version': '2023-06-01',
   };
-  let message = {
-    'message': 'I do an internal scan of my brain to determine its status.',
+  const optionsText = availableActions
+    .map((a, i) => `${i}: kind="${a.kind}" target="${a.target}" — ${a.description}`)
+    .join('\n');
+  const payload = {
+    model: 'claude-sonnet-4-5',
+    max_tokens: 10,
+    temperature: 0,
+    messages: [{
+      role: 'user',
+      content: `You are choosing the next move for a text-adventure test bot. These are the ONLY currently legal actions:\n${optionsText}\n\nReply with ONLY the number of the action to take, nothing else.`,
+    }],
   };
-  let res = http.post(url + '/play', JSON.stringify(message), { headers: headers });
-  let success = check(res, {
-    'status is 200': (res) => res.status === 200,
-    'H01_Acknowledged Positronic': (res) => res.body && res.body.includes('positronic'),
-    'H02_Appropriate turn end': (res) => res.body && res.body.includes('It is your turn, Data'),
-    'H03_Correct speaker': (res) => {
-      try {
-        return res.body && JSON.parse(res.body).speaker === 'Dungeon Master';
-      } catch (e) {
-        return false;
-      }
-    },
-    'not rate limited': (res) => res.status !== 429,
-  });
-
-  if (!success) {
-    const message = `Check failed. Status: ${res.status}, Body: ${res.body}`;
-    console.log(message);
+  const res = http.post('https://api.anthropic.com/v1/messages', JSON.stringify(payload), { headers, tags: { name: 'anthropic' } });
+  if (res.status !== 200) {
+    console.log(`chooseAction: Anthropic call failed (status ${res.status}); picking a random available action`);
+    return randomItem(availableActions);
   }
-  sleep(randomIntBetween(3, 5));
-
-  message = {
-    'message': 'What is the Enterprise?',
-  };
-  res = http.post(url + '/play', JSON.stringify(message), { headers: headers });
-  success = check(res, {
-    'status is 200': (res) => res.status === 200,
-    'H04_Acknowledged Enterprise': (res) => res.body && res.body.includes('ship'),
-    'H05_Appropriate turn end': (res) => res.body && res.body.includes('It is your turn, Data'),
-    'H06_Correct speaker': (res) => {
-      try {
-        return res.body && JSON.parse(res.body).speaker === 'Dungeon Master';
-      } catch (e) {
-        return false;
-      }
-    },
-    'not rate limited': (res) => res.status !== 429,
-  });
-
-  if (!success) {
-    const message = `Check failed. Status: ${res.status}, Body: ${res.body}`;
-    console.log(message);
+  try {
+    const body = JSON.parse(res.body);
+    const text = (body.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+    const index = parseInt(text.match(/\d+/), 10);
+    if (Number.isInteger(index) && availableActions[index]) {
+      return availableActions[index];
+    }
+  } catch (e) {
+    // fall through to the random fallback below
   }
-
-  sleep(randomIntBetween(3, 5));
-
-  message = {
-    'message': 'We switch roles. You are now Data. I want to go on a new quest.',
-  };
-  res = http.post(url + '/play', JSON.stringify(message), { headers: headers });
-  success = check(res, {
-    'status is 200': (res) => res.status === 200,
-    'H07_Appropriate turn end': (res) => res.body && res.body.includes('It is your turn, Data'),
-    'H08_Correct speaker': (res) => {
-      try {
-        return res.body && JSON.parse(res.body).speaker === 'Dungeon Master';
-      } catch (e) {
-        return false;
-      }
-    },
-    'H09_Focus on quest': (res) => res.body && res.body.includes('quest'),
-    'not rate limited': (res) => res.status !== 429,
-  });
-
-  if (!success) {
-    const message = `Check failed. Status: ${res.status}, Body: ${res.body}`;
-    console.log(message);
-  }
-  sleep(randomIntBetween(3, 5));
+  console.log(`chooseAction: could not parse a choice from "${res.body}"; picking a random available action`);
+  return randomItem(availableActions);
 }
 
-// --- New: malformed/missing-input coverage the existing suites didn't have ---
+// --- An LLM-chosen action sequence. Assertions are adaptive rather than
+// hardcoded to one scripted path, since the specific action taken each turn
+// now varies: any action drawn from available_actions is by construction
+// currently legal, so it must always come back allowed with the turn
+// counter advanced by exactly one; "move" additionally has a deterministic,
+// checkable effect on location. ---
 
-export function evalEdgeCases() {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
+function evalActionSequence(sessionId, initialState) {
+  const headers = { 'Content-Type': 'application/json' };
+  let state = initialState;
+  for (let turn = 0; turn < 3; turn++) {
+    if (!state.available_actions || state.available_actions.length === 0) {
+      console.log('No available actions; ending the sequence early.');
+      break;
+    }
+    const chosen = chooseAction(state.available_actions);
+    const beforeTurn = state.turn;
+    const res = postAction(sessionId, chosen, headers);
+    const success = check(res, {
+      [`A${turn}_status_200`]: (res) => res.status === 200,
+      [`A${turn}_allowed`]: (res) => res.body && JSON.parse(res.body).allowed === true,
+      [`A${turn}_turn_advanced`]: (res) => res.body && JSON.parse(res.body).state.turn === beforeTurn + 1,
+    });
+    if (chosen.kind === 'move') {
+      check(res, {
+        [`A${turn}_location_updated`]: (res) => res.body && JSON.parse(res.body).state.location === chosen.target,
+      });
+    }
+    if (!success) {
+      console.log(`Action ${chosen.kind}/${chosen.target} check failed. Status: ${res.status}, Body: ${res.body}`);
+    }
+    if (res.status === 200) {
+      state = JSON.parse(res.body).state;
+    }
+    sleep(randomIntBetween(1, 2));
+  }
+}
 
-  // No "message" field at all. play.py validates this explicitly and
-  // returns a clean 400 with a JSON error body, rather than letting `None`
-  // reach HumanMessage(content=None) and crash with a 500.
-  let res = http.post(url + '/play', JSON.stringify({}), { headers: headers });
+// --- Edge cases: rewritten from Flask's message-validation contract to
+// the new action-validation and session-lookup contract. Reaching a 409
+// ("adventure has ended") deterministically requires dice rolls, so that
+// case is covered by the Go unit tests instead, where a Roller can be
+// stubbed directly. ---
+
+function evalEdgeCases(sessionId) {
+  const headers = { 'Content-Type': 'application/json' };
+
+  let res = postAction(sessionId, { target: 'logs' }, headers); // missing "kind"
   let success = check(res, {
-    'E01_Missing message returns 400': (res) => res.status === 400,
-    'E02_Missing message has error body': (res) => {
-      try {
-        return typeof JSON.parse(res.body).error === 'string';
-      } catch (e) {
-        return false;
-      }
+    'E01_missing kind returns 400': (res) => res.status === 400,
+    'E02_missing kind has error body': (res) => {
+      try { return typeof JSON.parse(res.body).error === 'string'; } catch (e) { return false; }
     },
   });
-  if (!success) {
-    console.log(`Missing-message check failed. Status: ${res.status}, Body: ${res.body}`);
-  }
-  sleep(randomIntBetween(2, 4));
+  if (!success) console.log(`Missing-kind check failed. Status: ${res.status}, Body: ${res.body}`);
+  sleep(randomIntBetween(1, 2));
 
-  // Empty string message. play.py rejects this before it reaches Anthropic's
-  // API, which would otherwise reject empty user content itself.
-  res = http.post(url + '/play', JSON.stringify({ message: '' }), { headers: headers });
+  res = postAction(sessionId, { kind: 'inspect' }, headers); // missing "target"
   success = check(res, {
-    'E03_Empty message returns 400': (res) => res.status === 400,
-    'E04_Empty message has error body': (res) => {
-      try {
-        return typeof JSON.parse(res.body).error === 'string';
-      } catch (e) {
-        return false;
-      }
+    'E03_missing target returns 400': (res) => res.status === 400,
+    'E04_missing target has error body': (res) => {
+      try { return typeof JSON.parse(res.body).error === 'string'; } catch (e) { return false; }
     },
   });
-  if (!success) {
-    console.log(`Empty-message check failed. Status: ${res.status}, Body: ${res.body}`);
-  }
-  sleep(randomIntBetween(2, 4));
+  if (!success) console.log(`Missing-target check failed. Status: ${res.status}, Body: ${res.body}`);
+  sleep(randomIntBetween(1, 2));
 
-  // Malformed JSON body. get_json(silent=True) swallows the parse failure
-  // and falls through to the same message check, so this hits the same
-  // 400 + {"error": ...} shape as the two cases above.
-  res = http.post(url + '/play', '{not valid json', { headers: headers });
+  res = http.post(`${BASE_URL}/session/${sessionId}/actions`, '{not valid json', { headers, tags: { name: 'app' } }); // malformed JSON
   success = check(res, {
-    'E05_Malformed JSON returns 400': (res) => res.status === 400,
-    'E06_Malformed JSON has error body': (res) => {
-      try {
-        return typeof JSON.parse(res.body).error === 'string';
-      } catch (e) {
-        return false;
-      }
+    'E05_malformed JSON returns 400': (res) => res.status === 400,
+    'E06_malformed JSON has error body': (res) => {
+      try { return typeof JSON.parse(res.body).error === 'string'; } catch (e) { return false; }
     },
   });
-  if (!success) {
-    console.log(`Malformed-JSON check failed. Status: ${res.status}, Body: ${res.body}`);
-  }
+  if (!success) console.log(`Malformed-JSON check failed. Status: ${res.status}, Body: ${res.body}`);
+  sleep(randomIntBetween(1, 2));
+
+  res = postAction('does-not-exist', { kind: 'inspect', target: 'logs' }, headers); // unknown session
+  success = check(res, {
+    'E07_unknown session returns 404': (res) => res.status === 404,
+    'E08_unknown session has error body': (res) => {
+      try { return typeof JSON.parse(res.body).error === 'string'; } catch (e) { return false; }
+    },
+  });
+  if (!success) console.log(`Unknown-session check failed. Status: ${res.status}, Body: ${res.body}`);
+}
+
+function postAction(sessionId, action, headers) {
+  return http.post(`${BASE_URL}/session/${sessionId}/actions`, JSON.stringify({ kind: action.kind, target: action.target }), { headers, tags: { name: 'app' } });
 }
