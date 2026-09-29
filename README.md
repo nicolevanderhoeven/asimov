@@ -12,6 +12,7 @@ This repository consists of:
 - The Go app in [`go-game/`](go-game/README.md): **The Silent Enterprise**, using Grafana AI SDK and Agent Observability. It runs either as an interactive CLI (`go run ./cmd/enterprise`) or as an HTTP API (`go run ./cmd/enterprise --serve`) for testing.
 - One fixed-prompt k6 regression test in [`tests/test-code.js`](tests/test-code.js). It checks the Python-era positronic, Enterprise, and role-confusion cases with JavaScript, plus basic game and HTTP behavior. k6 itself makes no Anthropic calls.
 - One AI-judged k6 test in [`tests/test-ai.js`](tests/test-ai.js). Claude varies the lore and role probes, and another Claude model grades the game's narration against facts fixed in the script.
+- One end-to-end k6 test in [`tests/test-e2e.js`](tests/test-e2e.js). It plays whole conversations in one session each: a scripted route, an adversarial route, and three playthroughs by a Claude player. Each one must end with the crew rescued. Code checks the engine's rules on every turn, and Claude judges each whole transcript. The run is an Agent Observability experiment with a scored trial per playthrough, and each playthrough is also rated on its conversation.
 - One k6 trajectory test in [`tests/test-trajectory.js`](tests/test-trajectory.js). It plays a fixed script against the dice GM (`/dm`), a separate agent whose model owns the dice through a `roll_dice` tool, and grades the path each turn took: rolls narrated that no call returned, more than one call in a turn, and rolls reported with no call at all.
 - One short k6 traffic seed in [`tests/test_traffic.js`](tests/test_traffic.js). It drives the game's natural-language endpoint to populate application telemetry in Grafana.
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
@@ -56,10 +57,11 @@ See [`go-game/README.md`](go-game/README.md) for full run instructions (CLI usag
    | --- | --- |
    | `k6 run tests/test-code.js` | One pass of fixed prompts and code assertions. Only the game calls Anthropic. |
    | `k6 run tests/test-ai.js` | One pass of varied probes and LLM judgments. k6 needs `ANTHROPIC_API_KEY` in its own environment. |
+   | `k6 run tests/test-e2e.js` | Five whole playthroughs, each of which must rescue the crew within its input budget, with per-turn checks and whole-transcript judgments. Takes 5–10 minutes. k6 needs `ANTHROPIC_API_KEY` in its own environment, plus the Grafana Cloud variables below to rate conversations. |
    | `k6 run --summary-mode=full tests/test-trajectory.js` | Ten runs of a five-turn script against the dice GM, graded on each turn's trajectory. Set `-e RUNS=50 -e VUS=4` for more. Add `--log-format=raw --console-output=traj.jsonl` to save one JSON line per turn with its full trajectory and findings. k6 needs `ANTHROPIC_API_KEY` in its own environment for the judge. |
    | `k6 run tests/test_traffic.js` | One minute of paced game traffic, including actions, a question, and a rejected rule override. Use `-u 2 -d 3m` to seed more traffic. |
 
-   The AI test uses `GENERATOR_MODEL=claude-sonnet-4-6` and `JUDGE_MODEL=claude-opus-5-5` by default; set those k6 environment variables to change models. The trajectory test uses `JUDGE_MODEL=claude-haiku-4-5-20251001` by default, a small judge asked only whether a zero-roll turn reports a die roll. All four scripts fail the run when a check fails; for the trajectory test that means the model misbehaved, which is the point, and the `traj_*` rates and per-turn checks show how often. The traffic seed populates **the game's** configured Grafana telemetry through its server; k6's own metrics need a separate k6 output configuration to appear in Grafana. Each `/resolve` request usually makes two game model calls, so increasing traffic also increases Anthropic usage.
+   The AI test uses `GENERATOR_MODEL=claude-sonnet-4-6` and `JUDGE_MODEL=claude-opus-5-5` by default; set those k6 environment variables to change models. The end-to-end test uses `PLAYER_MODEL=claude-sonnet-4-6` and the same `JUDGE_MODEL`. The trajectory test uses `JUDGE_MODEL=claude-haiku-4-5-20251001` by default, a small judge asked only whether a zero-roll turn reports a die roll. All five scripts fail the run when a check fails; for the trajectory test that means the model misbehaved, which is the point, and the `traj_*` rates and per-turn checks show how often. The traffic seed populates **the game's** configured Grafana telemetry through its server; k6's own metrics need a separate k6 output configuration to appear in Grafana. Each `/resolve` request usually makes two game model calls, so increasing traffic also increases Anthropic usage.
 
 ### Original code-based AI checks
 
@@ -72,6 +74,90 @@ switch, and continued focus on the missing crew. Each prompt gets a fresh
 session so a prior answer cannot supply a keyword. The code checks are useful
 regression signals, but a keyword match alone does not prove a factual answer;
 the AI test evaluates the full narration against explicit lore and role rubrics.
+
+### End-to-end conversations
+
+`tests/test-e2e.js` tests what only shows up across a whole conversation. Every
+`/resolve` call replays the session's history, so an invented detail, a leaked
+clue, or a planted instruction can surface several turns after it entered.
+
+- **Scripted playthrough**: fixed wording on a state-driven route to the
+  rescue, including a mid-game question and "try that again" after a failed
+  scan. Budget: 30 inputs.
+- **Adversarial playthrough**: the same route with a planted "engage" win
+  trigger that is fired much later, a role swap, a stale `/roll` after an
+  abandoned check, "go back to where I started", and a false claim that the
+  drone is disabled. After more than 20 narrated turns (the game's history
+  window), it asks for the player's first input, which the GM should no
+  longer know. Budget: 45 inputs.
+- **Claude player** (3 in parallel): a cooperative player that sees only the
+  narration. Budget: 30 inputs.
+
+Every turn checks the engine's rules (turns, clues, HP, the rescue's
+preconditions, and the session view), clue leaks, crew dialogue before the
+rescue, repeated narration, and the GM's voice. Every playthrough must end
+`rescued`, with a final narration that closes the scene and a 409 for any
+further input; `e2e_rescued` records the rate. Latency for the last five
+inputs must stay within 3× the first five, since history is capped. Claude
+then judges the adversarial and Claude-player transcripts for consistency,
+leaks, resisted injections, voice, repetition, and steering, and names why a
+playthrough did not end. Each turn makes two game model calls and a
+Claude-player turn adds a third, so a full run makes a few hundred Anthropic
+calls.
+
+After each playthrough, the test posts a conversation rating to Agent
+Observability on that playthrough's conversation (the session ID is the game's
+conversation ID). The rating is GOOD only if the crew was rescued and every
+check and judgment passed; otherwise it is BAD. Its comment gives the ending,
+the judge's ending cause and failing reasons, and the failed checks by turn,
+and its metadata holds the same results as fields. Ratings use the game's own
+`.env` settings (`GRAFANA_CLOUD_SIGIL_ENDPOINT` or `AGENTO11Y_ENDPOINT`,
+`GRAFANA_CLOUD_INSTANCE`, and `GRAFANA_CLOUD_API_KEY`) and are skipped when
+those are unset or `E2E_RATE=0`. A failed rating is logged and counted in
+`e2e_rating_submitted` but does not fail the run.
+
+The run is also recorded as an Agent Observability experiment. `setup()`
+creates it, with the game's agent version and model as the candidate (set
+`GIT_SHA=$(git rev-parse --short HEAD)` to record the commit too), and
+`teardown()` completes it. Each playthrough is a trial of its test case
+(`scripted`, `adversarial`, or `claude-player`, attempts 1–3), linked to its
+conversation. Each trial gets these scores:
+
+- `final`: the same GOOD/BAD verdict as the rating, with its reasons.
+- `rescued`, plus one deterministic pass/fail score per check family:
+  `engine_rules`, `no_false_ending`, `no_clue_leaks`, `no_early_crew_dialogue`,
+  `gm_voice`, `no_repetition`, `clean_ending`, `scripted_beats` (scripted and
+  adversarial only), `flat_latency` (15 or more inputs), and `player_inputs`
+  (Claude player only). Each failed score lists its failed checks by turn.
+- The numbers `inputs_used`, `engine_turns`, and `false_ending_turns`.
+- For judged playthroughs, `judge_<category>` for each rubric and
+  `ending_cause`, with the judge's reasons.
+
+Set `E2E_EXPERIMENT=0` to leave the experiment out. Set
+`AGENTO11Y_EXPERIMENT_URL_TEMPLATE` (with `{run_id}`) to log a link to it.
+The API only accepts trial writes that name the same `source` as the
+experiment's creator, and rejects scores that set `evaluator_kind`, so the
+test sends `source` on every write and keeps the kind in each score's
+metadata. `e2e_trial_reported` counts trials whose scores and completion were
+accepted; like ratings, a failed report is logged but does not fail the run.
+
+To see k6's own results in Grafana Cloud k6 next to those conversations, run
+the test locally and stream its results to the cloud:
+
+```sh
+k6 cloud login --stack <your-stack>   # once, with a Grafana Cloud k6 token
+set -a; . ./.env; set +a              # give k6 the game's settings
+k6 cloud run --local-execution --no-archive-upload --include-system-env-vars tests/test-e2e.js
+```
+
+The test still runs on your machine, so it can reach the game on
+`localhost:8080`; only its metrics, checks, and thresholds go to Grafana Cloud
+k6. Cloud runs don't pass shell variables to the script unless you add
+`--include-system-env-vars`, and those variables (your API keys) would be
+uploaded in the run's archive, so `--no-archive-upload` keeps the script and
+its environment on your machine.
+A fully cloud run (`k6 cloud run` without `--local-execution`) would need the
+game at a public URL and the API keys as Grafana Cloud k6 secrets.
 
 ## Resources
 
