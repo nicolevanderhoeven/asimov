@@ -8,3 +8,6 @@ logs/
 go-game/.enterprise-save*.json
 go-game/.enterprise-save-*
 go-game/enterprise
+
+# Trajectory harness traces (cmd/traj)
+go-game/traj-traces/
