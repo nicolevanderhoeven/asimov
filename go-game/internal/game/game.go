@@ -25,6 +25,9 @@ type State struct {
 	// Pending is the chosen action waiting on the player's own /roll. It is
 	// cleared when the roll resolves it or when any other action is chosen.
 	Pending *PendingRoll `json:"pending_roll,omitempty"`
+	// Advantage is earned by a successful improvised setup and spent on the
+	// player's next roll.
+	Advantage bool `json:"advantage,omitempty"`
 }
 
 // A PendingRoll names the check the player must roll for with /roll before
@@ -36,6 +39,9 @@ type PendingRoll struct {
 	Check   string `json:"check"`
 	Target  int    `json:"target"`
 	Command string `json:"command"`
+	// Improvisation is set when the roll is for an improvised attempt rather
+	// than a listed action; Action is then {improvise, <effect>}.
+	Improvisation *Improvisation `json:"improvisation,omitempty"`
 	// aliases are the other words /roll accepts for this check, such as the
 	// skill name or the ability's abbreviation.
 	aliases []string
@@ -48,7 +54,7 @@ func New(id string) State {
 // An Action intentionally has no roll, DC, modifier, damage, or state fields.
 // The model may select an action; only the engine supplies its consequences.
 type Action struct {
-	Kind   string `json:"kind" jsonschema:"description=One of move, inspect, scan, bypass, attack, dodge, retreat, isolate, rescue"`
+	Kind   string `json:"kind" jsonschema:"description=One of move\\, inspect\\, scan\\, bypass\\, attack\\, dodge\\, retreat\\, isolate\\, rescue\\, or unsupported"`
 	Target string `json:"target" jsonschema:"description=An exact target from the currently available actions"`
 }
 
@@ -67,8 +73,11 @@ type View struct {
 	DroneHP     int          `json:"drone_hp,omitempty"`
 	Turn        int          `json:"turn"`
 	Discovered  []string     `json:"discovered"`
+	Details     []string     `json:"details,omitempty"`
 	Actions     []Option     `json:"available_actions"`
+	Effects     []Effect     `json:"improvised_effects,omitempty"`
 	Pending     *PendingRoll `json:"pending_roll,omitempty"`
+	Advantage   bool         `json:"advantage,omitempty"`
 	Status      string       `json:"status"`
 }
 
@@ -100,6 +109,9 @@ func (s State) View() View {
 		return v
 	}
 	v.Pending = s.Pending
+	v.Advantage = s.Advantage
+	v.Details = s.details()
+	v.Effects = s.effects()
 	add := func(k, t, d string) { v.Actions = append(v.Actions, Option{Action: Action{k, t}, Description: d}) }
 	if s.Combat {
 		v.DroneHP = s.DroneHP
@@ -144,7 +156,12 @@ type Result struct {
 	// RollRequired is set when the chosen action is waiting on /roll; the
 	// action has not been resolved and the turn has not advanced yet.
 	RollRequired *PendingRoll `json:"roll_required,omitempty"`
-	State        View         `json:"state"`
+	// Improvisation is the validated attempt this result is for, if any.
+	Improvisation *Improvisation `json:"improvisation,omitempty"`
+	// Question marks a player question: nothing happened and the turn has not
+	// advanced, so the narrator only answers it.
+	Question bool `json:"question,omitempty"`
+	State    View `json:"state"`
 }
 
 // pendingRoll reports the player-rolled check that action a calls for, or nil
@@ -221,43 +238,73 @@ func (s *State) Roll(text string, roll Roller) Result {
 		return finish(fmt.Sprintf("The GM asked for %s, not %s. Type %s.", p.Check, strings.TrimSpace(text), p.Command))
 	}
 	s.Pending = nil
-	r := s.resolve(p.Action, roll)
+	var r Result
+	if p.Improvisation != nil {
+		r = s.resolveImprovised(p, roll)
+	} else {
+		r = s.resolve(p.Action, roll)
+	}
 	for i := range r.Rolls {
 		r.Rolls[i].Manual = r.Rolls[i].Label == p.Check
 	}
 	return r
 }
 
+// turn accumulates one resolved turn's rolls, damage, and message, and holds
+// the combat steps that listed and improvised actions share.
+type turn struct {
+	s    *State
+	r    Result
+	roll Roller
+}
+
+func (s *State) newTurn(roll Roller) *turn {
+	s.Turn++
+	return &turn{s: s, r: Result{Allowed: true}, roll: roll}
+}
+
+func (t *turn) finish(msg string) Result { t.r.Message = msg; t.r.State = t.s.View(); return t.r }
+
+func (t *turn) check(label string, bonus, dc int, adv, dis, attack bool) Roll {
+	x := Check(t.roll, label, bonus, dc, adv, dis, attack)
+	t.r.Rolls = append(t.r.Rolls, x)
+	return x
+}
+
+func (t *turn) droneAttack(dodge bool) {
+	x := t.check("Drone attack", 3, Data().AC, false, dodge, true)
+	if x.Success {
+		damage := t.roll(4) + 1
+		if x.Critical {
+			damage += t.roll(4)
+		}
+		t.s.HP = max(0, t.s.HP-damage)
+		t.r.Damage += damage
+	}
+}
+
+func (t *turn) startCombat() {
+	t.s.Combat = true
+	p := t.check("Data initiative", Modifier(Data().Scores["dexterity"]), 0, false, false, false)
+	d := t.check("Drone initiative", 1, 0, false, false, false)
+	// On a tied initiative total, the GM's fixed policy gives Data priority.
+	if d.Total > p.Total {
+		t.droneAttack(false)
+	}
+}
+
+// takeAdvantage spends the advantage an improvised setup earned, if any, on
+// the player's roll being made now.
+func (s *State) takeAdvantage() bool {
+	adv := s.Advantage
+	s.Advantage = false
+	return adv
+}
+
 // resolve applies an action already validated against the current view.
 func (s *State) resolve(a Action, roll Roller) Result {
-	r := Result{Allowed: true}
-	finish := func(msg string) Result { r.Message = msg; r.State = s.View(); return r }
-	s.Turn++
-	check := func(label string, bonus, dc int, adv, dis, attack bool) Roll {
-		x := Check(roll, label, bonus, dc, adv, dis, attack)
-		r.Rolls = append(r.Rolls, x)
-		return x
-	}
-	droneAttack := func(dodge bool) {
-		x := check("Drone attack", 3, Data().AC, false, dodge, true)
-		if x.Success {
-			damage := roll(4) + 1
-			if x.Critical {
-				damage += roll(4)
-			}
-			s.HP = max(0, s.HP-damage)
-			r.Damage += damage
-		}
-	}
-	startCombat := func() {
-		s.Combat = true
-		p := check("Data initiative", Modifier(Data().Scores["dexterity"]), 0, false, false, false)
-		d := check("Drone initiative", 1, 0, false, false, false)
-		// On a tied initiative total, the GM's fixed policy gives Data priority.
-		if d.Total > p.Total {
-			droneAttack(false)
-		}
-	}
+	t := s.newTurn(roll)
+	finish, check := t.finish, t.check
 	switch a.Kind {
 	case "move":
 		s.Location = a.Target
@@ -267,28 +314,28 @@ func (s *State) resolve(a Action, roll Roller) Result {
 		s.Clues[key] = true
 		return finish(clueText[key])
 	case "scan":
-		x := check("Intelligence (Investigation)", Data().SkillBonus("investigation"), 12, false, false, false)
+		x := check("Intelligence (Investigation)", Data().SkillBonus("investigation"), 12, s.takeAdvantage(), false, false)
 		if x.Success {
 			s.Clues["frequency"] = true
 			return finish(clueText["frequency"])
 		}
 		return finish("The damaged buffer yields no stable frequency. You may try again.")
 	case "bypass":
-		x := check("Intelligence (Arcana): tricorder bypass", Data().SkillBonus("arcana"), 13, false, false, false)
+		x := check("Intelligence (Arcana): tricorder bypass", Data().SkillBonus("arcana"), 13, s.takeAdvantage(), false, false)
 		if x.Success {
 			s.DroneHP = 0
 			return finish("Your tricorder disables the security drone. The relay controls are accessible.")
 		}
-		startCombat()
+		t.startCombat()
 		return finish("The bypass fails and the drone activates. Initiative determines whether it fires before your next action.")
 	case "attack":
 		if !s.Combat {
-			startCombat()
+			t.startCombat()
 		}
 		if s.HP <= 0 {
 			return finish("The drone disables Data before he can fire.")
 		}
-		x := check("Phaser attack", Modifier(Data().Scores["dexterity"])+Data().ProficiencyBonus, 12, false, false, true)
+		x := check("Phaser attack", Modifier(Data().Scores["dexterity"])+Data().ProficiencyBonus, 12, s.takeAdvantage(), false, true)
 		if x.Success {
 			damage := roll(6) + Modifier(Data().Scores["dexterity"])
 			if x.Critical {
@@ -299,14 +346,14 @@ func (s *State) resolve(a Action, roll Roller) Result {
 				s.Combat = false
 				return finish(fmt.Sprintf("Your phaser deals %d damage and disables the drone.", damage))
 			}
-			r.Message = fmt.Sprintf("Your phaser deals %d damage. ", damage)
+			t.r.Message = fmt.Sprintf("Your phaser deals %d damage. ", damage)
 		} else {
-			r.Message = "Your phaser misses. "
+			t.r.Message = "Your phaser misses. "
 		}
-		droneAttack(false)
-		return finish(r.Message + "The drone takes its next turn.")
+		t.droneAttack(false)
+		return finish(t.r.Message + "The drone takes its next turn.")
 	case "dodge":
-		droneAttack(true)
+		t.droneAttack(true)
 		return finish("You dodge while the drone fires with disadvantage.")
 	case "retreat":
 		s.Combat = false
@@ -314,11 +361,11 @@ func (s *State) resolve(a Action, roll Roller) Result {
 		return finish("You withdraw to the bridge. The fixed drone cannot follow or make a melee opportunity attack.")
 	case "isolate":
 		s.Isolated = true
-		x := check("Dexterity saving throw", Data().SaveBonus("dexterity"), 12, false, false, false)
+		x := check("Dexterity saving throw", Data().SaveBonus("dexterity"), 12, s.takeAdvantage(), false, false)
 		if !x.Success {
 			damage := roll(6)
 			s.HP = max(0, s.HP-damage)
-			r.Damage = damage
+			t.r.Damage = damage
 			return finish("You isolate the relay but suffer an electrical discharge.")
 		}
 		return finish("You isolate the relay and avoid the electrical discharge.")

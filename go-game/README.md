@@ -62,6 +62,7 @@ go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve retur
 | `GET /session/{id}` | Current state |
 | `POST /session/{id}/actions` | Submit an exact `{"kind","target"}` action, as `/do` does |
 | `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does; an input of `/roll ABILITY` rolls the pending check |
+| `POST /session/{id}/improvise` | Submit an exact improvisation, as `/try` does: `{"approach","ability","skill","difficulty","effect"}` |
 | `POST /session/{id}/roll` | Roll the pending check: `{"ability"}`, plus `"narrate": true` for GM narration (needs an LLM) |
 
 Sessions are created per-request and held only in memory. `--session-ttl`
@@ -85,6 +86,7 @@ Agent Observability's Conversations view. History lives only in memory (not in
 | --- | --- |
 | `/actions` | Show the current supported actions and their mechanics |
 | `/do inspect logs` | Execute a supported action directly |
+| `/try str/athletics hard disable_drone rip it off its mount` | Improvise directly: `ABILITY[/SKILL] DIFFICULTY EFFECT APPROACH` |
 | `/roll Intelligence` | Roll the check the GM just asked for |
 | `/status` | Show location, health, and discovered evidence |
 | `/sheet` | Show Data's fixed character sheet |
@@ -99,11 +101,32 @@ and choosing a different action drops the pending roll. The engine still rolls
 initiative and the drone's attacks for you. Over HTTP, a response with
 `roll_required` means the action is waiting on `POST /session/{id}/roll`.
 
+You aren't limited to the listed actions. Describe anything else Data tries
+("I splice my positronic net into the sensor buffer", "I rip the drone off its
+mount") and the GM treats it as an improvised check. The model reads the
+attempt as an ability (and optionally a skill), a difficulty for the approach
+itself (easy, medium, or hard: DC 10/15/20), and one effect from a short menu
+the engine offers for the current situation. Examples are recovering the
+frequency another way, disabling the drone without a fight, damaging it in
+combat, or setting up advantage on your next roll. Each effect has a minimum
+DC. The engine uses the higher of the two and says when it raised the DC, and
+it decides what success and failure do. You then roll with `/roll` as usual.
+An attempt no effect covers, such as beaming the crew back directly, is
+unsupported: improvisation offers other routes to an objective, never a way to
+skip one. Harmless actions with no bearing on the mission, such as sitting in
+the captain's chair, are `flavor`: the GM describes them from authored scene
+details, with no roll and no turn.
+
+You can also just ask a question: about the rules, Data's abilities, the scene,
+or what you could try. A question changes nothing and doesn't use a turn. The
+GM answers from the state and the scene details, and says when Data doesn't
+know something yet.
+
 The `[Engine]` result and displayed rolls are authoritative. The model only
 interprets intent and narrates; it cannot set rolls, damage, DCs, inventory, or
 rescue flags. It receives only discovered scenario facts. A failed narration
 does not undo a resolved action. Model interpretation and prose can still be wrong;
-direct `/do` commands bypass interpretation for reproducible demonstrations.
+direct `/do` and `/try` commands bypass interpretation for reproducible demonstrations.
 
 ## Rules and adaptations
 
@@ -126,8 +149,11 @@ The adventure defines its checks, legal transitions, and success conditions.
 Repeated sensor analysis is allowed without an extra penalty. Failed drone
 bypass activates combat. The relay hazard always permits progress but can deal
 damage. These are authored encounter rulings, not universal 5e rules.
+Improvised checks may pair a skill with a different ability than usual (the 5e
+variant rule); proficiency still comes only from Data's own skills.
 
-Not yet implemented: arbitrary creative-action adjudication, character creation,
+Not yet implemented: open-ended creative outcomes beyond the authored effect
+menu, character creation,
 classes, spellcasting, leveling, full movement/range simulation, conditions,
 death saves, rests, or additional adventures. An unsupported action is not
 necessarily illegal in tabletop D&D; the app explains that it is unsupported.
@@ -139,7 +165,9 @@ Rules references:
 ## Agent and observability design
 
 1. A player turn opens a `game.turn` span.
-2. AI SDK `GenerateText` selects one typed `resolve_action` tool call.
+2. AI SDK `GenerateText` makes exactly one typed tool call: `resolve_action`
+   (a listed action), `propose_improvisation` (a creative attempt), or
+   `answer_question`.
 3. Go validates it, rolls dice, and resolves a candidate state. Multiple tool
    requests are rejected; provider failures leave the saved state unchanged.
 4. The resolved state is saved; AI SDK `StreamText` narrates with no tools.
@@ -147,7 +175,9 @@ Rules references:
    with `component=action_resolution` or `component=narration`.
 
 The Agent Observability SDK records tools; OTel exports application/tool spans,
-dice events, SDK generation metrics, the custom `game.actions` counter, and
+dice events, SDK generation metrics, the custom `game.actions` (by tool) and
+`game.improvisations` (by effect, difficulty, and whether the engine raised the
+DC) counters, and
 structured logs, under `service.name=asimov-enterprise-go`. All requests in a
 game share its conversation ID; over HTTP, the session ID doubles as
 the conversation ID. Generation data goes to the Agent Observability endpoint;
@@ -173,7 +203,8 @@ go vet ./...
 ```
 
 Tests use fixed dice and a fake provider exercising the actual AI SDK. They cover
-rules, rejected actions, hidden evidence, a complete rescue, combat, saves,
+rules, rejected actions, improvised checks and their DC floors, questions,
+hidden evidence, a complete rescue, combat, saves,
 single-action enforcement, provider failures, streaming narration, and config.
 They do not require credentials or send data to Anthropic/Grafana.
 

@@ -3,6 +3,7 @@ package game
 import (
 	"crypto/rand"
 	"math/big"
+	"slices"
 )
 
 // Roller is injectable so tests can reproduce rolls without model calls.
@@ -77,8 +78,14 @@ type Character struct {
 func Data() Character {
 	return Character{
 		Name: "Data", Level: 3, ProficiencyBonus: 2, AC: 14, MaxHP: 24,
-		Scores:            map[string]int{"strength": 18, "dexterity": 14, "constitution": 16, "intelligence": 18, "wisdom": 12, "charisma": 10},
-		Skills:            map[string]string{"athletics": "strength", "investigation": "intelligence", "arcana": "intelligence", "medicine": "wisdom", "perception": "wisdom"},
+		Scores: map[string]int{"strength": 18, "dexterity": 14, "constitution": 16, "intelligence": 18, "wisdom": 12, "charisma": 10},
+		Skills: map[string]string{
+			"acrobatics": "dexterity", "animal_handling": "wisdom", "arcana": "intelligence", "athletics": "strength",
+			"deception": "charisma", "history": "intelligence", "insight": "wisdom", "intimidation": "charisma",
+			"investigation": "intelligence", "medicine": "wisdom", "nature": "intelligence", "perception": "wisdom",
+			"performance": "charisma", "persuasion": "charisma", "religion": "intelligence", "sleight_of_hand": "dexterity",
+			"stealth": "dexterity", "survival": "wisdom",
+		},
 		Proficiencies:     []string{"athletics", "investigation", "arcana", "perception"},
 		SaveProficiencies: []string{"strength", "constitution"},
 		Equipment:         []string{"phaser (shortbow mechanics: +4 attack, 1d6+2 damage)", "tricorder", "Starfleet access credentials"},
@@ -91,6 +98,17 @@ func (c Character) SkillBonus(skill string) int {
 		if p == skill {
 			return b + c.ProficiencyBonus
 		}
+	}
+	return b
+}
+
+// CheckBonus is the bonus for an ability check using ability, adding
+// proficiency when skill is one Data is proficient in. It allows the 5e
+// variant of pairing a skill with a different ability than its usual one.
+func (c Character) CheckBonus(ability, skill string) int {
+	b := Modifier(c.Scores[ability])
+	if slices.Contains(c.Proficiencies, skill) {
+		b += c.ProficiencyBonus
 	}
 	return b
 }

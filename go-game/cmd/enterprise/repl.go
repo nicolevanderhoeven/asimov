@@ -77,7 +77,7 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 		case "quit", "exit", "/quit":
 			return nil
 		case "/help":
-			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\nWhen the GM asks for a check, roll it yourself with /roll ABILITY, e.g. /roll Intelligence.\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\nProgress is not saved; each run starts a new game.")
+			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\nYou can also try anything not on the list, or ask a question; the GM sets a check if it needs one.\nWhen the GM asks for a check, roll it yourself with /roll ABILITY, e.g. /roll Intelligence.\n/try ABILITY[/SKILL] DIFFICULTY EFFECT APPROACH improvises without the model, e.g.\n  /try strength/athletics hard disable_drone rip the drone off its mount\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\nProgress is not saved; each run starts a new game.")
 			continue
 		case "/status", "/actions":
 			show(s, false)
@@ -88,7 +88,8 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 			continue
 		}
 		isRoll := input == "/roll" || strings.HasPrefix(input, "/roll ")
-		if strings.HasPrefix(input, "/") && !strings.HasPrefix(input, "/do ") && !isRoll {
+		isTry := strings.HasPrefix(input, "/try ")
+		if strings.HasPrefix(input, "/") && !strings.HasPrefix(input, "/do ") && !isRoll && !isTry {
 			fmt.Println("Unknown command. Type /help.")
 			continue
 		}
@@ -102,7 +103,18 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 		span.SetAttributes(attribute.String("gen_ai.conversation.id", s.ConversationID), attribute.Int("game.turn", s.Turn+1))
 		var result game.Result
 		var err error
-		if isRoll {
+		if isTry {
+			parts := strings.Fields(input)
+			if len(parts) < 5 {
+				fmt.Println("Usage: /try ABILITY[/SKILL] DIFFICULTY EFFECT APPROACH")
+				span.End()
+				cancel()
+				continue
+			}
+			ability, skill, _ := strings.Cut(parts[1], "/")
+			im := game.Improvisation{Ability: ability, Skill: skill, Difficulty: parts[2], Effect: parts[3], Approach: strings.Join(parts[4:], " ")}
+			result = g.Improvise(turnCtx, &s, im, agentobservability.NewGenerationID())
+		} else if isRoll {
 			result = g.RollPending(turnCtx, &s, strings.TrimSpace(strings.TrimPrefix(input, "/roll")), agentobservability.NewGenerationID())
 		} else if strings.HasPrefix(input, "/do ") {
 			parts := strings.Fields(input)
@@ -114,7 +126,7 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 			}
 			result = g.Execute(turnCtx, &s, game.Action{Kind: parts[1], Target: parts[2]}, agentobservability.NewGenerationID())
 		} else if offline {
-			fmt.Println("Offline mode requires an exact /do command from /actions.")
+			fmt.Println("Offline mode requires an exact /do, /try, or /roll command; see /help.")
 			span.End()
 			cancel()
 			continue
@@ -191,6 +203,15 @@ func show(s game.State, withArt bool) {
 		for _, a := range v.Actions {
 			fmt.Printf("  /do %s %s\n%s\n", a.Kind, a.Target, wrap(a.Description, "      "))
 		}
+	}
+	if len(v.Effects) > 0 {
+		fmt.Printf("\n%s\n%s\n", heading("Or improvise"), wrap("Describe anything else you try, or ask a question. An attempt can aim for:", "  "))
+		for _, e := range v.Effects {
+			fmt.Printf("  %s\n%s\n", e.ID, wrap(e.Description, "      "))
+		}
+	}
+	if v.Advantage {
+		fmt.Printf("\n%s\n", wrap(">> Your next roll has advantage.", ""))
 	}
 	if v.Pending != nil {
 		fmt.Printf("\n%s\n", wrap(fmt.Sprintf(">> Waiting on your roll: %s vs %d. Type %s.", v.Pending.Check, v.Pending.Target, v.Pending.Command), ""))

@@ -20,6 +20,15 @@ type fakeModel struct {
 	params provider.CallOptions
 }
 
+// toolCall splits a scripted call into its tool name and JSON arguments. A
+// call is either bare JSON, for resolve_action, or "tool_name {json}".
+func toolCall(c string) (string, string) {
+	if name, input, ok := strings.Cut(c, " "); ok && !strings.HasPrefix(c, "{") {
+		return name, input
+	}
+	return "resolve_action", c
+}
+
 func (*fakeModel) SpecificationVersion() string               { return "v4" }
 func (*fakeModel) Provider() string                           { return "anthropic" }
 func (*fakeModel) ModelID() string                            { return "test-model" }
@@ -31,7 +40,8 @@ func (m *fakeModel) DoGenerate(_ context.Context, p provider.CallOptions) (*prov
 	}
 	r := &provider.GenerateResult{FinishReason: provider.FinishReason{Unified: provider.FinishReasonToolCalls}}
 	for i, c := range m.calls {
-		r.Content = append(r.Content, provider.GenerateContentPart{Type: provider.ContentToolCall, ToolCallID: string(rune('a' + i)), ToolName: "resolve_action", Input: json.RawMessage(c)})
+		tool, input := toolCall(c)
+		r.Content = append(r.Content, provider.GenerateContentPart{Type: provider.ContentToolCall, ToolCallID: string(rune('a' + i)), ToolName: tool, Input: json.RawMessage(input)})
 	}
 	return r, nil
 }
@@ -43,7 +53,8 @@ func (m *fakeModel) DoStream(_ context.Context, p provider.CallOptions) (*provid
 	c := make(chan provider.StreamPart, len(m.calls)+4)
 	if len(p.Tools) > 0 {
 		for i, input := range m.calls {
-			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: string(rune('a' + i)), ToolName: "resolve_action", Input: input}
+			tool, input := toolCall(input)
+			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: string(rune('a' + i)), ToolName: tool, Input: input}
 		}
 		c <- provider.StreamPart{Type: provider.PartFinish, FinishReason: &provider.FinishReason{Unified: provider.FinishReasonToolCalls}}
 		close(c)
@@ -151,5 +162,44 @@ func TestAppendTurnSkipsEmptyNarration(t *testing.T) {
 	history := AppendTurn(nil, "input", "")
 	if len(history) != 0 {
 		t.Fatalf("empty narration should not be recorded: %+v", history)
+	}
+}
+
+func TestModelCanProposeImprovisation(t *testing.T) {
+	m := &fakeModel{calls: []string{`propose_improvisation {"approach":"reroute the sensor buffer through my own neural net","ability":"intelligence","skill":"investigation","difficulty":"medium","effect":"recover_frequency"}`}}
+	s := game.New("test")
+	r, err := newGM(m).Resolve(context.Background(), &s, nil, "I plug myself into the sensor buffer")
+	if err != nil || !r.Allowed || r.RollRequired == nil || r.RollRequired.Target != 15 || s.Pending == nil || s.Turn != 0 {
+		t.Fatal(r, s, err)
+	}
+	if !strings.Contains(m.params.Prompt[0].Content[0].Text, "improvised_effects") {
+		t.Fatal("the view given to the model does not list improvised effects")
+	}
+}
+
+func TestModelCannotImproviseOffMenu(t *testing.T) {
+	m := &fakeModel{calls: []string{`propose_improvisation {"approach":"beam the crew back","ability":"intelligence","difficulty":"easy","effect":"rescue_crew"}`}}
+	s := game.New("test")
+	r, err := newGM(m).Resolve(context.Background(), &s, nil, "I beam the crew back")
+	if err != nil || r.Allowed || s.Pending != nil || s.Won {
+		t.Fatal(r, s, err)
+	}
+}
+
+func TestQuestionChangesNothing(t *testing.T) {
+	m := &fakeModel{calls: []string{`answer_question {"topic":"armor class"}`}}
+	s := game.New("test")
+	before := s.View().JSON()
+	r, err := newGM(m).Resolve(context.Background(), &s, nil, "What's my AC?")
+	if err != nil || !r.Question || s.View().JSON() != before {
+		t.Fatal(r, s, err)
+	}
+}
+
+func TestMixedToolsCannotBothRun(t *testing.T) {
+	m := &fakeModel{calls: []string{`answer_question {"topic":"logs"}`, `{"kind":"inspect","target":"logs"}`}}
+	s := game.New("test")
+	if _, err := newGM(m).Resolve(context.Background(), &s, nil, "What do the logs say? Read them."); err == nil || s.Clues["logs"] {
+		t.Fatal("a question and an action in one input should be rejected without changing state")
 	}
 }

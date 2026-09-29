@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,15 @@ type fakeModel struct {
 	params provider.CallOptions // set by the most recent DoGenerate/DoStream call
 }
 
+// toolCall splits a scripted call into its tool name and JSON arguments. A
+// call is either bare JSON, for resolve_action, or "tool_name {json}".
+func toolCall(c string) (string, string) {
+	if name, input, ok := strings.Cut(c, " "); ok && !strings.HasPrefix(c, "{") {
+		return name, input
+	}
+	return "resolve_action", c
+}
+
 func (*fakeModel) SpecificationVersion() string               { return "v4" }
 func (*fakeModel) Provider() string                           { return "anthropic" }
 func (*fakeModel) ModelID() string                            { return "test-model" }
@@ -38,7 +48,8 @@ func (m *fakeModel) DoGenerate(_ context.Context, p provider.CallOptions) (*prov
 	}
 	r := &provider.GenerateResult{FinishReason: provider.FinishReason{Unified: provider.FinishReasonToolCalls}}
 	for i, c := range m.calls {
-		r.Content = append(r.Content, provider.GenerateContentPart{Type: provider.ContentToolCall, ToolCallID: string(rune('a' + i)), ToolName: "resolve_action", Input: json.RawMessage(c)})
+		tool, input := toolCall(c)
+		r.Content = append(r.Content, provider.GenerateContentPart{Type: provider.ContentToolCall, ToolCallID: string(rune('a' + i)), ToolName: tool, Input: json.RawMessage(input)})
 	}
 	return r, nil
 }
@@ -51,7 +62,8 @@ func (m *fakeModel) DoStream(_ context.Context, p provider.CallOptions) (*provid
 	c := make(chan provider.StreamPart, len(m.calls)+4)
 	if len(p.Tools) > 0 {
 		for i, input := range m.calls {
-			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: string(rune('a' + i)), ToolName: "resolve_action", Input: input}
+			tool, input := toolCall(input)
+			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: string(rune('a' + i)), ToolName: tool, Input: input}
 		}
 		c <- provider.StreamPart{Type: provider.PartFinish, FinishReason: &provider.FinishReason{Unified: provider.FinishReasonToolCalls}}
 		close(c)
@@ -350,6 +362,35 @@ func TestResolveRoutesRollCommandToEngine(t *testing.T) {
 		if (i == 0) != (body.Result.RollRequired != nil) || body.Result.State.Turn != i {
 			t.Fatalf("%q: unexpected result %+v", input, body.Result)
 		}
+	}
+}
+
+func TestImproviseThenRoll(t *testing.T) {
+	ts := newTestServer(t, nil)
+	defer ts.Close()
+	id := createSession(t, ts.URL)
+	res, err := http.Post(ts.URL+"/session/"+id+"/improvise", "application/json", bytes.NewBufferString(`{"approach":"reroute the buffer","ability":"int","skill":"investigation","difficulty":"easy","effect":"recover_frequency"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pending game.Result
+	err = json.NewDecoder(res.Body).Decode(&pending)
+	res.Body.Close()
+	if err != nil || res.StatusCode != http.StatusOK || pending.RollRequired == nil || pending.RollRequired.Target != 15 {
+		t.Fatalf("improvise: %d %+v %v", res.StatusCode, pending, err)
+	}
+	// The fixed roller rolls 15; +6 investigation beats DC 15.
+	status, body := postRoll(t, ts.URL, id, `{"ability":"Intelligence"}`)
+	if status != http.StatusOK || !body.Result.Allowed || body.Result.State.Turn != 1 || len(body.Result.State.Discovered) != 1 {
+		t.Fatalf("roll: %d %+v", status, body)
+	}
+	res, err = http.Post(ts.URL+"/session/"+id+"/improvise", "application/json", bytes.NewBufferString(`{"ability":"int"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing fields: status = %d, want 400", res.StatusCode)
 	}
 }
 

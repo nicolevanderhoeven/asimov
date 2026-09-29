@@ -1,6 +1,7 @@
 package game
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -123,11 +124,11 @@ func TestRescueRequiresEvidence(t *testing.T) {
 
 func TestFailureCanBeRetried(t *testing.T) {
 	s := New("test")
-	play(&s,Action{"scan", "sensors"}, sequence(t, 1))
+	play(&s, Action{"scan", "sensors"}, sequence(t, 1))
 	if s.Clues["frequency"] {
 		t.Fatal("failed check revealed frequency")
 	}
-	play(&s,Action{"scan", "sensors"}, sequence(t, 10))
+	play(&s, Action{"scan", "sensors"}, sequence(t, 10))
 	if !s.Clues["frequency"] {
 		t.Fatal("retry did not reveal frequency")
 	}
@@ -137,7 +138,7 @@ func TestCombatAndCriticalDamage(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	// Player wins initiative, critically hits, and deals 6+4+2 damage.
-	r := play(&s,Action{"attack", "drone"}, sequence(t, 15, 1, 20, 6, 4))
+	r := play(&s, Action{"attack", "drone"}, sequence(t, 15, 1, 20, 6, 4))
 	if s.DroneHP != 0 || s.Combat || s.HP != 24 || len(r.Rolls) != 3 {
 		t.Fatalf("bad critical or retaliation after defeat: %+v %+v", s, r)
 	}
@@ -147,7 +148,7 @@ func TestDroneActsFirstAndCanDisableData(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	s.HP = 1
-	r := play(&s,Action{"attack", "drone"}, sequence(t, 1, 20, 20, 4, 4))
+	r := play(&s, Action{"attack", "drone"}, sequence(t, 1, 20, 20, 4, 4))
 	if s.HP != 0 || s.DroneHP != 10 || r.State.Status != "disabled" {
 		t.Fatal(s, r)
 	}
@@ -173,7 +174,7 @@ func TestDodgeAndRetreat(t *testing.T) {
 func TestBypassFailureStartsCombat(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
-	play(&s,Action{"bypass", "drone"}, sequence(t, 1, 15, 1))
+	play(&s, Action{"bypass", "drone"}, sequence(t, 1, 15, 1))
 	if !s.Combat || s.DroneHP != 10 {
 		t.Fatal(s)
 	}
@@ -186,7 +187,7 @@ func TestHazardAndSave(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	s.DroneHP = 0
-	r := play(&s,Action{"isolate", "relay"}, sequence(t, 1, 6))
+	r := play(&s, Action{"isolate", "relay"}, sequence(t, 1, 6))
 	if !s.Isolated || s.HP != 18 || r.Damage != 6 {
 		t.Fatal(s, r)
 	}
@@ -243,5 +244,103 @@ func TestOnlyPlayerRollIsManual(t *testing.T) {
 	}
 	if manual != 1 || len(r.Rolls) != 4 {
 		t.Fatalf("%+v", r.Rolls)
+	}
+}
+
+func improvisation(ability, skill, difficulty, effect string) Improvisation {
+	return Improvisation{Approach: "try something clever", Ability: ability, Skill: skill, Difficulty: difficulty, Effect: effect}
+}
+
+func TestImprovisedCheckUsesEffectMinimumDC(t *testing.T) {
+	s := New("test")
+	s.Location = "engineering"
+	r := s.Improvise(improvisation("STR", "Athletics", "easy", "disable_drone"))
+	if !r.Allowed || r.RollRequired == nil || r.RollRequired.Target != 20 || r.RollRequired.Command != "/roll Strength" || s.Turn != 0 {
+		t.Fatalf("easy approach to a hard effect should wait on a DC 20 roll: %+v", r)
+	}
+	if !strings.Contains(r.Message, "at least DC 20") {
+		t.Fatalf("raised DC not explained: %s", r.Message)
+	}
+	// Strength 18 (+4) plus athletics proficiency (+2): 14 + 6 = 20.
+	r = s.Roll("athletics", sequence(t, 14))
+	if !r.Allowed || s.DroneHP != 0 || s.Combat || s.Turn != 1 || len(r.Rolls) != 1 || !r.Rolls[0].Manual || r.Rolls[0].Total != 20 || r.Improvisation == nil {
+		t.Fatalf("improvised disable did not resolve: %+v", r)
+	}
+}
+
+func TestImprovisedDifficultyCanRaiseDC(t *testing.T) {
+	s := New("test")
+	r := s.Improvise(improvisation("wisdom", "", "hard", "recover_frequency"))
+	if r.RollRequired == nil || r.RollRequired.Target != 20 {
+		t.Fatal(r)
+	}
+	// Wisdom 12 (+1), no skill: 18 + 1 = 19 fails.
+	s.Roll("Wisdom", sequence(t, 18))
+	if s.Clues["frequency"] || s.Turn != 1 {
+		t.Fatal(s)
+	}
+}
+
+func TestInvalidImprovisationChangesNothing(t *testing.T) {
+	for _, im := range []Improvisation{
+		improvisation("strength", "", "easy", "rescue_crew"),                // never on the menu
+		improvisation("strength", "", "easy", "disable_drone"),              // not on the bridge
+		improvisation("luck", "", "easy", "recover_frequency"),              // not an ability
+		improvisation("strength", "hacking", "easy", "gain_advantage"),      // not a skill
+		improvisation("strength", "", "trivial", "gain_advantage"),          // not a tier
+		{Ability: "strength", Difficulty: "easy", Effect: "gain_advantage"}, // no approach
+	} {
+		s := New("test")
+		before := s.View().JSON()
+		if r := s.Improvise(im); r.Allowed || s.View().JSON() != before {
+			t.Fatalf("invalid improvisation %+v was accepted: %+v", im, r)
+		}
+	}
+}
+
+func TestFlavorNeedsNoRollOrTurn(t *testing.T) {
+	s := New("test")
+	s.Apply(Action{"scan", "sensors"}, sequence(t))
+	r := s.Improvise(Improvisation{Approach: "sit in the captain's chair", Effect: "flavor"})
+	if !r.Allowed || r.RollRequired != nil || s.Turn != 0 || s.Pending == nil {
+		t.Fatalf("flavor should change nothing, including the pending scan: %+v", r)
+	}
+}
+
+func TestAdvantageIsEarnedAndSpent(t *testing.T) {
+	s := New("test")
+	play := func(im Improvisation, dice ...int) Result {
+		r := s.Improvise(im)
+		return s.Roll(r.RollRequired.Ability, sequence(t, dice...))
+	}
+	play(improvisation("intelligence", "", "easy", "gain_advantage"), 10)
+	if !s.Advantage || slices.ContainsFunc(s.View().Effects, func(e Effect) bool { return e.ID == "gain_advantage" }) {
+		t.Fatal("advantage not earned, or still offered while held")
+	}
+	s.Apply(Action{"scan", "sensors"}, sequence(t))
+	r := s.Roll("Intelligence", sequence(t, 2, 12))
+	if s.Advantage || len(r.Rolls[0].Dice) != 2 || !s.Clues["frequency"] {
+		t.Fatalf("advantage not applied to the next roll: %+v", r)
+	}
+}
+
+func TestImprovisedDamageInCombatDrawsFire(t *testing.T) {
+	s := New("test")
+	s.Location = "engineering"
+	s.Combat = true
+	r := s.Improvise(improvisation("strength", "athletics", "medium", "damage_drone"))
+	// Check 15+6 hits, 4 damage, then the drone attacks and misses.
+	r = s.Roll("Strength", sequence(t, 15, 4, 2))
+	if s.DroneHP != 6 || !s.Combat || len(r.Rolls) != 2 || r.Rolls[1].Label != "Drone attack" {
+		t.Fatalf("%+v %+v", s, r)
+	}
+}
+
+func TestQuestionChangesNothing(t *testing.T) {
+	s := New("test")
+	before := s.View().JSON()
+	r := s.Answer()
+	if !r.Allowed || !r.Question || s.View().JSON() != before {
+		t.Fatal(r)
 	}
 }

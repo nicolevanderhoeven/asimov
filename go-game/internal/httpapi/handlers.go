@@ -90,6 +90,44 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleImprovise submits an exact improvisation, as /try does: the
+// deterministic, model-free counterpart of an improvised /resolve input.
+func (s *Server) handleImprovise(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req game.Improvisation
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Effect == "" || req.Approach == "" {
+		writeError(w, http.StatusBadRequest, "effect and approach are required")
+		return
+	}
+	var (
+		result game.Result
+		ended  bool
+	)
+	found := s.store.WithSession(id, func(data *SessionData) {
+		state := data.State
+		if state.Won || state.HP <= 0 {
+			ended = true
+			return
+		}
+		ctx, span := otel.Tracer(telemetry.Service).Start(turnContext(r.Context(), state), "game.turn")
+		defer span.End()
+		span.SetAttributes(attribute.String("gen_ai.conversation.id", state.ConversationID), attribute.Int("game.turn", state.Turn+1))
+		result = s.gm.Improvise(ctx, state, req, agentobservability.NewGenerationID())
+	})
+	switch {
+	case !found:
+		writeError(w, http.StatusNotFound, "session not found")
+	case ended:
+		writeError(w, http.StatusConflict, "adventure has ended")
+	default:
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
 func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	if s.offline {
 		writeError(w, http.StatusServiceUnavailable, "natural-language resolution requires an LLM; server was started with --offline")
