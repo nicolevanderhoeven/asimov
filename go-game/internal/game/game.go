@@ -61,7 +61,13 @@ type Action struct {
 type Option struct {
 	Action
 	Description string `json:"description"`
+	// Location is set on an option offered somewhere other than where Data
+	// is; choosing it takes the turbolift there first.
+	Location string `json:"location,omitempty"`
 }
+
+// Locations are every place the turbolift reaches, in display order.
+var Locations = []string{"bridge", "sickbay", "engineering"}
 
 type View struct {
 	Title       string       `json:"title"`
@@ -75,6 +81,8 @@ type View struct {
 	Discovered  []string     `json:"discovered"`
 	Details     []string     `json:"details,omitempty"`
 	Actions     []Option     `json:"available_actions"`
+	Elsewhere   []Option     `json:"actions_elsewhere,omitempty"`
+	Leads       []string     `json:"leads,omitempty"`
 	Effects     []Effect     `json:"improvised_effects,omitempty"`
 	Pending     *PendingRoll `json:"pending_roll,omitempty"`
 	Advantage   bool         `json:"advantage,omitempty"`
@@ -112,30 +120,38 @@ func (s State) View() View {
 	v.Advantage = s.Advantage
 	v.Details = s.details()
 	v.Effects = s.effects()
-	add := func(k, t, d string) { v.Actions = append(v.Actions, Option{Action: Action{k, t}, Description: d}) }
 	if s.Combat {
 		v.DroneHP = s.DroneHP
 		v.Description = "The damaged security drone is 15 feet away and fires from its fixed mount. It blocks the phase relay."
-		add("attack", "drone", "Fire your phaser: ranged attack, +4 to hit, 1d6+2 damage.")
-		add("dodge", "drone", "Dodge; the drone's next attack has disadvantage.")
-		add("retreat", "bridge", "Withdraw to the bridge; the fixed drone cannot pursue.")
-		return v
+		v.Actions = s.combatOptions()
+	} else {
+		v.Description, v.Actions = s.optionsAt(s.Location)
 	}
-	switch s.Location {
+	v.Elsewhere = s.elsewhere()
+	v.Leads = s.leads()
+	return v
+}
+
+// optionsAt describes loc outside combat and lists the actions available
+// there, including the turbolift to every other location.
+func (s State) optionsAt(loc string) (string, []Option) {
+	var o []Option
+	add := func(k, t, d string) { o = append(o, Option{Action: Action{k, t}, Description: d}) }
+	var desc string
+	switch loc {
 	case "bridge":
-		v.Description = "Empty command chairs face a steady starfield. The operations console holds logs and a damaged sensor buffer. Turbolifts reach sickbay and engineering."
+		desc = "Empty command chairs face a steady starfield. The operations console holds logs and a damaged sensor buffer. Turbolifts reach every deck."
 		add("inspect", "logs", "Read the operations log; no roll required.")
 		add("scan", "sensors", "Recover the pulse frequency: Intelligence (Investigation), DC 12. A failed attempt can be retried.")
-		add("move", "sickbay", "Take the turbolift to sickbay.")
-		add("move", "engineering", "Take the turbolift to engineering.")
 	case "sickbay":
-		v.Description = "The biobeds are empty. The medical console retains recent crew scans."
+		desc = "The biobeds are empty. The medical console retains recent crew scans."
 		add("inspect", "medical_records", "Retrieve crew biopatterns using your credentials; no roll required.")
-		add("move", "bridge", "Return to the bridge.")
 	case "engineering":
-		v.Description = "An experimental phase relay pulses beside the warp core. A damaged security drone guards its control panel."
+		desc = "An experimental phase relay pulses beside the warp core. A damaged security drone guards its control panel."
+		if s.DroneHP == 0 {
+			desc = "An experimental phase relay pulses beside the warp core. The disabled security drone hangs inert beside its control panel."
+		}
 		add("inspect", "relay", "Read the relay's diagnostic display; no roll required.")
-		add("move", "bridge", "Return to the bridge.")
 		if s.DroneHP > 0 {
 			add("bypass", "drone", "Use your tricorder to disable the drone: Intelligence (Arcana), DC 13. Failure starts combat.")
 			add("attack", "drone", "Initiate combat with the drone; roll initiative, then make a phaser attack if able.")
@@ -145,7 +161,73 @@ func (s State) View() View {
 			add("rescue", "crew", "Use the recovered pulse frequency and medical biopatterns to return the crew.")
 		}
 	}
-	return v
+	for _, other := range Locations {
+		if other != loc {
+			add("move", other, "Take the turbolift to "+other+".")
+		}
+	}
+	return desc, o
+}
+
+func (s State) combatOptions() []Option {
+	o := []Option{
+		{Action: Action{"attack", "drone"}, Description: "Fire your phaser: ranged attack, +4 to hit, 1d6+2 damage."},
+		{Action: Action{"dodge", "drone"}, Description: "Dodge; the drone's next attack has disadvantage."},
+	}
+	for _, loc := range Locations {
+		if loc != s.Location {
+			o = append(o, Option{Action: Action{"retreat", loc}, Description: "Withdraw to " + loc + " by turbolift; the fixed drone cannot pursue."})
+		}
+	}
+	return o
+}
+
+// elsewhere lists what Data could do at every other location. Choosing one
+// takes the turbolift there first (withdrawing from combat, which the fixed
+// drone cannot prevent), so "go to sickbay and pull the biopatterns" is one
+// action rather than a refusal to plan two.
+func (s State) elsewhere() []Option {
+	var o []Option
+	for _, loc := range Locations {
+		if loc == s.Location {
+			continue
+		}
+		_, opts := s.optionsAt(loc)
+		for _, x := range opts {
+			if x.Kind != "move" {
+				x.Location = loc
+				o = append(o, x)
+			}
+		}
+	}
+	return o
+}
+
+// leads are spoiler-free pointers to the next unfinished steps, so the GM can
+// steer any attempt, however far off the list, back toward the scenario.
+func (s State) leads() []string {
+	var l []string
+	if !s.Clues["logs"] {
+		l = append(l, "The operations console on the bridge is flashing a diagnostic warning and holds the ship's logs.")
+	}
+	if !s.Clues["frequency"] {
+		l = append(l, "The bridge's damaged sensor buffer recorded whatever happened; its readings might still be recovered.")
+	}
+	if !s.Clues["biopattern"] {
+		l = append(l, "Sickbay's medical console retains the crew's most recent scans.")
+	}
+	if !s.Clues["source"] {
+		l = append(l, "Something experimental is pulsing beside the warp core in engineering.")
+	}
+	if s.DroneHP > 0 {
+		l = append(l, "A damaged security drone in engineering guards the phase relay's controls.")
+	} else if !s.Isolated {
+		l = append(l, "With the drone down, the phase relay in engineering can be isolated.")
+	}
+	if len(l) == 0 {
+		l = append(l, "Everything is ready: the transporter can return the crew from engineering.")
+	}
+	return l
 }
 
 type Result struct {
@@ -205,21 +287,51 @@ func (p *PendingRoll) accepts(text string) bool {
 func (s *State) Apply(a Action, roll Roller) Result {
 	r := Result{}
 	finish := func(msg string) Result { r.Message = msg; r.State = s.View(); return r }
-	options := s.View().Actions
-	if !slices.ContainsFunc(options, func(o Option) bool { return o.Action == a }) {
-		return finish("That action is unavailable in the current state. Choose a listed action; rolls, abilities, and outcomes cannot be supplied by the player.")
+	if s.Won || s.HP <= 0 {
+		return finish("This adventure has ended.")
+	}
+	v := s.View()
+	// In combat, taking the turbolift anywhere is a withdrawal.
+	if s.Combat && a.Kind == "move" {
+		a.Kind = "retreat"
+	}
+	travel := ""
+	if !slices.ContainsFunc(v.Actions, func(o Option) bool { return o.Action == a }) {
+		i := slices.IndexFunc(v.Elsewhere, func(o Option) bool { return o.Action == a })
+		if i < 0 {
+			return finish("Nothing changes from that: the dice and the ship's facts decide outcomes.")
+		}
+		travel = v.Elsewhere[i].Location
 	}
 	if a.Kind == "rescue" && (!s.Clues["frequency"] || !s.Clues["biopattern"] || !s.Clues["source"]) {
-		return finish("Transport is not ready. Recover the bridge frequency, sickbay biopatterns, and relay diagnostics first.")
+		return finish("Transport is not ready yet. The transporter still needs the pulse frequency, the crew's biopatterns, and the relay diagnostics.")
 	}
 	r.Allowed = true
+	prefix := s.travel(travel)
 	// Choosing another action abandons any roll that was still pending.
 	s.Pending = pendingRoll(a)
 	if s.Pending != nil {
 		r.RollRequired = s.Pending
-		return finish(fmt.Sprintf("This needs a roll: %s, target %d. Type %s to roll.", s.Pending.Check, s.Pending.Target, s.Pending.Command))
+		return finish(prefix + fmt.Sprintf("This needs a roll: %s, target %d. Type %s to roll.", s.Pending.Check, s.Pending.Target, s.Pending.Command))
 	}
-	return s.resolve(a, roll)
+	r = s.resolve(a, roll)
+	r.Message = prefix + r.Message
+	return r
+}
+
+// travel takes the turbolift to loc, if set, withdrawing from combat on the
+// way, and reports it for the front of the turn's message.
+func (s *State) travel(loc string) string {
+	if loc == "" || loc == s.Location {
+		return ""
+	}
+	msg := "You take the turbolift to " + loc + ". "
+	if s.Combat {
+		msg = "You withdraw from the drone, which cannot pursue, and take the turbolift to " + loc + ". "
+	}
+	s.Combat = false
+	s.Location = loc
+	return msg
 }
 
 // Roll resolves the pending action using the die rolled now. text is what the
@@ -357,8 +469,8 @@ func (s *State) resolve(a Action, roll Roller) Result {
 		return finish("You dodge while the drone fires with disadvantage.")
 	case "retreat":
 		s.Combat = false
-		s.Location = "bridge"
-		return finish("You withdraw to the bridge. The fixed drone cannot follow or make a melee opportunity attack.")
+		s.Location = a.Target
+		return finish("You withdraw to " + a.Target + ". The fixed drone cannot follow or make a melee opportunity attack.")
 	case "isolate":
 		s.Isolated = true
 		x := check("Dexterity saving throw", Data().SaveBonus("dexterity"), 12, s.takeAdvantage(), false, false)

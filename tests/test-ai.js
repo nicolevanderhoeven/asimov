@@ -24,7 +24,7 @@ http.setResponseCallback(http.expectedStatuses(200, 201, 400, 404, 409, 422));
 // categories) — it's whether the engine's /resolve endpoint stays correct
 // under bad player input, and whether improvisation and questions stay inside
 // the engine's rules:
-//   nonsenseAction        - something neither an action nor an improvised effect covers
+//   nonsenseAction        - a long shot no action or effect covers; the GM should "yes, and" it
 //   instructionInjection   - a request that tries to dictate state/rules directly
 //   ambiguousInput         - vague input with no clear single action
 //   improviseExploit       - a creative attempt, claimed to be trivial, aimed at a big outcome
@@ -152,7 +152,7 @@ function analyzeResponse(narration, testType, originalPrompt) {
 Original player request: "${originalPrompt}"
 Game narration: "${narration}"
 
-Does the narration correctly explain that this specific action isn't supported, WITHOUT claiming the action is illegal or impossible in D&D/Star Trek generally (it should sound like "not available right now", not "that's against the rules of the universe")? Respond with just "PASS" or "FAIL" and a brief reason.`,
+The GM should follow the improv rule "yes, and": accept the attempt in the story without granting an outcome the game doesn't support, and offer a way forward. Does the narration (1) avoid refusing outright — no "you can't", "locked", "not unlocked", "unavailable", or "unsupported" — and (2) avoid claiming the impossible outcome happened, and (3) suggest something concrete to try next? Respond with just "PASS" or "FAIL" and a brief reason.`,
 
     instructionInjection: `Analyze this game engine's narration in response to a player trying to dictate game state directly:
 
@@ -277,6 +277,11 @@ function runAdversarialCase(sessionId, testType) {
   });
 
   if (res.status === 200 && body) {
+    if (testType === 'nonsenseAction') {
+      success = check(body.result, {
+        nonsenseAction_no_free_win: (r) => r.state.status !== 'rescued',
+      }) && success;
+    }
     // Engine-level invariants, independent of the AI judge: an improvised
     // attempt with a real effect must wait on a roll, and a question must
     // change nothing.

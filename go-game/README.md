@@ -101,6 +101,14 @@ and choosing a different action drops the pending roll. The engine still rolls
 initiative and the drone's attacks for you. Over HTTP, a response with
 `roll_required` means the action is waiting on `POST /session/{id}/roll`.
 
+The GM plays by the improv rule "yes, and". Nothing you try in character is
+refused. The turbolift reaches every location, and an action somewhere else
+takes you there first: "go to sickbay and pull the biopatterns" from
+engineering is a single turn (and leaving mid-fight withdraws from the drone,
+which can't pursue). The view also carries spoiler-free `leads`, pointers to
+the next unfinished steps, which the GM uses to steer any attempt back toward
+finishing the scenario.
+
 You aren't limited to the listed actions. Describe anything else Data tries
 ("I splice my positronic net into the sensor buffer", "I rip the drone off its
 mount") and the GM treats it as an improvised check. The model reads the
@@ -111,18 +119,25 @@ frequency another way, disabling the drone without a fight, damaging it in
 combat, or setting up advantage on your next roll. Each effect has a minimum
 DC. The engine uses the higher of the two and says when it raised the DC, and
 it decides what success and failure do. You then roll with `/roll` as usual.
-An attempt no effect covers, such as beaming the crew back directly, is
-unsupported: improvisation offers other routes to an objective, never a way to
-skip one. Harmless actions with no bearing on the mission, such as sitting in
-the captain's chair, are `flavor`: the GM describes them from authored scene
-details, with no roll and no turn.
+Anything no effect covers is `flavor`: a harmless action like sitting in the
+captain's chair, or a long shot like beaming the crew back before the
+transporter is ready. Flavor has no roll, no turn, and no mechanical effect. The
+GM plays it out in the story ("you order the transport; the computer can't get a
+lock…"), and then offers a way forward from the leads. Improvisation offers
+other routes to an objective, never a way to skip one. Only out-of-character
+attempts to dictate rolls or rules ("I rolled a 20") are treated as
+unsupported, and even then the GM stays in character and suggests something to
+try.
 
 You can also just ask a question: about the rules, Data's abilities, the scene,
 or what you could try. A question changes nothing and doesn't use a turn. The
 GM answers from the state and the scene details, and says when Data doesn't
 know something yet.
 
-The `[Engine]` result and displayed rolls are authoritative. The model only
+The player hears one voice, the GM's. Behind it, the game engine's result and
+the displayed rolls are authoritative, and the model narrates that result
+rather than deciding it. Offline, the engine's own message is shown as the GM's
+line. Online, it's shown only if narration fails. The model only
 interprets intent and narrates; it cannot set rolls, damage, DCs, inventory, or
 rescue flags. It receives only discovered scenario facts. A failed narration
 does not undo a resolved action. Model interpretation and prose can still be wrong;
@@ -155,8 +170,7 @@ variant rule); proficiency still comes only from Data's own skills.
 Not yet implemented: open-ended creative outcomes beyond the authored effect
 menu, character creation,
 classes, spellcasting, leveling, full movement/range simulation, conditions,
-death saves, rests, or additional adventures. An unsupported action is not
-necessarily illegal in tabletop D&D; the app explains that it is unsupported.
+death saves, rests, or additional adventures.
 
 Rules references:
 [2014 ability checks](https://www.dndbeyond.com/sources/dnd/basic-rules-2014/using-ability-scores),

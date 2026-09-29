@@ -141,28 +141,21 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 			cancel()
 			continue
 		}
+		// The player hears one voice, the GM's. Online, the model narrates the
+		// engine's result, so its plain message is shown only as a fallback
+		// when narration fails; offline, that message is the GM's line.
 		printPlayerRolls(result.Rolls)
-		fmt.Printf("\n%s\n", wrap("[Engine] "+result.Message, ""))
-		for _, r := range result.Rolls {
-			if r.Manual {
-				continue
-			}
-			fmt.Printf("  %s: %v %+d = %d", r.Label, r.Dice, r.Modifier, r.Total)
-			if r.Target > 0 {
-				fmt.Printf(" vs %d; success=%t", r.Target, r.Success)
-			}
-			fmt.Println()
-		}
-		if result.Damage > 0 {
-			fmt.Printf("  Data takes %d damage.\n", result.Damage)
-		}
-		if !offline {
+		printOtherRolls(result)
+		if offline {
+			fmt.Printf("\n%s\n", wrap("GM: "+result.Message, ""))
+		} else {
 			fmt.Print("\nGM: ")
 			var narration bytes.Buffer
 			if err = g.Narrate(turnCtx, history, input, result, io.MultiWriter(os.Stdout, &narration)); err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, "narration failed")
-				fmt.Fprintln(os.Stderr, "\nNarration interrupted; the engine result above still stands:", err)
+				fmt.Fprintln(os.Stderr, "\nThe GM was interrupted:", err)
+				fmt.Printf("\n%s\n", wrap("What happened: "+result.Message, ""))
 			}
 			// Recorded for the next turn regardless of a mid-stream error above:
 			// AppendTurn only skips a turn whose narration is entirely empty, and
@@ -196,6 +189,12 @@ func show(s game.State, withArt bool) {
 		fmt.Printf("\n%s\n", heading("Evidence"))
 		for _, clue := range v.Discovered {
 			fmt.Println(strings.Replace(wrap(clue, "    "), "    ", "  * ", 1))
+		}
+	}
+	if len(v.Leads) > 0 {
+		fmt.Printf("\n%s\n", heading("Leads"))
+		for _, lead := range v.Leads {
+			fmt.Println(strings.Replace(wrap(lead, "    "), "    ", "  - ", 1))
 		}
 	}
 	if len(v.Actions) > 0 {

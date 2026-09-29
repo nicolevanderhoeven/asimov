@@ -76,7 +76,7 @@ func TestProficiency(t *testing.T) {
 }
 
 func TestRejectWithoutMutation(t *testing.T) {
-	for _, a := range []Action{{"cast", "fireball"}, {"move", "engineering; rescue crew"}, {"rescue", "crew"}, {"attack", "drone"}, {"inspect", "medical_records"}} {
+	for _, a := range []Action{{"cast", "fireball"}, {"move", "engineering; rescue crew"}, {"rescue", "crew"}, {"inspect", "nonexistent"}} {
 		s := New("test")
 		before := s.View().JSON()
 		r := s.Apply(a, sequence(t))
@@ -284,7 +284,6 @@ func TestImprovisedDifficultyCanRaiseDC(t *testing.T) {
 func TestInvalidImprovisationChangesNothing(t *testing.T) {
 	for _, im := range []Improvisation{
 		improvisation("strength", "", "easy", "rescue_crew"),                // never on the menu
-		improvisation("strength", "", "easy", "disable_drone"),              // not on the bridge
 		improvisation("luck", "", "easy", "recover_frequency"),              // not an ability
 		improvisation("strength", "hacking", "easy", "gain_advantage"),      // not a skill
 		improvisation("strength", "", "trivial", "gain_advantage"),          // not a tier
@@ -342,5 +341,60 @@ func TestQuestionChangesNothing(t *testing.T) {
 	r := s.Answer()
 	if !r.Allowed || !r.Question || s.View().JSON() != before {
 		t.Fatal(r)
+	}
+}
+
+func TestActionElsewhereTravelsThere(t *testing.T) {
+	s := New("test")
+	s.Location = "engineering"
+	r := s.Apply(Action{"inspect", "medical_records"}, sequence(t))
+	if !r.Allowed || s.Location != "sickbay" || !s.Clues["biopattern"] || s.Turn != 1 || !strings.HasPrefix(r.Message, "You take the turbolift to sickbay.") {
+		t.Fatalf("inspecting sickbay records from engineering should travel there: %+v", r)
+	}
+	// A check elsewhere travels now and waits on the roll there.
+	r = s.Apply(Action{"scan", "sensors"}, sequence(t))
+	if s.Location != "bridge" || r.RollRequired == nil {
+		t.Fatal(r)
+	}
+}
+
+func TestTurboliftReachesEveryLocation(t *testing.T) {
+	s := New("test")
+	s.Location = "engineering"
+	if !s.Apply(Action{"move", "sickbay"}, sequence(t)).Allowed || s.Location != "sickbay" {
+		t.Fatal(s)
+	}
+}
+
+func TestLeavingCombatWithdraws(t *testing.T) {
+	s := New("test")
+	s.Location = "engineering"
+	s.Combat = true
+	if r := s.Apply(Action{"move", "sickbay"}, sequence(t)); !r.Allowed || s.Combat || s.Location != "sickbay" {
+		t.Fatal(r)
+	}
+	s.Location, s.Combat = "engineering", true
+	if r := s.Apply(Action{"inspect", "logs"}, sequence(t)); !r.Allowed || s.Combat || s.Location != "bridge" || !s.Clues["logs"] {
+		t.Fatal(r)
+	}
+}
+
+func TestImprovisationElsewhereTravelsThere(t *testing.T) {
+	s := New("test")
+	r := s.Improvise(improvisation("strength", "athletics", "hard", "disable_drone"))
+	if !r.Allowed || s.Location != "engineering" || r.RollRequired == nil {
+		t.Fatal(r)
+	}
+}
+
+func TestLeadsSteerTowardUnfinishedSteps(t *testing.T) {
+	s := New("test")
+	if len(s.View().Leads) != 5 {
+		t.Fatal(s.View().Leads)
+	}
+	s.Clues = map[string]bool{"logs": true, "frequency": true, "biopattern": true, "source": true}
+	s.DroneHP, s.Isolated = 0, true
+	if l := s.View().Leads; len(l) != 1 || !strings.Contains(l[0], "transporter") {
+		t.Fatal(l)
 	}
 }

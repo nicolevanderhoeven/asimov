@@ -27,6 +27,9 @@ type Effect struct {
 	Description string `json:"description"`
 	MinDC       int    `json:"min_dc,omitempty"`
 	OnFailure   string `json:"on_failure,omitempty"`
+	// Location is set on an effect only reachable somewhere else; aiming for
+	// it takes the turbolift there first.
+	Location string `json:"location,omitempty"`
 }
 
 // difficultyDC maps the model's rating of an approach to a DC. An effect's
@@ -46,23 +49,33 @@ func (s State) effects() []Effect {
 	if s.Won || s.HP <= 0 {
 		return nil
 	}
-	var e []Effect
-	add := func(id, desc string, minDC int, onFailure string) {
-		e = append(e, Effect{ID: id, Description: desc, MinDC: minDC, OnFailure: onFailure})
-	}
-	switch {
-	case s.Combat:
-		add("damage_drone", "Damage the drone by some means other than your phaser: 1d6 damage on a success.", 15, "no damage; the drone fires either way unless disabled")
-	case s.Location == "bridge" && !s.Clues["frequency"]:
-		add("recover_frequency", "Recover the pulse frequency from the damaged sensor buffer by another method.", 15, "nothing is recovered; you may try again")
-	case s.Location == "engineering" && s.DroneHP > 0:
-		add("disable_drone", "Disable the security drone without a fight.", 20, "the drone activates and combat starts")
+	e := s.effectsAt(s.Location, s.Combat)
+	for _, loc := range Locations {
+		if loc != s.Location {
+			for _, x := range s.effectsAt(loc, false) {
+				x.Location = loc
+				e = append(e, x)
+			}
+		}
 	}
 	if !s.Advantage {
-		add("gain_advantage", "Set up a later attempt: your next roll (a check, save, or phaser attack) has advantage.", 10, "no advantage; in combat the drone still fires")
+		e = append(e, Effect{ID: "gain_advantage", Description: "Set up a later attempt: your next roll (a check, save, or phaser attack) has advantage.", MinDC: 10, OnFailure: "no advantage; in combat the drone still fires"})
 	}
-	add("flavor", "Any harmless action with no bearing on the mission, such as sitting in the captain's chair. No roll.", 0, "")
-	return e
+	return append(e, Effect{ID: "flavor", Description: "Anything else: an attempt with no mechanical effect, from sitting in the captain's chair to a long shot the scenario can't support yet. No roll; the GM narrates it and points to a way forward."})
+}
+
+// effectsAt lists the location-bound effects at loc, as they would be with
+// Data there and, if combat is set, fighting the drone.
+func (s State) effectsAt(loc string, combat bool) []Effect {
+	switch {
+	case combat:
+		return []Effect{{ID: "damage_drone", Description: "Damage the drone by some means other than your phaser: 1d6 damage on a success.", MinDC: 15, OnFailure: "no damage; the drone fires either way unless disabled"}}
+	case loc == "bridge" && !s.Clues["frequency"]:
+		return []Effect{{ID: "recover_frequency", Description: "Recover the pulse frequency from the damaged sensor buffer by another method.", MinDC: 15, OnFailure: "nothing is recovered; you may try again"}}
+	case loc == "engineering" && s.DroneHP > 0:
+		return []Effect{{ID: "disable_drone", Description: "Disable the security drone without a fight.", MinDC: 20, OnFailure: "the drone activates and combat starts"}}
+	}
+	return nil
 }
 
 // details are authored, spoiler-free facts about the current scene that the
@@ -140,7 +153,7 @@ func (s State) normalize(im Improvisation) (Improvisation, Effect, error) {
 	case im.Approach == "":
 		return im, Effect{}, errors.New("An improvised attempt needs an approach: say what Data tries.")
 	case i < 0:
-		return im, Effect{}, errors.New("Nothing in the current situation lets that attempt change the outcome. Try a listed action, or a different approach.")
+		return im, Effect{}, errors.New("That effect isn't one the engine offers right now; nothing changes.")
 	case effects[i].ID == "flavor":
 		return im, effects[i], nil
 	case c.Scores[im.Ability] == 0:
@@ -167,8 +180,9 @@ func (s *State) Improvise(im Improvisation) Result {
 	}
 	r := Result{Allowed: true, Improvisation: &im}
 	if effect.ID == "flavor" {
-		return finish(r, "This has no bearing on the mission; nothing in the game changes.")
+		return finish(r, "No mechanical effect; the GM narrates the attempt.")
 	}
+	prefix := s.travel(effect.Location)
 	ability := title(im.Ability)
 	label := ability
 	aliases := []string{}
@@ -192,7 +206,7 @@ func (s *State) Improvise(im Improvisation) Result {
 		aliases:       aliases,
 	}
 	r.RollRequired = s.Pending
-	msg := fmt.Sprintf("This needs a roll: %s, DC %d. Type %s to roll.", label, dc, s.Pending.Command)
+	msg := prefix + fmt.Sprintf("This needs a roll: %s, DC %d. Type %s to roll.", label, dc, s.Pending.Command)
 	if dc > difficultyDC[im.Difficulty] {
 		msg += fmt.Sprintf(" The approach itself is %s, but that outcome needs at least DC %d.", im.Difficulty, effect.MinDC)
 	}
