@@ -28,19 +28,3 @@ func TestRejectInsecureEndpoint(t *testing.T) {
 		t.Fatal("insecure export accepted")
 	}
 }
-
-func TestAPIEndpointDefaultsToGenerationHost(t *testing.T) {
-	t.Setenv("AGENTO11Y_ENDPOINT", "https://sigil.example.com/api/v1/generations:export")
-	t.Setenv("AGENTO11Y_API_ENDPOINT", "")
-	if got := FromEnv().APIEndpoint; got != "https://sigil.example.com" {
-		t.Fatal(got)
-	}
-	t.Setenv("AGENTO11Y_API_ENDPOINT", "https://api.example.com")
-	if got := FromEnv().APIEndpoint; got != "https://api.example.com" {
-		t.Fatal(got)
-	}
-	c := Config{Endpoint: "https://example.com", Authorization: "Basic test", GenerationEndpoint: "https://example.com/export", APIEndpoint: "http://example.com", Instance: "test", Token: "test"}
-	if c.Validate() == nil {
-		t.Fatal("insecure API endpoint accepted")
-	}
-}

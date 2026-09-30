@@ -521,7 +521,7 @@ function finishExperiment(id) {
     return;
   }
   // The experiments UI is on the Grafana stack, not the API host, so a link
-  // needs the same template the game's trajectory harness uses.
+  // needs AGENTO11Y_EXPERIMENT_URL_TEMPLATE, as tests/test-trajectory.js does.
   const template = __ENV.AGENTO11Y_EXPERIMENT_URL_TEMPLATE;
   const link = template ? `: ${template.replace('{run_id}', id).replace('{base}', O11Y_API)}` : '';
   console.log(`Agent Observability experiment ${id} completed${link}`);

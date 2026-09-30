@@ -1,5 +1,5 @@
 {
-  "_comment": "Shared cases for the dice GM's deterministic graders. Read by go-game/internal/trajeval (go test) and tests/test-trajectory-graders.js (k6). Add a case here, not in either test, so both implementations are held to it.",
+  "_comment": "Cases for the dice GM's deterministic graders in tests/lib/trajectory-grader.js, checked by tests/test-trajectory-graders.js. Add a case here for any grader change.",
   "roll_mentions": [
     { "text": "You roll a 14 plus 4 for a total of 18.", "want": [14, 4, 18] },
     { "text": "You rolled 1d20+4 against DC 15 and got 11.", "want": [11] },

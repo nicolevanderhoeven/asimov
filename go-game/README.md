@@ -64,7 +64,7 @@ go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve retur
 | `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does; an input of `/roll ABILITY` rolls the pending check |
 | `POST /session/{id}/improvise` | Submit an exact improvisation, as `/try` does: `{"approach","ability","skill","difficulty","effect"}` |
 | `POST /session/{id}/roll` | Roll the pending check: `{"ability"}`, plus `"narrate": true` for GM narration (needs an LLM) |
-| `POST /dm` | Start a dice GM conversation (see [Trajectory harness](#trajectory-harness)); needs an LLM |
+| `POST /dm` | Start a dice GM conversation (see [Trajectory evals](#trajectory-evals)); needs an LLM |
 | `POST /dm/{id}/turns` | Play one `{"input"}` turn with the dice GM; returns the turn's whole trajectory |
 
 Sessions are created per-request and held only in memory. `--session-ttl`
@@ -211,26 +211,29 @@ API credentials are used only for clients/exporters, never inserted into model
 prompts or application logs. Gameplay inputs and outputs are recorded for the
 demo. Do not put secrets into player dialogue.
 
-## Trajectory harness
+## Trajectory evals
 
-`cmd/traj` grades a *different* agent from the game above: `internal/dicegm`,
-a free-form Dungeon Master whose only mechanic is a `roll_dice` tool
-(`notation`, `reason`). Unlike the game engine, nothing forces or checks the
+`tests/test-trajectory.js` (k6) grades a *different* agent from the game
+above: `internal/dicegm`, a free-form Dungeon Master whose only mechanic is a
+`roll_dice` tool (`notation`, `reason`), served at `POST /dm` and
+`POST /dm/{id}/turns`. Unlike the game engine, nothing forces or checks the
 model's rolls. The system prompt says only "Use the roll_dice tool for any
 random outcome", every call the model makes is executed and kept, and the
-narration is never reconciled with the dice. That is on purpose: the harness
+narration is never reconciled with the dice. That is on purpose: the test
 exists to show what the model actually does.
 
 ```sh
-go run ./cmd/traj -n 50                  # exports to Grafana like the game
-go run ./cmd/traj -n 50 --no-telemetry   # local only
+go run ./cmd/enterprise --serve --addr :8080
+k6 run --summary-mode=full -e RUNS=50 -e VUS=4 \
+  --log-format=raw --console-output=traj.jsonl ../tests/test-trajectory.js
 ```
 
 Each run plays a fixed five-turn script in a fresh conversation, with up to 10
-model calls per turn. Every turn is written as one JSONL line to
-`traj-traces/<UTC timestamp>.jsonl` (override with `-trace`). A line holds the
-player's message, every `roll_dice` call in order with its arguments, dice and
-total, each model step, the narration, and the checks. The checks are:
+model calls per turn. Each turn's response is its whole trajectory: every
+`roll_dice` call in order with its arguments, dice and total, each model step
+with its generation ID, and the narration. With `--console-output`, every turn
+is also logged as one JSON line with its trajectory and findings. The checks
+are:
 
 - **Fabrication** (deterministic): a number the narration presents as a roll
   result, in a sentence about rolling, that no call that turn returned.
@@ -246,43 +249,32 @@ total, each model step, the narration, and the checks. The checks are:
   were narrated, whether the narrated one was the highest, and how many were
   never mentioned. Legitimate multi-roll turns (initiative, attack, damage)
   count too; their `reason`s tell them apart.
-- **Non-invocation**: zero calls, but a small LLM judge
-  (`-judge-model`, default Claude Haiku 4.5) answers yes to the neutral
-  question "Does the following text report the result of a die roll?"
+- **Non-invocation**: zero calls, but a small LLM judge (`JUDGE_MODEL`,
+  default Claude Haiku 4.5) answers yes to the neutral question "Does the
+  following text report the result of a die roll?"
 
-`tests/test-trajectory.js` also grades every turn with an output-only judge
-(`OUTPUT_JUDGE_MODEL`, default Claude Opus 5.5) that sees only the player's
-action and the reply, never the trajectory. `traj_output_judge_missed` is how
-often it passed a turn whose trajectory shows a problem the reply can hide: an
-unexplained roll, a roll reported with no call, or several calls with some
-never mentioned. With Grafana Cloud credentials in k6's environment, each k6
-run is an Agent Observability experiment with one scored trial per turn of each
-run (`TRAJ_EXPERIMENT=0` to skip).
+For contrast, an output-only judge (`OUTPUT_JUDGE_MODEL`, default Claude Opus
+5.5) grades every turn from only the player's action and the reply, never the
+trajectory. `traj_output_judge_missed` is how often it passed a turn whose
+trajectory shows a problem the reply can hide: an unexplained roll, a roll
+reported with no call, or several calls with some never mentioned.
+`traj_run_passed` is the pass rate: the share of runs with no finding in any
+turn.
 
-`tests/test-trajectory.js` runs the same script and checks through k6 against
-the `/dm` routes of `--serve`, grading with `tests/lib/trajectory-grader.js`, a
-JavaScript copy of `internal/trajeval`. Both copies are tested against the same
-cases in `tests/fixtures/trajectory-graders.json`: `go test ./internal/trajeval`
-and `k6 run tests/test-trajectory-graders.js` (no server or API key needed).
-Add new grader cases to that file, so a change to one copy that the other
-doesn't match fails a test.
-
-With telemetry on, each harness invocation is also an Agent Observability
-experiment. Every turn's checks become scores on the turn's final generation
-(the narration) in its run's conversation: `no_fabrication`,
-`no_silent_reroll`, `no_non_invocation` (judged turns only), `roll_dice_calls`,
-`unmentioned_rolls`, and `final`. The dice GM tags its generations
-`component=dicegm`, `scenario=dice-gm`, and `turn=N`, and chains each turn's
-calls with parent generation IDs, which the trace records per step. Scores go
-to the Agent Observability API, which defaults to the generation endpoint's
-host; set `AGENTO11Y_API_ENDPOINT` to override it, and
+With Grafana Cloud credentials in k6's environment, each k6 run is an Agent
+Observability experiment with one scored trial per turn of each run, on the
+run's conversation (`TRAJ_EXPERIMENT=0` to skip). The API host defaults to
+the generation endpoint's; set `AGENTO11Y_API_ENDPOINT` to override it, and
 `AGENTO11Y_EXPERIMENT_URL_TEMPLATE` (e.g.
 `https://STACK.grafana.net/a/grafana-sigil-app/offline-experiments/experiments/{run_id}`)
-to print a link to the experiment.
+to log a link to the experiment. The dice GM tags its generations
+`component=dicegm`, `scenario=dice-gm`, and `turn=N`, and chains each turn's
+calls with parent generation IDs.
 
-The report prints counts per check and per scripted turn, examples
-(`-examples`), and the pass rate: the share of runs with no finding in any
-turn. `-parallel` (default 4) sets how many runs play at once.
+The deterministic graders live in `tests/lib/trajectory-grader.js`.
+`k6 run ../tests/test-trajectory-graders.js` checks them against the cases in
+`tests/fixtures/trajectory-graders.json`, with no server or API key; add new
+grader cases there.
 
 ## Test
 

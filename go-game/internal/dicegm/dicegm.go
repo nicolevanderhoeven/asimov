@@ -2,7 +2,7 @@
 // roll_dice tool the model may call. Unlike internal/gm, where the engine owns
 // every roll, here the model decides whether and how often to roll, and
 // nothing checks that it narrates what the dice showed. It exists to be
-// graded on its trajectory (see internal/trajeval and cmd/traj).
+// graded on its trajectory (see tests/test-trajectory.js).
 package dicegm
 
 import (

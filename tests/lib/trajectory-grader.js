@@ -1,8 +1,7 @@
 // Deterministic trajectory graders for the dice GM: fabrication and silent
-// reroll. This is a JavaScript copy of go-game/internal/trajeval. Both run
-// against tests/fixtures/trajectory-graders.json (k6 run
-// tests/test-trajectory-graders.js, and go test ./internal/trajeval), so a
-// change to one that the other doesn't match fails a test.
+// reroll, used by tests/test-trajectory.js. tests/test-trajectory-graders.js
+// checks them against tests/fixtures/trajectory-graders.json; add a case
+// there for any change here.
 
 const SENTENCES = /[^.!?\n]+[.!?]*/g;
 // A sentence is about a roll if it names dice or rolling.

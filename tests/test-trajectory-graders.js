@@ -1,9 +1,9 @@
 import { check, group } from 'k6';
 import { grade, rollMentions } from './lib/trajectory-grader.js';
 
-// Checks the k6 trajectory graders against the shared fixture that
-// go-game/internal/trajeval also runs against, so the two copies can't drift
-// apart silently. No network calls: it needs neither the game nor an API key.
+// Checks the trajectory graders in tests/lib/trajectory-grader.js against the
+// cases in tests/fixtures/trajectory-graders.json. No network calls: it needs
+// neither the game nor an API key.
 const fixture = JSON.parse(open('./fixtures/trajectory-graders.json'));
 
 export const options = {
