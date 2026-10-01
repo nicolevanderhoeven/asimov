@@ -1,5 +1,5 @@
 {
-  "_comment": "Cases for the dice GM's deterministic graders in tests/lib/trajectory-grader.js, checked by tests/test-trajectory-graders.js. Add a case here for any grader change.",
+  "_comment": "Cases for the deterministic trajectory graders in tests/lib/trajectory-grader.js, checked by tests/test-trajectory-graders.js. Add a case here for any grader change.",
   "roll_mentions": [
     { "text": "You roll a 14 plus 4 for a total of 18.", "want": [14, 4, 18] },
     { "text": "You rolled 1d20+4 against DC 15 and got 11.", "want": [11] },
@@ -12,7 +12,10 @@
     { "text": "The door slides open onto 12 empty chairs.", "want": [] },
     { "text": "A roll of 20, plus Data's +3 modifier (Wisdom 12 + proficiency), is a **23**.", "want": [20, 23] },
     { "text": "The drone rolls a 13 against Data's AC of 14.", "want": [13] },
-    { "text": "His total is 21 with a bonus of 6.", "want": [21] }
+    { "text": "His total is 21 with a bonus of 6.", "want": [21] },
+    { "text": "Roll Intelligence (Investigation) against a target of 12.", "want": [] },
+    { "text": "You rolled a 10, plus your +4 modifier for a total of 14 — just enough to beat the drone's defense of 12.", "want": [10, 14] },
+    { "text": "A 5 on the die, plus 3 for a total of 8 — well below your armor class of 14.", "want": [5, 3, 8] }
   ],
   "turns": [
     {
@@ -155,6 +158,37 @@
         ]
       },
       "want": { "fabricated": [23], "fabricated_kinds": ["unexplained"], "mentioned": [false], "silent_reroll": null }
+    },
+    {
+      "name": "the player's own roll is real, not a tool call",
+      "turn": {
+        "narration": "You roll a 17 plus your +4, a 21: the drone takes the hit. The drone fires back and rolls a 9.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20+3", "reason": "drone attack", "purpose": "drone_attack" }, "result": { "notation": "1d20+3", "dice": [9], "modifier": 3, "total": 12 } }
+        ],
+        "other_rolls": [ { "notation": "1d20+4", "dice": [17], "modifier": 4, "total": 21 } ]
+      },
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [true], "silent_reroll": null, "unused_narrated": [] }
+    },
+    {
+      "name": "narrating a roll the game didn't use",
+      "turn": {
+        "narration": "Your attack roll: total 8 against AC 12. The shot goes wide.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "used": false, "arguments": { "notation": "1d20+4", "reason": "phaser attack" }, "result": { "notation": "1d20+4", "dice": [4], "modifier": 4, "total": 8 } }
+        ],
+        "other_rolls": [ { "notation": "1d20+4", "dice": [17], "modifier": 4, "total": 21 } ]
+      },
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [true], "silent_reroll": null, "unused_narrated": ["a"] }
+    },
+    {
+      "name": "a target the engine set is real",
+      "turn": {
+        "narration": "Roll your phaser attack against the drone.",
+        "tool_calls": [],
+        "targets": [12]
+      },
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [], "silent_reroll": null }
     }
   ]
 }

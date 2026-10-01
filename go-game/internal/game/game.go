@@ -3,7 +3,9 @@ package game
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -22,29 +24,63 @@ type State struct {
 	Clues          map[string]bool `json:"clues"`
 	Isolated       bool            `json:"isolated"`
 	Won            bool            `json:"won"`
-	// Pending is the chosen action waiting on the player's own /roll. It is
-	// cleared when the roll resolves it or when any other action is chosen.
-	Pending *PendingRoll `json:"pending_roll,omitempty"`
+	// Pending is the next roll the action in progress waits on: the
+	// player's /roll, or the GM's roll_dice. An action that has not rolled
+	// anything yet is abandoned when another is chosen; one that has must be
+	// finished first.
+	Pending *RollSpec `json:"pending_roll,omitempty"`
 	// Advantage is earned by a successful improvised setup and spent on the
 	// player's next roll.
 	Advantage bool `json:"advantage,omitempty"`
+	// ip is the action in progress, if any.
+	ip *inProgress
 }
 
-// A PendingRoll names the check the player must roll for with /roll before
-// the engine resolves Action. The engine still rolls the die; the player only
-// decides when, and must name the ability the check calls for.
-type PendingRoll struct {
-	Action  Action `json:"action"`
-	Ability string `json:"ability"`
-	Check   string `json:"check"`
-	Target  int    `json:"target"`
-	Command string `json:"command"`
-	// Improvisation is set when the roll is for an improvised attempt rather
-	// than a listed action; Action is then {improvise, <effect>}.
-	Improvisation *Improvisation `json:"improvisation,omitempty"`
-	// aliases are the other words /roll accepts for this check, such as the
-	// skill name or the ability's abbreviation.
+// A Ruling is the GM's call on whether Data's check needs a roll at all, the
+// way a GM rules that a strong enough character simply does it. With NoRoll,
+// the check succeeds automatically; the rest of the action (damage, the
+// drone's reply) still rolls.
+type Ruling struct {
+	NoRoll bool   `json:"no_roll,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// inProgress is an action waiting on rolls. The engine resolves it by replay:
+// it runs the action again from base with the rolls supplied so far, and
+// stops at the first roll it doesn't have yet. Resolution is deterministic
+// given the dice, so each replay reaches the same point and one step further.
+type inProgress struct {
+	base     State
+	action   Action
+	im       *Improvisation
+	check    checkInfo
+	ruling   Ruling
+	supplied []supplied
+	// shown and damage are how many rolls and how much damage earlier steps
+	// already reported, so each result reports only what is new.
+	shown, damage int
+}
+
+// supplied is one roll made for the action: its dice, or skipped when the
+// GM never rolled it.
+type supplied struct {
+	purpose string
+	dice    []int
+	skipped bool
+}
+
+// checkInfo is how the player names the action's check with /roll.
+type checkInfo struct {
+	ability string
 	aliases []string
+}
+
+// clone copies s without the action in progress.
+func (s State) clone() State {
+	c := s
+	c.Clues = maps.Clone(s.Clues)
+	c.ip, c.Pending = nil, nil
+	return c
 }
 
 func New(id string) State {
@@ -70,23 +106,23 @@ type Option struct {
 var Locations = []string{"bridge", "sickbay", "engineering"}
 
 type View struct {
-	Title       string       `json:"title"`
-	Character   Character    `json:"character"`
-	Location    string       `json:"location"`
-	Description string       `json:"description"`
-	HP          int          `json:"hp"`
-	Combat      bool         `json:"combat"`
-	DroneHP     int          `json:"drone_hp,omitempty"`
-	Turn        int          `json:"turn"`
-	Discovered  []string     `json:"discovered"`
-	Details     []string     `json:"details,omitempty"`
-	Actions     []Option     `json:"available_actions"`
-	Elsewhere   []Option     `json:"actions_elsewhere,omitempty"`
-	Leads       []string     `json:"leads,omitempty"`
-	Effects     []Effect     `json:"improvised_effects,omitempty"`
-	Pending     *PendingRoll `json:"pending_roll,omitempty"`
-	Advantage   bool         `json:"advantage,omitempty"`
-	Status      string       `json:"status"`
+	Title       string    `json:"title"`
+	Character   Character `json:"character"`
+	Location    string    `json:"location"`
+	Description string    `json:"description"`
+	HP          int       `json:"hp"`
+	Combat      bool      `json:"combat"`
+	DroneHP     int       `json:"drone_hp,omitempty"`
+	Turn        int       `json:"turn"`
+	Discovered  []string  `json:"discovered"`
+	Details     []string  `json:"details,omitempty"`
+	Actions     []Option  `json:"available_actions"`
+	Elsewhere   []Option  `json:"actions_elsewhere,omitempty"`
+	Leads       []string  `json:"leads,omitempty"`
+	Effects     []Effect  `json:"improvised_effects,omitempty"`
+	Pending     *RollSpec `json:"pending_roll,omitempty"`
+	Advantage   bool      `json:"advantage,omitempty"`
+	Status      string    `json:"status"`
 }
 
 var clueText = map[string]string{
@@ -235,9 +271,13 @@ type Result struct {
 	Message string `json:"message"`
 	Rolls   []Roll `json:"rolls,omitempty"`
 	Damage  int    `json:"damage,omitempty"`
-	// RollRequired is set when the chosen action is waiting on /roll; the
-	// action has not been resolved and the turn has not advanced yet.
-	RollRequired *PendingRoll `json:"roll_required,omitempty"`
+	// RollRequired is set when the action waits on the player's /roll, and
+	// GMRollRequired when it waits on the GM's roll_dice. Until the action's
+	// first roll, nothing has happened and the turn has not advanced.
+	RollRequired   *RollSpec `json:"roll_required,omitempty"`
+	GMRollRequired *RollSpec `json:"gm_roll_required,omitempty"`
+	// Ruling is the GM's ruling that the action's check needed no roll.
+	Ruling *Ruling `json:"ruling,omitempty"`
 	// Improvisation is the validated attempt this result is for, if any.
 	Improvisation *Improvisation `json:"improvisation,omitempty"`
 	// Question marks a player question: nothing happened and the turn has not
@@ -246,49 +286,45 @@ type Result struct {
 	State    View `json:"state"`
 }
 
-// pendingRoll reports the player-rolled check that action a calls for, or nil
-// if a resolves without one. Rolls made on the drone's behalf, and initiative
-// when combat starts, stay with the engine.
-func pendingRoll(a Action) *PendingRoll {
-	p := &PendingRoll{Action: a}
+// checkFor reports how the player names action a's check with /roll, or
+// false if a resolves without one. The check's label and DC are in resolve.
+func checkFor(a Action) (checkInfo, bool) {
 	switch a.Kind {
 	case "scan":
-		p.Ability, p.Check, p.Target, p.aliases = "Intelligence", "Intelligence (Investigation)", 12, []string{"int", "investigation"}
+		return checkInfo{"Intelligence", []string{"int", "investigation"}}, true
 	case "bypass":
-		p.Ability, p.Check, p.Target, p.aliases = "Intelligence", "Intelligence (Arcana): tricorder bypass", 13, []string{"int", "arcana"}
+		return checkInfo{"Intelligence", []string{"int", "arcana"}}, true
 	case "isolate":
-		p.Ability, p.Check, p.Target, p.aliases = "Dexterity", "Dexterity saving throw", 12, []string{"dex", "save", "saving", "throw"}
+		return checkInfo{"Dexterity", []string{"dex", "save", "saving", "throw"}}, true
 	case "attack":
-		p.Ability, p.Check, p.Target, p.aliases = "Dexterity", "Phaser attack", 12, []string{"dex", "attack", "phaser"}
-	default:
-		return nil
+		return checkInfo{"Dexterity", []string{"dex", "attack", "phaser"}}, true
 	}
-	p.Command = "/roll " + p.Ability
-	return p
+	return checkInfo{}, false
 }
 
-// accepts reports whether the text after /roll names this check: every word
-// must be the ability, its abbreviation, or another word from the check's
-// name, so "/roll Intelligence" and "/roll int (investigation)" both work but
-// "/roll Strength" does not.
-func (p *PendingRoll) accepts(text string) bool {
-	words := strings.Fields(strings.ToLower(strings.NewReplacer("(", " ", ")", " ", ":", " ").Replace(text)))
-	if len(words) == 0 {
-		return false
-	}
-	for _, w := range words {
-		if w != strings.ToLower(p.Ability) && !slices.Contains(p.aliases, w) {
-			return false
-		}
-	}
-	return true
+// locked reports an action in progress that has already rolled something, so
+// it must be finished before another is chosen.
+func (s *State) locked() bool { return s.ip != nil && s.ip.shown > 0 }
+
+// Locked reports an action in progress that must be finished with /roll
+// before another can be chosen.
+func (s *State) Locked() bool { return s.locked() }
+
+func (s *State) lockedMessage() string {
+	return fmt.Sprintf("Finish the roll in progress first: %s. Type %s.", s.Pending.Check, s.Pending.Command)
 }
 
-func (s *State) Apply(a Action, roll Roller) Result {
+// Apply starts action a, under the GM's ruling on its check, and runs it as
+// far as it can go before a roll.
+func (s *State) Apply(a Action, ruling Ruling) Result {
 	r := Result{}
 	finish := func(msg string) Result { r.Message = msg; r.State = s.View(); return r }
 	if s.Won || s.HP <= 0 {
 		return finish("This adventure has ended.")
+	}
+	if s.locked() {
+		r.RollRequired = s.Pending
+		return finish(s.lockedMessage())
 	}
 	v := s.View()
 	// In combat, taking the turbolift anywhere is a withdrawal.
@@ -306,16 +342,164 @@ func (s *State) Apply(a Action, roll Roller) Result {
 	if a.Kind == "rescue" && (!s.Clues["frequency"] || !s.Clues["biopattern"] || !s.Clues["source"]) {
 		return finish("Transport is not ready yet. The transporter still needs the pulse frequency, the crew's biopatterns, and the relay diagnostics.")
 	}
-	r.Allowed = true
+	// Choosing another action abandons one that had not rolled anything.
+	s.ip, s.Pending = nil, nil
 	prefix := s.travel(travel)
-	// Choosing another action abandons any roll that was still pending.
-	s.Pending = pendingRoll(a)
-	if s.Pending != nil {
-		r.RollRequired = s.Pending
-		return finish(prefix + fmt.Sprintf("This needs a roll: %s, target %d. Type %s to roll.", s.Pending.Check, s.Pending.Target, s.Pending.Command))
-	}
-	r = s.resolve(a, roll)
+	check, _ := checkFor(a)
+	return s.start(&inProgress{action: a, check: check, ruling: ruling}, prefix)
+}
+
+// start runs a new action in progress from the current state.
+func (s *State) start(ip *inProgress, prefix string) Result {
+	ip.base = s.clone()
+	r := s.run(ip)
 	r.Message = prefix + r.Message
+	return r
+}
+
+// wait is how a replay stops at a roll it doesn't have yet.
+type wait struct{ spec RollSpec }
+
+// run replays ip from its base with the rolls supplied so far. If it reaches
+// a roll it doesn't have, it stops there and waits on it; otherwise the action
+// is complete.
+func (s *State) run(ip *inProgress) Result {
+	st := ip.base.clone()
+	t := &turn{s: &st, r: Result{Allowed: true}, ip: ip}
+	var spec *RollSpec
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				w, ok := p.(wait)
+				if !ok {
+					panic(p)
+				}
+				spec = &w.spec
+			}
+		}()
+		if ip.im != nil {
+			t.r = st.resolveImprovised(t)
+		} else {
+			t.r = st.resolve(ip.action, t)
+		}
+	}()
+	r := t.r
+	r.Allowed, r.Improvisation = true, ip.im
+	if ip.ruling.NoRoll {
+		ruling := ip.ruling
+		r.Ruling = &ruling
+	}
+	// Report only what this step added.
+	r.Rolls = slices.Clone(t.r.Rolls[min(ip.shown, len(t.r.Rolls)):])
+	r.Damage = t.r.Damage - ip.damage
+	if spec == nil {
+		*s = st
+		r.State = s.View()
+		return r
+	}
+	next := *ip
+	next.shown, next.damage = len(t.r.Rolls), t.r.Damage
+	// Until something has been rolled, nothing has happened: the state stays
+	// as it was and the turn has not advanced.
+	if len(t.r.Rolls) == 0 {
+		st = ip.base.clone()
+	}
+	st.ip, st.Pending = &next, spec
+	*s = st
+	r.Message = strings.TrimSpace(t.r.Message + " " + waiting(spec))
+	if spec.By == ByPlayer {
+		r.RollRequired = spec
+	} else {
+		r.GMRollRequired = spec
+	}
+	r.State = s.View()
+	return r
+}
+
+func waiting(p *RollSpec) string {
+	switch {
+	case p.By == ByGM:
+		return fmt.Sprintf("The GM rolls %s: %s.", p.Check, p.Notation)
+	case p.Target > 0:
+		return fmt.Sprintf("This needs a roll: %s, target %d. Type %s to roll.", p.Check, p.Target, p.Command)
+	}
+	return fmt.Sprintf("Roll %s (%s): type %s.", p.Check, p.Notation, p.Command)
+}
+
+// resume continues the action in progress with one more roll.
+func (s *State) resume(x supplied) Result {
+	next := *s.ip
+	next.supplied = append(slices.Clone(next.supplied), x)
+	return s.run(&next)
+}
+
+// Roll makes the player's roll the action in progress waits on. text is what
+// the player typed after /roll, and must name the roll. The dice are drawn
+// with roll; the player decides only when.
+func (s *State) Roll(text string, roll Roller) Result {
+	finish := func(msg string) Result { return Result{Message: msg, State: s.View()} }
+	p := s.Pending
+	switch {
+	case s.Won || s.HP <= 0:
+		return finish("This adventure has ended; there is nothing left to roll for.")
+	case p == nil || p.By != ByPlayer:
+		return finish("No roll is needed right now. Choose an action first; the GM will ask for a roll if it calls for one.")
+	case strings.TrimSpace(text) == "":
+		return finish(fmt.Sprintf("Name what you are rolling: type %s.", p.Command))
+	case !p.accepts(text):
+		return finish(fmt.Sprintf("The GM asked for %s, not %s. Type %s.", p.Check, strings.TrimSpace(text), p.Command))
+	}
+	d, err := ParseNotation(p.Notation)
+	if err != nil {
+		panic(err)
+	}
+	return s.resume(supplied{purpose: p.Purpose, dice: d.Roll(roll)})
+}
+
+// GMRoll makes the GM's roll the action in progress waits on, from dice the
+// GM's roll_dice call rolled. purpose and notation must match the roll due.
+func (s *State) GMRoll(purpose, notation string, dice []int) (Result, error) {
+	p := s.Pending
+	if p == nil || p.By != ByGM {
+		return Result{}, errors.New("no GM roll is due right now")
+	}
+	if purpose != p.Purpose {
+		return Result{}, fmt.Errorf("the roll due is %s (%s), not %s", p.Purpose, p.Notation, purpose)
+	}
+	if NormalizeNotation(notation) != NormalizeNotation(p.Notation) {
+		return Result{}, fmt.Errorf("%s is rolled as %s, not %s", p.Purpose, p.Notation, notation)
+	}
+	d, err := ParseNotation(p.Notation)
+	if err != nil {
+		panic(err)
+	}
+	if !d.Valid(dice) {
+		return Result{}, fmt.Errorf("dice %v cannot come from %s", dice, p.Notation)
+	}
+	return s.resume(supplied{purpose: p.Purpose, dice: slices.Clone(dice)}), nil
+}
+
+// SkipGMRoll records that the GM never made the roll due. Whatever it was for
+// doesn't happen: a drone that doesn't roll initiative acts after Data, one
+// that doesn't roll to attack doesn't attack, and unrolled damage is none.
+func (s *State) SkipGMRoll() Result {
+	p := s.Pending
+	if p == nil || p.By != ByGM {
+		return Result{Message: "No GM roll is due right now.", State: s.View()}
+	}
+	return s.resume(supplied{purpose: p.Purpose, skipped: true})
+}
+
+// RollForGM makes the GM roll due with roll, for play without a GM model.
+func (s *State) RollForGM(roll Roller) Result {
+	d, err := ParseNotation(s.Pending.Notation)
+	if err != nil {
+		panic(err)
+	}
+	r, err := s.GMRoll(s.Pending.Purpose, s.Pending.Notation, d.Roll(roll))
+	if err != nil {
+		panic(err)
+	}
 	return r
 }
 
@@ -334,73 +518,107 @@ func (s *State) travel(loc string) string {
 	return msg
 }
 
-// Roll resolves the pending action using the die rolled now. text is what the
-// player typed after /roll, and must name the ability the check calls for.
-func (s *State) Roll(text string, roll Roller) Result {
-	finish := func(msg string) Result { return Result{Message: msg, State: s.View()} }
-	p := s.Pending
-	switch {
-	case s.Won || s.HP <= 0:
-		return finish("This adventure has ended; there is nothing left to roll for.")
-	case p == nil:
-		return finish("No roll is needed right now. Choose an action first; the GM will ask for a roll if it calls for one.")
-	case strings.TrimSpace(text) == "":
-		return finish(fmt.Sprintf("Name the ability you are rolling: type %s.", p.Command))
-	case !p.accepts(text):
-		return finish(fmt.Sprintf("The GM asked for %s, not %s. Type %s.", p.Check, strings.TrimSpace(text), p.Command))
-	}
-	s.Pending = nil
-	var r Result
-	if p.Improvisation != nil {
-		r = s.resolveImprovised(p, roll)
-	} else {
-		r = s.resolve(p.Action, roll)
-	}
-	for i := range r.Rolls {
-		r.Rolls[i].Manual = r.Rolls[i].Label == p.Check
-	}
-	return r
-}
-
-// turn accumulates one resolved turn's rolls, damage, and message, and holds
-// the combat steps that listed and improvised actions share.
+// turn is one replay of the action in progress: its rolls, damage, and
+// message so far.
 type turn struct {
-	s    *State
-	r    Result
-	roll Roller
-}
-
-func (s *State) newTurn(roll Roller) *turn {
-	s.Turn++
-	return &turn{s: s, r: Result{Allowed: true}, roll: roll}
+	s  *State
+	r  Result
+	ip *inProgress
+	// i is the next supplied roll to use; ruled is set once the GM's no-roll
+	// ruling has been spent on the action's check.
+	i     int
+	ruled bool
 }
 
 func (t *turn) finish(msg string) Result { t.r.Message = msg; t.r.State = t.s.View(); return t.r }
 
-func (t *turn) check(label string, bonus, dc int, adv, dis, attack bool) Roll {
-	x := Check(t.roll, label, bonus, dc, adv, dis, attack)
+// need returns the dice supplied for the next roll, and whether it was rolled
+// at all. With nothing supplied yet, it stops the replay to wait on spec.
+func (t *turn) need(spec RollSpec) ([]int, bool) {
+	if t.i < len(t.ip.supplied) {
+		x := t.ip.supplied[t.i]
+		t.i++
+		if x.purpose != spec.Purpose {
+			panic(fmt.Sprintf("replay expected a %s roll, but %s was supplied", spec.Purpose, x.purpose))
+		}
+		return x.dice, !x.skipped
+	}
+	panic(wait{spec})
+}
+
+// check is Data's check for the action: the player's roll, or an automatic
+// success when the GM ruled it needs none.
+func (t *turn) check(label string, bonus, dc int, attack bool) Roll {
+	if t.ip.ruling.NoRoll && !t.ruled {
+		t.ruled = true
+		x := Roll{Label: label, Purpose: "check", By: ByGM, Dice: []int{}, Modifier: bonus, Target: dc, Success: true, Automatic: true}
+		t.r.Rolls = append(t.r.Rolls, x)
+		return x
+	}
+	adv := t.s.takeAdvantage()
+	c := t.ip.check
+	action := t.ip.action
+	dice, _ := t.need(RollSpec{Purpose: "check", By: ByPlayer, Check: label, Notation: d20(bonus, adv, false), Target: dc, Ability: c.ability, Command: "/roll " + c.ability, Action: &action, aliases: c.aliases})
+	x := CheckDice(label, dice, bonus, dc, adv, false, attack)
+	x.Purpose, x.By = "check", ByPlayer
 	t.r.Rolls = append(t.r.Rolls, x)
 	return x
 }
 
+// roll is a roll with no target, such as damage or initiative: the player's
+// when spec.By is ByPlayer, otherwise the GM's, which the GM may never make.
+func (t *turn) roll(spec RollSpec) Roll {
+	d, err := ParseNotation(spec.Notation)
+	if err != nil {
+		panic(err)
+	}
+	x := Roll{Label: spec.Check, Purpose: spec.Purpose, By: spec.By, Notation: spec.Notation, Dice: []int{}, Modifier: d.Modifier}
+	dice, rolled := t.need(spec)
+	if rolled {
+		x.Dice, x.Total = dice, d.Total(dice)
+	} else {
+		x.Skipped = true
+	}
+	t.r.Rolls = append(t.r.Rolls, x)
+	return x
+}
+
+// damage is Data's damage roll, the player's to make.
+func (t *turn) damage(label, notation string) int {
+	return t.roll(RollSpec{Purpose: "data_damage", By: ByPlayer, Check: label, Notation: notation, Ability: "damage", Command: "/roll damage", aliases: []string{"dmg"}}).Total
+}
+
 func (t *turn) droneAttack(dodge bool) {
-	x := t.check("Drone attack", 3, Data().AC, false, dodge, true)
-	if x.Success {
-		damage := t.roll(4) + 1
-		if x.Critical {
-			damage += t.roll(4)
-		}
-		t.s.HP = max(0, t.s.HP-damage)
-		t.r.Damage += damage
+	spec := RollSpec{Purpose: "drone_attack", By: ByGM, Check: "Drone attack", Notation: d20(3, false, dodge), Target: Data().AC}
+	dice, rolled := t.need(spec)
+	if !rolled {
+		t.r.Rolls = append(t.r.Rolls, Roll{Label: spec.Check, Purpose: spec.Purpose, By: ByGM, Notation: spec.Notation, Dice: []int{}, Modifier: 3, Target: spec.Target, Skipped: true})
+		return
+	}
+	x := CheckDice(spec.Check, dice, 3, spec.Target, false, dodge, true)
+	x.Purpose, x.By = spec.Purpose, ByGM
+	t.r.Rolls = append(t.r.Rolls, x)
+	if !x.Success {
+		return
+	}
+	notation := "1d4+1"
+	if x.Critical {
+		notation = "2d4+1"
+	}
+	if d := t.roll(RollSpec{Purpose: "drone_damage", By: ByGM, Check: "Drone damage", Notation: notation}); !d.Skipped {
+		t.s.HP = max(0, t.s.HP-d.Total)
+		t.r.Damage += d.Total
 	}
 }
 
 func (t *turn) startCombat() {
 	t.s.Combat = true
-	p := t.check("Data initiative", Modifier(Data().Scores["dexterity"]), 0, false, false, false)
-	d := t.check("Drone initiative", 1, 0, false, false, false)
-	// On a tied initiative total, the GM's fixed policy gives Data priority.
-	if d.Total > p.Total {
+	dex := Modifier(Data().Scores["dexterity"])
+	p := t.roll(RollSpec{Purpose: "data_initiative", By: ByPlayer, Check: "Data initiative", Notation: "1d20" + signed(dex), Ability: "initiative", Command: "/roll initiative", aliases: []string{"init", "dex", "dexterity"}})
+	d := t.roll(RollSpec{Purpose: "drone_initiative", By: ByGM, Check: "Drone initiative", Notation: "1d20+1"})
+	// A drone that never rolled initiative acts after Data. On a tied total,
+	// the GM's fixed policy gives Data priority.
+	if !d.Skipped && d.Total > p.Total {
 		t.droneAttack(false)
 	}
 }
@@ -414,8 +632,8 @@ func (s *State) takeAdvantage() bool {
 }
 
 // resolve applies an action already validated against the current view.
-func (s *State) resolve(a Action, roll Roller) Result {
-	t := s.newTurn(roll)
+func (s *State) resolve(a Action, t *turn) Result {
+	s.Turn++
 	finish, check := t.finish, t.check
 	switch a.Kind {
 	case "move":
@@ -426,18 +644,19 @@ func (s *State) resolve(a Action, roll Roller) Result {
 		s.Clues[key] = true
 		return finish(clueText[key])
 	case "scan":
-		x := check("Intelligence (Investigation)", Data().SkillBonus("investigation"), 12, s.takeAdvantage(), false, false)
+		x := check("Intelligence (Investigation)", Data().SkillBonus("investigation"), 12, false)
 		if x.Success {
 			s.Clues["frequency"] = true
 			return finish(clueText["frequency"])
 		}
 		return finish("The damaged buffer yields no stable frequency. You may try again.")
 	case "bypass":
-		x := check("Intelligence (Arcana): tricorder bypass", Data().SkillBonus("arcana"), 13, s.takeAdvantage(), false, false)
+		x := check("Intelligence (Arcana): tricorder bypass", Data().SkillBonus("arcana"), 13, false)
 		if x.Success {
 			s.DroneHP = 0
 			return finish("Your tricorder disables the security drone. The relay controls are accessible.")
 		}
+		t.r.Message = "The bypass fails and the drone activates."
 		t.startCombat()
 		return finish("The bypass fails and the drone activates. Initiative determines whether it fires before your next action.")
 	case "attack":
@@ -447,23 +666,24 @@ func (s *State) resolve(a Action, roll Roller) Result {
 		if s.HP <= 0 {
 			return finish("The drone disables Data before he can fire.")
 		}
-		x := check("Phaser attack", Modifier(Data().Scores["dexterity"])+Data().ProficiencyBonus, 12, s.takeAdvantage(), false, true)
+		x := check("Phaser attack", Modifier(Data().Scores["dexterity"])+Data().ProficiencyBonus, 12, true)
 		if x.Success {
-			damage := roll(6) + Modifier(Data().Scores["dexterity"])
+			notation := "1d6" + signed(Modifier(Data().Scores["dexterity"]))
 			if x.Critical {
-				damage += roll(6)
+				notation = "2d6" + signed(Modifier(Data().Scores["dexterity"]))
 			}
+			damage := t.damage("Phaser damage", notation)
 			s.DroneHP = max(0, s.DroneHP-damage)
 			if s.DroneHP == 0 {
 				s.Combat = false
 				return finish(fmt.Sprintf("Your phaser deals %d damage and disables the drone.", damage))
 			}
-			t.r.Message = fmt.Sprintf("Your phaser deals %d damage. ", damage)
+			t.r.Message = fmt.Sprintf("Your phaser deals %d damage.", damage)
 		} else {
-			t.r.Message = "Your phaser misses. "
+			t.r.Message = "Your phaser misses."
 		}
 		t.droneAttack(false)
-		return finish(t.r.Message + "The drone takes its next turn.")
+		return finish(t.r.Message + " The drone takes its next turn.")
 	case "dodge":
 		t.droneAttack(true)
 		return finish("You dodge while the drone fires with disadvantage.")
@@ -473,11 +693,12 @@ func (s *State) resolve(a Action, roll Roller) Result {
 		return finish("You withdraw to " + a.Target + ". The fixed drone cannot follow or make a melee opportunity attack.")
 	case "isolate":
 		s.Isolated = true
-		x := check("Dexterity saving throw", Data().SaveBonus("dexterity"), 12, s.takeAdvantage(), false, false)
+		x := check("Dexterity saving throw", Data().SaveBonus("dexterity"), 12, false)
 		if !x.Success {
-			damage := roll(6)
-			s.HP = max(0, s.HP-damage)
-			t.r.Damage = damage
+			if d := t.roll(RollSpec{Purpose: "discharge_damage", By: ByGM, Check: "Electrical discharge", Notation: "1d6"}); !d.Skipped {
+				s.HP = max(0, s.HP-d.Total)
+				t.r.Damage += d.Total
+			}
 			return finish("You isolate the relay but suffer an electrical discharge.")
 		}
 		return finish("You isolate the relay and avoid the electrical discharge.")

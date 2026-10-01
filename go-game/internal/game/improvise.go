@@ -166,10 +166,11 @@ func (s State) normalize(im Improvisation) (Improvisation, Effect, error) {
 	return im, effects[i], nil
 }
 
-// Improvise validates an improvised attempt. A flavor attempt resolves at once
-// without a roll or a turn; anything else waits on /roll like a listed check.
-// An invalid attempt changes nothing.
-func (s *State) Improvise(im Improvisation) Result {
+// Improvise validates an improvised attempt, under the GM's ruling on its
+// check. A flavor attempt resolves at once without a roll or a turn;
+// anything else runs like a listed action. An invalid attempt changes
+// nothing.
+func (s *State) Improvise(im Improvisation, ruling Ruling) Result {
 	finish := func(r Result, msg string) Result { r.Message = msg; r.State = s.View(); return r }
 	if s.Won || s.HP <= 0 {
 		return finish(Result{}, "This adventure has ended.")
@@ -178,13 +179,14 @@ func (s *State) Improvise(im Improvisation) Result {
 	if err != nil {
 		return finish(Result{}, err.Error())
 	}
-	r := Result{Allowed: true, Improvisation: &im}
 	if effect.ID == "flavor" {
-		return finish(r, "No mechanical effect; the GM narrates the attempt.")
+		return finish(Result{Allowed: true, Improvisation: &im}, "No mechanical effect; the GM narrates the attempt.")
 	}
+	if s.locked() {
+		return finish(Result{RollRequired: s.Pending}, s.lockedMessage())
+	}
+	s.ip, s.Pending = nil, nil
 	prefix := s.travel(effect.Location)
-	ability := title(im.Ability)
-	label := ability
 	aliases := []string{}
 	for abbr, full := range abilityAbbreviations {
 		if full == im.Ability {
@@ -192,35 +194,40 @@ func (s *State) Improvise(im Improvisation) Result {
 		}
 	}
 	if im.Skill != "" {
-		label += " (" + title(im.Skill) + ")"
 		aliases = append(aliases, strings.Split(im.Skill, "_")...)
 	}
-	dc := max(difficultyDC[im.Difficulty], effect.MinDC)
-	s.Pending = &PendingRoll{
-		Action:        Action{Kind: "improvise", Target: effect.ID},
-		Ability:       ability,
-		Check:         label + ": " + im.Approach,
-		Target:        dc,
-		Command:       "/roll " + ability,
-		Improvisation: &im,
-		aliases:       aliases,
+	r := s.start(&inProgress{action: Action{Kind: "improvise", Target: effect.ID}, im: &im, check: checkInfo{title(im.Ability), aliases}, ruling: ruling}, prefix)
+	if dc := improvisedDC(im, effect); r.RollRequired != nil && r.RollRequired.Purpose == "check" && dc > difficultyDC[im.Difficulty] {
+		r.Message += fmt.Sprintf(" The approach itself is %s, but that outcome needs at least DC %d.", im.Difficulty, effect.MinDC)
 	}
-	r.RollRequired = s.Pending
-	msg := prefix + fmt.Sprintf("This needs a roll: %s, DC %d. Type %s to roll.", label, dc, s.Pending.Command)
-	if dc > difficultyDC[im.Difficulty] {
-		msg += fmt.Sprintf(" The approach itself is %s, but that outcome needs at least DC %d.", im.Difficulty, effect.MinDC)
-	}
-	return finish(r, msg)
+	return r
 }
 
-// resolveImprovised applies an improvised attempt's effect once its check is
-// rolled. p was validated when it became pending, and any other action since
-// would have cleared it.
-func (s *State) resolveImprovised(p *PendingRoll, roll Roller) Result {
-	im := p.Improvisation
-	t := s.newTurn(roll)
+// improvisedDC is the higher of the approach's difficulty and the effect's
+// minimum.
+func improvisedDC(im Improvisation, effect Effect) int {
+	return max(difficultyDC[im.Difficulty], effect.MinDC)
+}
+
+// improvisedCheck labels an improvised check: the ability, the skill if any,
+// and the approach.
+func improvisedCheck(im Improvisation) string {
+	label := title(im.Ability)
+	if im.Skill != "" {
+		label += " (" + title(im.Skill) + ")"
+	}
+	return label + ": " + im.Approach
+}
+
+// resolveImprovised applies an improvised attempt's effect. The attempt was
+// validated when it started, against the same state it replays from.
+func (s *State) resolveImprovised(t *turn) Result {
+	im := t.ip.im
+	i := slices.IndexFunc(s.effects(), func(e Effect) bool { return e.ID == im.Effect })
+	effect := s.effects()[i]
+	s.Turn++
 	t.r.Improvisation = im
-	x := t.check(p.Check, Data().CheckBonus(im.Ability, im.Skill), p.Target, s.takeAdvantage(), false, false)
+	x := t.check(improvisedCheck(*im), Data().CheckBonus(im.Ability, im.Skill), improvisedDC(*im, effect), false)
 	switch im.Effect {
 	case "recover_frequency":
 		if x.Success {
@@ -233,21 +240,23 @@ func (s *State) resolveImprovised(p *PendingRoll, roll Roller) Result {
 			s.DroneHP = 0
 			return t.finish("The attempt disables the security drone. The relay controls are accessible.")
 		}
+		t.r.Message = "The attempt fails and the drone activates."
 		t.startCombat()
 		return t.finish("The attempt fails and the drone activates. Initiative determines whether it fires before your next action.")
 	case "damage_drone":
-		msg := "The attempt does no damage. "
+		msg := "The attempt does no damage."
 		if x.Success {
-			damage := roll(6)
+			damage := t.damage("Improvised damage", "1d6")
 			s.DroneHP = max(0, s.DroneHP-damage)
 			if s.DroneHP == 0 {
 				s.Combat = false
 				return t.finish(fmt.Sprintf("The attempt deals %d damage and disables the drone.", damage))
 			}
-			msg = fmt.Sprintf("The attempt deals %d damage. ", damage)
+			msg = fmt.Sprintf("The attempt deals %d damage.", damage)
 		}
+		t.r.Message = msg
 		t.droneAttack(false)
-		return t.finish(msg + "The drone takes its next turn.")
+		return t.finish(msg + " The drone takes its next turn.")
 	case "gain_advantage":
 		msg := "The setup doesn't pay off."
 		if x.Success {
@@ -255,6 +264,7 @@ func (s *State) resolveImprovised(p *PendingRoll, roll Roller) Result {
 			msg = "The setup works: your next roll has advantage."
 		}
 		if s.Combat {
+			t.r.Message = msg
 			t.droneAttack(false)
 			msg += " The drone takes its next turn."
 		}

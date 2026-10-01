@@ -23,14 +23,26 @@ func sequence(t *testing.T, values ...int) Roller {
 	}
 }
 
-// play applies a and, if it calls for a check, rolls it the way the player
-// would with /roll.
-func play(s *State, a Action, roll Roller) Result {
-	r := s.Apply(a, roll)
-	if r.RollRequired != nil {
-		return s.Roll(r.RollRequired.Ability, roll)
+// drive makes every roll r waits on with roll, the player's with /roll and
+// the GM's as roll_dice would, and returns the last result with every step's
+// rolls and damage.
+func drive(s *State, r Result, roll Roller) Result {
+	rolls, damage := r.Rolls, r.Damage
+	for r.RollRequired != nil || r.GMRollRequired != nil {
+		if r.RollRequired != nil {
+			r = s.Roll(r.RollRequired.Ability, roll)
+		} else {
+			r = s.RollForGM(roll)
+		}
+		rolls, damage = append(rolls, r.Rolls...), damage+r.Damage
 	}
+	r.Rolls, r.Damage = rolls, damage
 	return r
+}
+
+// play applies a and makes every roll it needs.
+func play(s *State, a Action, roll Roller) Result {
+	return drive(s, s.Apply(a, Ruling{}), roll)
 }
 
 func TestModifiers(t *testing.T) {
@@ -79,7 +91,7 @@ func TestRejectWithoutMutation(t *testing.T) {
 	for _, a := range []Action{{"cast", "fireball"}, {"move", "engineering; rescue crew"}, {"rescue", "crew"}, {"inspect", "nonexistent"}} {
 		s := New("test")
 		before := s.View().JSON()
-		r := s.Apply(a, sequence(t))
+		r := s.Apply(a, Ruling{})
 		if r.Allowed || s.View().JSON() != before {
 			t.Fatalf("invalid action mutated state: %+v", a)
 		}
@@ -97,7 +109,7 @@ func TestCompleteRescueWithoutCombat(t *testing.T) {
 	if !s.Won || s.HP != 24 || s.Turn != 10 {
 		t.Fatalf("unexpected ending: %+v", s)
 	}
-	if s.Apply(Action{"scan", "sensors"}, sequence(t)).Allowed {
+	if s.Apply(Action{"scan", "sensors"}, Ruling{}).Allowed {
 		t.Fatal("action allowed after ending")
 	}
 }
@@ -116,7 +128,7 @@ func TestRescueRequiresEvidence(t *testing.T) {
 	s.Location = "engineering"
 	s.DroneHP = 0
 	s.Isolated = true
-	r := s.Apply(Action{"rescue", "crew"}, sequence(t))
+	r := s.Apply(Action{"rescue", "crew"}, Ruling{})
 	if r.Allowed || s.Won || s.Turn != 0 {
 		t.Fatal(r)
 	}
@@ -139,7 +151,7 @@ func TestCombatAndCriticalDamage(t *testing.T) {
 	s.Location = "engineering"
 	// Player wins initiative, critically hits, and deals 6+4+2 damage.
 	r := play(&s, Action{"attack", "drone"}, sequence(t, 15, 1, 20, 6, 4))
-	if s.DroneHP != 0 || s.Combat || s.HP != 24 || len(r.Rolls) != 3 {
+	if s.DroneHP != 0 || s.Combat || s.HP != 24 || len(r.Rolls) != 4 || r.Rolls[3].Notation != "2d6+2" {
 		t.Fatalf("bad critical or retaliation after defeat: %+v %+v", s, r)
 	}
 }
@@ -152,7 +164,7 @@ func TestDroneActsFirstAndCanDisableData(t *testing.T) {
 	if s.HP != 0 || s.DroneHP != 10 || r.State.Status != "disabled" {
 		t.Fatal(s, r)
 	}
-	if s.Apply(Action{"retreat", "bridge"}, sequence(t)).Allowed {
+	if s.Apply(Action{"retreat", "bridge"}, Ruling{}).Allowed {
 		t.Fatal("disabled Data acted")
 	}
 }
@@ -161,11 +173,11 @@ func TestDodgeAndRetreat(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	s.Combat = true
-	s.Apply(Action{"dodge", "drone"}, sequence(t, 20, 1))
+	play(&s, Action{"dodge", "drone"}, sequence(t, 20, 1))
 	if s.HP != 24 {
 		t.Fatal("disadvantage not respected")
 	}
-	s.Apply(Action{"retreat", "bridge"}, sequence(t))
+	s.Apply(Action{"retreat", "bridge"}, Ruling{})
 	if s.Combat || s.Location != "bridge" || s.DroneHP != 10 {
 		t.Fatal(s)
 	}
@@ -178,7 +190,7 @@ func TestBypassFailureStartsCombat(t *testing.T) {
 	if !s.Combat || s.DroneHP != 10 {
 		t.Fatal(s)
 	}
-	if s.Apply(Action{"isolate", "relay"}, sequence(t)).Allowed {
+	if s.Apply(Action{"isolate", "relay"}, Ruling{}).Allowed {
 		t.Fatal("relay used during combat")
 	}
 }
@@ -195,7 +207,7 @@ func TestHazardAndSave(t *testing.T) {
 
 func TestRollRequiresPlayerCommand(t *testing.T) {
 	s := New("test")
-	r := s.Apply(Action{"scan", "sensors"}, sequence(t))
+	r := s.Apply(Action{"scan", "sensors"}, Ruling{})
 	if !r.Allowed || r.RollRequired == nil || r.RollRequired.Command != "/roll Intelligence" || s.Turn != 0 || len(r.Rolls) != 0 {
 		t.Fatalf("scan should wait for /roll without rolling: %+v", r)
 	}
@@ -207,8 +219,11 @@ func TestRollRequiresPlayerCommand(t *testing.T) {
 			t.Fatalf("/roll %q should be rejected without rolling: %+v", wrong, r)
 		}
 	}
+	if r := s.Roll("1d20+7", sequence(t)); r.Allowed {
+		t.Fatal("/roll accepted notation that isn't the roll due")
+	}
 	r = s.Roll("int (Investigation)", sequence(t, 10))
-	if !r.Allowed || !s.Clues["frequency"] || s.Pending != nil || s.Turn != 1 || len(r.Rolls) != 1 || !r.Rolls[0].Manual || r.Rolls[0].Total != 16 {
+	if !r.Allowed || !s.Clues["frequency"] || s.Pending != nil || s.Turn != 1 || len(r.Rolls) != 1 || r.Rolls[0].By != ByPlayer || r.Rolls[0].Total != 16 {
 		t.Fatalf("roll did not resolve the scan: %+v", r)
 	}
 	if r := s.Roll("Intelligence", sequence(t)); r.Allowed {
@@ -218,8 +233,8 @@ func TestRollRequiresPlayerCommand(t *testing.T) {
 
 func TestOtherActionCancelsPendingRoll(t *testing.T) {
 	s := New("test")
-	s.Apply(Action{"scan", "sensors"}, sequence(t))
-	s.Apply(Action{"move", "sickbay"}, sequence(t))
+	s.Apply(Action{"scan", "sensors"}, Ruling{})
+	s.Apply(Action{"move", "sickbay"}, Ruling{})
 	if s.Pending != nil || s.Location != "sickbay" {
 		t.Fatal(s)
 	}
@@ -228,22 +243,18 @@ func TestOtherActionCancelsPendingRoll(t *testing.T) {
 	}
 }
 
-func TestOnlyPlayerRollIsManual(t *testing.T) {
+func TestDataRollsAreThePlayersAndDroneRollsTheGMs(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	// Data wins initiative and misses; the drone then fires and misses.
 	r := play(&s, Action{"attack", "drone"}, sequence(t, 15, 1, 2, 1))
-	manual := 0
+	var by []string
 	for _, x := range r.Rolls {
-		if x.Manual {
-			manual++
-			if x.Label != "Phaser attack" {
-				t.Fatalf("engine roll marked manual: %+v", x)
-			}
-		}
+		by = append(by, x.Label+":"+x.By)
 	}
-	if manual != 1 || len(r.Rolls) != 4 {
-		t.Fatalf("%+v", r.Rolls)
+	want := []string{"Data initiative:player", "Drone initiative:gm", "Phaser attack:player", "Drone attack:gm"}
+	if !slices.Equal(by, want) {
+		t.Fatalf("got %v, want %v", by, want)
 	}
 }
 
@@ -254,7 +265,7 @@ func improvisation(ability, skill, difficulty, effect string) Improvisation {
 func TestImprovisedCheckUsesEffectMinimumDC(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
-	r := s.Improvise(improvisation("STR", "Athletics", "easy", "disable_drone"))
+	r := s.Improvise(improvisation("STR", "Athletics", "easy", "disable_drone"), Ruling{})
 	if !r.Allowed || r.RollRequired == nil || r.RollRequired.Target != 20 || r.RollRequired.Command != "/roll Strength" || s.Turn != 0 {
 		t.Fatalf("easy approach to a hard effect should wait on a DC 20 roll: %+v", r)
 	}
@@ -263,14 +274,14 @@ func TestImprovisedCheckUsesEffectMinimumDC(t *testing.T) {
 	}
 	// Strength 18 (+4) plus athletics proficiency (+2): 14 + 6 = 20.
 	r = s.Roll("athletics", sequence(t, 14))
-	if !r.Allowed || s.DroneHP != 0 || s.Combat || s.Turn != 1 || len(r.Rolls) != 1 || !r.Rolls[0].Manual || r.Rolls[0].Total != 20 || r.Improvisation == nil {
+	if !r.Allowed || s.DroneHP != 0 || s.Combat || s.Turn != 1 || len(r.Rolls) != 1 || r.Rolls[0].By != ByPlayer || r.Rolls[0].Total != 20 || r.Improvisation == nil {
 		t.Fatalf("improvised disable did not resolve: %+v", r)
 	}
 }
 
 func TestImprovisedDifficultyCanRaiseDC(t *testing.T) {
 	s := New("test")
-	r := s.Improvise(improvisation("wisdom", "", "hard", "recover_frequency"))
+	r := s.Improvise(improvisation("wisdom", "", "hard", "recover_frequency"), Ruling{})
 	if r.RollRequired == nil || r.RollRequired.Target != 20 {
 		t.Fatal(r)
 	}
@@ -291,7 +302,7 @@ func TestInvalidImprovisationChangesNothing(t *testing.T) {
 	} {
 		s := New("test")
 		before := s.View().JSON()
-		if r := s.Improvise(im); r.Allowed || s.View().JSON() != before {
+		if r := s.Improvise(im, Ruling{}); r.Allowed || s.View().JSON() != before {
 			t.Fatalf("invalid improvisation %+v was accepted: %+v", im, r)
 		}
 	}
@@ -299,8 +310,8 @@ func TestInvalidImprovisationChangesNothing(t *testing.T) {
 
 func TestFlavorNeedsNoRollOrTurn(t *testing.T) {
 	s := New("test")
-	s.Apply(Action{"scan", "sensors"}, sequence(t))
-	r := s.Improvise(Improvisation{Approach: "sit in the captain's chair", Effect: "flavor"})
+	s.Apply(Action{"scan", "sensors"}, Ruling{})
+	r := s.Improvise(Improvisation{Approach: "sit in the captain's chair", Effect: "flavor"}, Ruling{})
 	if !r.Allowed || r.RollRequired != nil || s.Turn != 0 || s.Pending == nil {
 		t.Fatalf("flavor should change nothing, including the pending scan: %+v", r)
 	}
@@ -309,14 +320,14 @@ func TestFlavorNeedsNoRollOrTurn(t *testing.T) {
 func TestAdvantageIsEarnedAndSpent(t *testing.T) {
 	s := New("test")
 	play := func(im Improvisation, dice ...int) Result {
-		r := s.Improvise(im)
+		r := s.Improvise(im, Ruling{})
 		return s.Roll(r.RollRequired.Ability, sequence(t, dice...))
 	}
 	play(improvisation("intelligence", "", "easy", "gain_advantage"), 10)
 	if !s.Advantage || slices.ContainsFunc(s.View().Effects, func(e Effect) bool { return e.ID == "gain_advantage" }) {
 		t.Fatal("advantage not earned, or still offered while held")
 	}
-	s.Apply(Action{"scan", "sensors"}, sequence(t))
+	s.Apply(Action{"scan", "sensors"}, Ruling{})
 	r := s.Roll("Intelligence", sequence(t, 2, 12))
 	if s.Advantage || len(r.Rolls[0].Dice) != 2 || !s.Clues["frequency"] {
 		t.Fatalf("advantage not applied to the next roll: %+v", r)
@@ -327,10 +338,10 @@ func TestImprovisedDamageInCombatDrawsFire(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	s.Combat = true
-	r := s.Improvise(improvisation("strength", "athletics", "medium", "damage_drone"))
+	r := s.Improvise(improvisation("strength", "athletics", "medium", "damage_drone"), Ruling{})
 	// Check 15+6 hits, 4 damage, then the drone attacks and misses.
-	r = s.Roll("Strength", sequence(t, 15, 4, 2))
-	if s.DroneHP != 6 || !s.Combat || len(r.Rolls) != 2 || r.Rolls[1].Label != "Drone attack" {
+	r = drive(&s, s.Roll("Strength", sequence(t, 15)), sequence(t, 4, 2))
+	if s.DroneHP != 6 || !s.Combat || len(r.Rolls) != 3 || r.Rolls[1].Label != "Improvised damage" || r.Rolls[2].Label != "Drone attack" {
 		t.Fatalf("%+v %+v", s, r)
 	}
 }
@@ -347,12 +358,12 @@ func TestQuestionChangesNothing(t *testing.T) {
 func TestActionElsewhereTravelsThere(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
-	r := s.Apply(Action{"inspect", "medical_records"}, sequence(t))
+	r := s.Apply(Action{"inspect", "medical_records"}, Ruling{})
 	if !r.Allowed || s.Location != "sickbay" || !s.Clues["biopattern"] || s.Turn != 1 || !strings.HasPrefix(r.Message, "You take the turbolift to sickbay.") {
 		t.Fatalf("inspecting sickbay records from engineering should travel there: %+v", r)
 	}
 	// A check elsewhere travels now and waits on the roll there.
-	r = s.Apply(Action{"scan", "sensors"}, sequence(t))
+	r = s.Apply(Action{"scan", "sensors"}, Ruling{})
 	if s.Location != "bridge" || r.RollRequired == nil {
 		t.Fatal(r)
 	}
@@ -361,7 +372,7 @@ func TestActionElsewhereTravelsThere(t *testing.T) {
 func TestTurboliftReachesEveryLocation(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
-	if !s.Apply(Action{"move", "sickbay"}, sequence(t)).Allowed || s.Location != "sickbay" {
+	if !s.Apply(Action{"move", "sickbay"}, Ruling{}).Allowed || s.Location != "sickbay" {
 		t.Fatal(s)
 	}
 }
@@ -370,18 +381,18 @@ func TestLeavingCombatWithdraws(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	s.Combat = true
-	if r := s.Apply(Action{"move", "sickbay"}, sequence(t)); !r.Allowed || s.Combat || s.Location != "sickbay" {
+	if r := s.Apply(Action{"move", "sickbay"}, Ruling{}); !r.Allowed || s.Combat || s.Location != "sickbay" {
 		t.Fatal(r)
 	}
 	s.Location, s.Combat = "engineering", true
-	if r := s.Apply(Action{"inspect", "logs"}, sequence(t)); !r.Allowed || s.Combat || s.Location != "bridge" || !s.Clues["logs"] {
+	if r := s.Apply(Action{"inspect", "logs"}, Ruling{}); !r.Allowed || s.Combat || s.Location != "bridge" || !s.Clues["logs"] {
 		t.Fatal(r)
 	}
 }
 
 func TestImprovisationElsewhereTravelsThere(t *testing.T) {
 	s := New("test")
-	r := s.Improvise(improvisation("strength", "athletics", "hard", "disable_drone"))
+	r := s.Improvise(improvisation("strength", "athletics", "hard", "disable_drone"), Ruling{})
 	if !r.Allowed || s.Location != "engineering" || r.RollRequired == nil {
 		t.Fatal(r)
 	}
@@ -396,5 +407,150 @@ func TestLeadsSteerTowardUnfinishedSteps(t *testing.T) {
 	s.DroneHP, s.Isolated = 0, true
 	if l := s.View().Leads; len(l) != 1 || !strings.Contains(l[0], "transporter") {
 		t.Fatal(l)
+	}
+}
+
+// pending lists the purposes of the rolls an action waits on, in order, and
+// who makes each, rolling each with its value from values.
+func pending(t *testing.T, s *State, r Result, values ...int) []string {
+	t.Helper()
+	var got []string
+	roll := sequence(t, values...)
+	for r.RollRequired != nil || r.GMRollRequired != nil {
+		if p := r.RollRequired; p != nil {
+			got = append(got, p.Purpose+":"+p.By)
+			r = s.Roll(p.Ability, roll)
+		} else {
+			p := r.GMRollRequired
+			got = append(got, p.Purpose+":"+p.By)
+			r = s.RollForGM(roll)
+		}
+	}
+	return got
+}
+
+func TestGMCanRuleACheckNeedsNoRoll(t *testing.T) {
+	s := New("test")
+	r := s.Apply(Action{"scan", "sensors"}, Ruling{NoRoll: true, Reason: "Data's sensors outclass the buffer"})
+	if r.RollRequired != nil || !s.Clues["frequency"] || s.Turn != 1 || len(r.Rolls) != 1 || !r.Rolls[0].Automatic || !r.Rolls[0].Success || r.Ruling == nil {
+		t.Fatalf("an automatic success should resolve at once: %+v", r)
+	}
+	// An automatic hit still rolls damage, and the drone still replies.
+	s = New("test")
+	s.Location, s.Combat = "engineering", true
+	got := pending(t, &s, s.Apply(Action{"attack", "drone"}, Ruling{NoRoll: true}), 3, 2)
+	if !slices.Equal(got, []string{"data_damage:player", "drone_attack:gm"}) || s.DroneHP != 5 {
+		t.Fatalf("got %v, drone HP %d", got, s.DroneHP)
+	}
+}
+
+func TestInitiativeDecidesWhoActsFirst(t *testing.T) {
+	// Data wins: Data's attack roll comes before any drone attack.
+	s := New("test")
+	s.Location = "engineering"
+	got := pending(t, &s, s.Apply(Action{"attack", "drone"}, Ruling{}), 15, 1, 2, 1)
+	if !slices.Equal(got, []string{"data_initiative:player", "drone_initiative:gm", "check:player", "drone_attack:gm"}) {
+		t.Fatalf("Data first: %v", got)
+	}
+	// The drone wins: it attacks, and damages Data, before Data rolls to hit.
+	s = New("test")
+	s.Location = "engineering"
+	r := s.Apply(Action{"attack", "drone"}, Ruling{})
+	r = s.Roll("initiative", sequence(t, 1))
+	r = s.RollForGM(sequence(t, 20))
+	if r.GMRollRequired == nil || r.GMRollRequired.Purpose != "drone_attack" {
+		t.Fatalf("drone should attack next: %+v", r)
+	}
+	r = s.RollForGM(sequence(t, 15))
+	r = s.RollForGM(sequence(t, 4))
+	if s.HP != 19 || r.RollRequired == nil || r.RollRequired.Purpose != "check" || s.Turn != 1 {
+		t.Fatalf("the drone's hit should land before Data's attack roll: HP %d, %+v", s.HP, r)
+	}
+	// With rolls made, the action must be finished before another.
+	if r := s.Apply(Action{"dodge", "drone"}, Ruling{}); r.Allowed || s.Pending.Purpose != "check" || r.RollRequired != s.Pending {
+		t.Fatalf("an action in progress should be finished first, and say which roll it waits on: %+v", r)
+	}
+}
+
+func TestGMRollMustMatchTheRollDue(t *testing.T) {
+	s := New("test")
+	s.Location, s.Combat = "engineering", true
+	r := s.Apply(Action{"dodge", "drone"}, Ruling{})
+	if p := r.GMRollRequired; p == nil || p.Purpose != "drone_attack" || p.Notation != "2d20kl1+3" || s.Turn != 0 {
+		t.Fatalf("dodge should wait on a drone attack with disadvantage: %+v", r)
+	}
+	before := s.View().JSON()
+	for _, bad := range []struct {
+		purpose, notation string
+		dice              []int
+	}{
+		{"drone_damage", "2d20kl1+3", []int{5, 6}},
+		{"drone_attack", "1d20+3", []int{5}},
+		{"drone_attack", "2d20kl1+3", []int{5}},
+		{"drone_attack", "2d20kl1+3", []int{5, 21}},
+	} {
+		if _, err := s.GMRoll(bad.purpose, bad.notation, bad.dice); err == nil || s.View().JSON() != before {
+			t.Fatalf("%+v was accepted", bad)
+		}
+	}
+	if _, err := s.GMRoll("drone_attack", "2D20KL1 + 3", []int{19, 2}); err != nil || s.Pending != nil || s.HP != 24 {
+		t.Fatalf("a matching roll was refused, or disadvantage ignored: %v, %+v", err, s)
+	}
+}
+
+func TestSkippedGMRollsDontHappen(t *testing.T) {
+	// No drone initiative: Data acts first. No drone attack: no damage.
+	s := New("test")
+	s.Location = "engineering"
+	r := s.Apply(Action{"attack", "drone"}, Ruling{})
+	r = s.Roll("initiative", sequence(t, 1))
+	r = s.SkipGMRoll()
+	if r.RollRequired == nil || r.RollRequired.Purpose != "check" {
+		t.Fatalf("Data should act first: %+v", r)
+	}
+	r = s.Roll("attack", sequence(t, 2))
+	r = s.SkipGMRoll()
+	if s.HP != 24 || s.Pending != nil || !r.Rolls[0].Skipped || r.Rolls[0].Label != "Drone attack" {
+		t.Fatalf("a skipped attack should do nothing: %+v", r)
+	}
+}
+
+func TestActionWithNothingRolledCanBeAbandoned(t *testing.T) {
+	s := New("test")
+	s.Location = "engineering"
+	s.Apply(Action{"attack", "drone"}, Ruling{})
+	if r := s.Roll("1d20 + 2", sequence(t, 5)); r.GMRollRequired == nil {
+		t.Fatalf("/roll should accept the roll's own notation: %+v", r)
+	}
+	s = New("test")
+	s.Location = "engineering"
+	s.Apply(Action{"attack", "drone"}, Ruling{})
+	if r := s.Apply(Action{"inspect", "relay"}, Ruling{}); !r.Allowed || !s.Clues["source"] || s.Combat || s.Pending != nil {
+		t.Fatalf("an unrolled action should be abandoned: %+v", r)
+	}
+}
+
+func TestNotation(t *testing.T) {
+	for _, c := range []struct {
+		notation string
+		dice     []int
+		total    int
+	}{
+		{"1d20+6", []int{9}, 15},
+		{"d6", []int{4}, 4},
+		{"2d6+2", []int{6, 4}, 12},
+		{"2d20kh1+6", []int{3, 18}, 24},
+		{"2d20kl1+3", []int{19, 2}, 5},
+		{"1d20-1", []int{1}, 0},
+	} {
+		d, err := ParseNotation(c.notation)
+		if err != nil || !d.Valid(c.dice) || d.Total(c.dice) != c.total {
+			t.Errorf("%s %v: %+v %v total %d", c.notation, c.dice, d, err, d.Total(c.dice))
+		}
+	}
+	for _, bad := range []string{"", "d", "1d1", "0d6", "banana", "1d20+", "1d20kh2"} {
+		if _, err := ParseNotation(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
 	}
 }

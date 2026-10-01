@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +19,9 @@ type fakeModel struct {
 	calls  []string
 	fail   bool
 	params provider.CallOptions
+	// rolls are the roll_dice inputs the narrator calls on its first step;
+	// after their results come back, it narrates.
+	rolls []string
 }
 
 // toolCall splits a scripted call into its tool name and JSON arguments. A
@@ -50,8 +54,17 @@ func (m *fakeModel) DoStream(_ context.Context, p provider.CallOptions) (*provid
 	if m.fail {
 		return nil, errors.New("model unavailable")
 	}
-	c := make(chan provider.StreamPart, len(m.calls)+4)
-	if len(p.Tools) > 0 {
+	c := make(chan provider.StreamPart, len(m.calls)+len(m.rolls)+4)
+	narrating := slices.ContainsFunc(p.Tools, func(t provider.Tool) bool { return t.Name == "roll_dice" })
+	if narrating && len(m.rolls) > 0 && p.Prompt[len(p.Prompt)-1].Role != provider.RoleTool {
+		for i, input := range m.rolls {
+			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: "roll" + string(rune('a'+i)), ToolName: "roll_dice", Input: input}
+		}
+		c <- provider.StreamPart{Type: provider.PartFinish, FinishReason: &provider.FinishReason{Unified: provider.FinishReasonToolCalls}}
+		close(c)
+		return &provider.StreamResult{Stream: c}, nil
+	}
+	if len(p.Tools) > 0 && !narrating {
 		for i, input := range m.calls {
 			tool, input := toolCall(input)
 			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: string(rune('a' + i)), ToolName: tool, Input: input}
@@ -83,9 +96,15 @@ func TestSDKExecutesTypedAction(t *testing.T) {
 func TestModelCannotCreateActions(t *testing.T) {
 	m := &fakeModel{calls: []string{`{"kind":"cast","target":"fireball"}`}}
 	s := game.New("test")
-	r, err := newGM(m).Resolve(context.Background(), &s, nil, "Cast fireball")
+	g := newGM(m)
+	var logs strings.Builder
+	g.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	r, err := g.Resolve(context.Background(), &s, nil, "Cast fireball")
 	if err != nil || r.Allowed || s.Turn != 0 {
 		t.Fatal(r, s, err)
+	}
+	if r.Message == "" || !strings.Contains(logs.String(), "reason=") || !strings.Contains(logs.String(), r.Message) {
+		t.Fatalf("a rejection should log its reason %q: %s", r.Message, logs.String())
 	}
 }
 func TestMultipleToolsCannotAdvanceMultipleTurns(t *testing.T) {
@@ -105,15 +124,18 @@ func TestProviderFailureDoesNotChangeState(t *testing.T) {
 		t.Fatal("provider failure mutated state")
 	}
 }
-func TestNarrationHasNoTools(t *testing.T) {
+func TestNarrationOffersOnlyRollDice(t *testing.T) {
 	m := &fakeModel{}
 	g := newGM(m)
 	s := game.New("test")
-	r := g.Execute(context.Background(), &s, game.Action{Kind: "inspect", Target: "logs"}, "test")
+	r := g.Execute(context.Background(), &s, game.Action{Kind: "inspect", Target: "logs"}, game.Ruling{}, "test")
 	var out strings.Builder
-	err := g.Narrate(context.Background(), nil, "Read logs", r, &out)
-	if err != nil || out.Len() == 0 || len(m.params.Tools) != 0 {
-		t.Fatal(out.String(), err)
+	n, err := g.Narrate(context.Background(), &s, nil, "Read logs", r, &out)
+	if err != nil || out.Len() == 0 || len(m.params.Tools) != 1 || m.params.Tools[0].Name != "roll_dice" || len(n.Rolls) != 0 {
+		t.Fatal(out.String(), err, m.params.Tools)
+	}
+	if m.params.ToolChoice != nil && m.params.ToolChoice.Type != provider.ToolChoiceAuto {
+		t.Fatal("narration must not force tool use", m.params.ToolChoice)
 	}
 }
 
@@ -135,8 +157,8 @@ func TestResolveAndNarrateReplayHistory(t *testing.T) {
 	}
 
 	var out strings.Builder
-	r := g.Execute(context.Background(), &s, game.Action{Kind: "inspect", Target: "logs"}, "test")
-	if err := g.Narrate(context.Background(), history, "Read the logs", r, &out); err != nil {
+	r := g.Execute(context.Background(), &s, game.Action{Kind: "inspect", Target: "logs"}, game.Ruling{}, "test")
+	if _, err := g.Narrate(context.Background(), &s, history, "Read the logs", r, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(m.params.Prompt); got != 4 {
@@ -212,5 +234,102 @@ func TestContextInfoTagsOnlyGameCalls(t *testing.T) {
 	// Anything else gets no explicit tags, so its agento11y context tags win.
 	if other := contextInfo(context.Background(), "v1"); other.Tags != nil {
 		t.Fatalf("%+v", other)
+	}
+}
+
+func TestResolvePassesTheGMsRuling(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"scan","target":"sensors","roll":"no_roll","roll_reason":"an android reads a buffer easily"}`}}
+	s := game.New("test")
+	r, err := newGM(m).Resolve(context.Background(), &s, nil, "I scan the sensors")
+	if err != nil || r.RollRequired != nil || r.Ruling == nil || !s.Clues["frequency"] || s.Turn != 1 {
+		t.Fatalf("a no_roll ruling should succeed at once: %+v %v", r, err)
+	}
+}
+
+func TestResolveWaitsForAnActionInProgress(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"move","target":"sickbay"}`}}
+	g := newGM(m)
+	s := game.New("test")
+	s.Location = "engineering"
+	s.Apply(game.Action{Kind: "attack", Target: "drone"}, game.Ruling{})
+	g.RollPending(context.Background(), &s, "initiative", "roll")
+	m.params = provider.CallOptions{}
+	r, err := g.Resolve(context.Background(), &s, nil, "Take me to sickbay")
+	if err != nil || r.Allowed || s.Location != "engineering" || m.params.Prompt != nil {
+		t.Fatalf("an action in progress should be finished before the model is asked: %+v", r)
+	}
+}
+
+// dodge puts s mid-combat with the drone's attack roll due.
+func dodge(t *testing.T, g *GM) (game.State, game.Result) {
+	t.Helper()
+	s := game.New("test")
+	s.Location, s.Combat = "engineering", true
+	r := g.Execute(context.Background(), &s, game.Action{Kind: "dodge", Target: "drone"}, game.Ruling{}, "dodge")
+	if r.GMRollRequired == nil || r.GMRollRequired.Notation != "2d20kl1+3" {
+		t.Fatal(r)
+	}
+	return s, r
+}
+
+func TestNarratorAppliesTheGMRollDue(t *testing.T) {
+	m := &fakeModel{rolls: []string{`{"notation":"2d20kl1+3","reason":"drone fires","purpose":"drone_attack"}`}}
+	g := newGM(m)
+	g.Roll = func(sides int) int { return min(15, sides) } // 15+3 hits AC 14
+
+	s, r := dodge(t, g)
+	var out strings.Builder
+	n, err := g.Narrate(context.Background(), &s, nil, "I dodge", r, &out)
+	if err != nil || len(n.Rolls) != 1 || n.Rolls[0].AppliedTo != "drone_attack" || n.Rolls[0].Error != "" {
+		t.Fatalf("%+v %v", n.Rolls, err)
+	}
+	// The hit's damage roll was due next and never made, so it is skipped.
+	if s.Pending != nil || s.HP != 24 || len(n.Result.Rolls) != 2 || !n.Result.Rolls[1].Skipped || n.Result.Rolls[1].Label != "Drone damage" {
+		t.Fatalf("%+v HP %d", n.Result.Rolls, s.HP)
+	}
+	if b, _ := json.Marshal(m.params.Prompt[len(m.params.Prompt)-1]); !strings.Contains(string(b), "drone_damage") {
+		t.Fatalf("the GM was not told the damage roll was next: %+v", m.params.Prompt[len(m.params.Prompt)-1])
+	}
+}
+
+func TestNarratorRollsAreRecordedEvenWhenNotApplied(t *testing.T) {
+	m := &fakeModel{rolls: []string{
+		`{"notation":"1d20+3","reason":"drone fires","purpose":"drone_attack"}`,
+		`{"notation":"1d100","reason":"is the coffee still warm"}`,
+		`{"notation":"lots","reason":"x"}`,
+	}}
+	g := newGM(m)
+	s, r := dodge(t, g)
+	var out, logs strings.Builder
+	g.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	n, err := g.Narrate(context.Background(), &s, nil, "I dodge", r, &out)
+	if err != nil || len(n.Rolls) != 3 {
+		t.Fatalf("%+v %v", n.Rolls, err)
+	}
+	if got := strings.Count(logs.String(), `level=WARN msg="gm roll failed"`); got != 2 {
+		t.Fatalf("want the 2 failed rolls logged as warnings, got %d: %s", got, logs.String())
+	}
+	if n.Rolls[0].AppliedTo != "" || !strings.Contains(n.Rolls[0].Error, "2d20kl1+3") || n.Rolls[0].Result == nil {
+		t.Fatalf("a roll with the wrong dice must not apply: %+v", n.Rolls[0])
+	}
+	if n.Rolls[1].AppliedTo != "" || n.Rolls[1].Error != "" || n.Rolls[1].Result == nil {
+		t.Fatalf("a free roll should roll and change nothing: %+v", n.Rolls[1])
+	}
+	if n.Rolls[2].Error == "" || n.Rolls[2].Result != nil {
+		t.Fatalf("bad notation should be recorded as an error: %+v", n.Rolls[2])
+	}
+	// The drone's attack was never validly rolled, so it didn't happen.
+	if s.Pending != nil || s.HP != 24 || !n.Result.Rolls[0].Skipped {
+		t.Fatalf("%+v", n.Result.Rolls)
+	}
+}
+
+func TestAutoRollMakesTheGMsRollsWithoutAModel(t *testing.T) {
+	g := newGM(&fakeModel{})
+	g.Roll = func(sides int) int { return min(15, sides) } // hits, then 4+1 damage
+	s, r := dodge(t, g)
+	r = g.AutoRoll(&s, r)
+	if s.Pending != nil || len(r.Rolls) != 2 || r.Rolls[0].Label != "Drone attack" || r.Rolls[1].Label != "Drone damage" || s.HP != 24-(4+1) {
+		t.Fatalf("%+v HP %d", r.Rolls, s.HP)
 	}
 }

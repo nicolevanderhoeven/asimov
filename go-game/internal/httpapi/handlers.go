@@ -78,7 +78,10 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		ctx, span := otel.Tracer(telemetry.Service).Start(turnContext(r.Context(), state), "game.turn")
 		defer span.End()
 		span.SetAttributes(attribute.String("gen_ai.conversation.id", state.ConversationID), attribute.Int("game.turn", state.Turn+1))
-		result = s.gm.Execute(ctx, state, game.Action{Kind: req.Kind, Target: req.Target}, agentobservability.NewGenerationID())
+		// An exact action has no GM model behind it, so the engine makes the
+		// GM's rolls.
+		result = s.gm.Execute(ctx, state, game.Action{Kind: req.Kind, Target: req.Target}, game.Ruling{NoRoll: req.NoRoll}, agentobservability.NewGenerationID())
+		result = s.gm.AutoRoll(state, result)
 	})
 	switch {
 	case !found:
@@ -94,7 +97,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 // deterministic, model-free counterpart of an improvised /resolve input.
 func (s *Server) handleImprovise(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var req game.Improvisation
+	var req improviseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -116,7 +119,8 @@ func (s *Server) handleImprovise(w http.ResponseWriter, r *http.Request) {
 		ctx, span := otel.Tracer(telemetry.Service).Start(turnContext(r.Context(), state), "game.turn")
 		defer span.End()
 		span.SetAttributes(attribute.String("gen_ai.conversation.id", state.ConversationID), attribute.Int("game.turn", state.Turn+1))
-		result = s.gm.Improvise(ctx, state, req, agentobservability.NewGenerationID())
+		result = s.gm.Improvise(ctx, state, req.Improvisation, game.Ruling{NoRoll: req.NoRoll}, agentobservability.NewGenerationID())
+		result = s.gm.AutoRoll(state, result)
 	})
 	switch {
 	case !found:
@@ -146,6 +150,7 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	var (
 		result     game.Result
 		narration  bytes.Buffer
+		narrated   gm.Narration
 		narrateErr error
 		resolveErr error
 		ended      bool
@@ -164,12 +169,18 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		if text, ok := strings.CutPrefix(req.Input, "/roll"); ok && (text == "" || text[0] == ' ') {
 			result = s.gm.RollPending(ctx, state, strings.TrimSpace(text), agentobservability.NewGenerationID())
 		} else if result, resolveErr = s.gm.Resolve(ctx, state, data.History, req.Input); resolveErr != nil {
+			s.logger.ErrorContext(ctx, "action resolution failed", "error", resolveErr, "turn", state.Turn)
 			return
 		}
 		// A broken narration stream doesn't invalidate an already-committed
 		// turn; report it alongside the result instead of failing the request,
-		// matching the REPL's own handling of the same case.
-		narrateErr = s.gm.Narrate(ctx, data.History, req.Input, result, &narration)
+		// matching the REPL's own handling of the same case. The GM makes its
+		// rolls while narrating, so the result to report is the narration's.
+		narrated, narrateErr = s.gm.Narrate(ctx, state, data.History, req.Input, result, &narration)
+		if narrateErr != nil {
+			s.logger.ErrorContext(ctx, "narration failed", "error", narrateErr, "turn", state.Turn)
+		}
+		result = narrated.Result
 		// Record this turn for the next call, whether or not narration fully
 		// completed (AppendTurn itself skips an empty narration).
 		data.History = gm.AppendTurn(data.History, req.Input, narration.String())
@@ -182,7 +193,7 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	case resolveErr != nil:
 		writeError(w, http.StatusUnprocessableEntity, resolveErr.Error())
 	default:
-		resp := resolveResponse{Result: result, Narration: narration.String()}
+		resp := resolveResponse{Result: result, Narration: narration.String(), GMRolls: narrated.Rolls}
 		if narrateErr != nil {
 			resp.NarrationError = narrateErr.Error()
 		}
@@ -208,6 +219,7 @@ func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
 	var (
 		result     game.Result
 		narration  bytes.Buffer
+		narrated   gm.Narration
 		narrateErr error
 		ended      bool
 	)
@@ -222,10 +234,17 @@ func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
 		span.SetAttributes(attribute.String("gen_ai.conversation.id", state.ConversationID), attribute.Int("game.turn", state.Turn+1))
 		result = s.gm.RollPending(ctx, state, req.Ability, agentobservability.NewGenerationID())
 		if !req.Narrate {
+			// Without narration there is no GM model, so the engine makes the
+			// GM's rolls.
+			result = s.gm.AutoRoll(state, result)
 			return
 		}
 		input := "/roll " + req.Ability
-		narrateErr = s.gm.Narrate(ctx, data.History, input, result, &narration)
+		narrated, narrateErr = s.gm.Narrate(ctx, state, data.History, input, result, &narration)
+		if narrateErr != nil {
+			s.logger.ErrorContext(ctx, "narration failed", "error", narrateErr, "turn", state.Turn)
+		}
+		result = narrated.Result
 		data.History = gm.AppendTurn(data.History, input, narration.String())
 	})
 	switch {
@@ -234,7 +253,7 @@ func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
 	case ended:
 		writeError(w, http.StatusConflict, "adventure has ended")
 	default:
-		resp := resolveResponse{Result: result, Narration: narration.String()}
+		resp := resolveResponse{Result: result, Narration: narration.String(), GMRolls: narrated.Rolls}
 		if narrateErr != nil {
 			resp.NarrationError = narrateErr.Error()
 		}

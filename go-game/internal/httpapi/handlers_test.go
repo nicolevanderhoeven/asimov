@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +61,9 @@ func (m *fakeModel) DoStream(_ context.Context, p provider.CallOptions) (*provid
 		return nil, errors.New("model unavailable")
 	}
 	c := make(chan provider.StreamPart, len(m.calls)+4)
-	if len(p.Tools) > 0 {
+	// Narration offers roll_dice; this fake narrates without rolling.
+	narrating := slices.ContainsFunc(p.Tools, func(t provider.Tool) bool { return t.Name == "roll_dice" })
+	if len(p.Tools) > 0 && !narrating {
 		for i, input := range m.calls {
 			tool, input := toolCall(input)
 			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: string(rune('a' + i)), ToolName: tool, Input: input}
@@ -338,7 +341,7 @@ func TestRollResolvesPendingAction(t *testing.T) {
 		t.Fatalf("missing ability: status = %d, want 400", status)
 	}
 	status, body := postRoll(t, ts.URL, id, `{"ability":"Intelligence","narrate":true}`)
-	if status != http.StatusOK || !body.Result.Allowed || body.Result.State.Turn != 1 || len(body.Result.Rolls) != 1 || !body.Result.Rolls[0].Manual || body.Narration == "" {
+	if status != http.StatusOK || !body.Result.Allowed || body.Result.State.Turn != 1 || len(body.Result.Rolls) != 1 || body.Result.Rolls[0].By != game.ByPlayer || body.Narration == "" {
 		t.Fatalf("unexpected roll response: %d %+v", status, body)
 	}
 }

@@ -37,12 +37,11 @@ type SessionData struct {
 type Store struct {
 	mu       sync.RWMutex
 	sessions map[string]*session
-	dms      map[string]*dmSession
 	ttl      time.Duration
 }
 
 func NewStore(ttl time.Duration) *Store {
-	return &Store{sessions: make(map[string]*session), dms: make(map[string]*dmSession), ttl: ttl}
+	return &Store{sessions: make(map[string]*session), ttl: ttl}
 }
 
 // Create starts a new session with a fresh game.State, keyed by its own
@@ -93,7 +92,7 @@ func (st *Store) WithSession(id string, fn func(*SessionData)) bool {
 	return true
 }
 
-// Sweep deletes game and DM sessions idle longer than the store's ttl, once per
+// Sweep deletes sessions idle longer than the store's ttl, once per
 // interval, until ctx is done. Run it in its own goroutine at server
 // startup.
 func (st *Store) Sweep(ctx context.Context, interval time.Duration) {
@@ -112,14 +111,6 @@ func (st *Store) Sweep(ctx context.Context, interval time.Duration) {
 				s.mu.Unlock()
 				if expired {
 					delete(st.sessions, id)
-				}
-			}
-			for id, s := range st.dms {
-				s.mu.Lock()
-				expired := s.lastAccess.Before(cutoff)
-				s.mu.Unlock()
-				if expired {
-					delete(st.dms, id)
 				}
 			}
 			st.mu.Unlock()

@@ -41,36 +41,32 @@ func dieArt(dice []int) string {
 	return strings.Join(lines, "\n")
 }
 
-// printPlayerRolls draws the die for each roll the player made with /roll.
-func printPlayerRolls(rolls []game.Roll) {
-	for _, r := range rolls {
-		if !r.Manual {
-			continue
-		}
-		fmt.Printf("\n%s\n", dieArt(r.Dice))
-		verdict := "failure"
-		if r.Success {
-			verdict = "success"
-		}
-		if r.Critical {
-			verdict = "critical hit"
-		}
-		fmt.Printf("  %s: rolled %d %+d = %d vs %d — %s\n", r.Label, r.Dice[0], r.Modifier, r.Total, r.Target, verdict)
-	}
-}
-
-// printOtherRolls lists the rolls the game made on its own (initiative and the
-// drone's attacks) and any damage Data took.
-func printOtherRolls(result game.Result) {
+// printRolls shows result's rolls: a die face for each d20 the player rolled
+// with /roll, and a line for every other roll, the GM's included.
+func printRolls(result game.Result) {
 	for _, r := range result.Rolls {
-		if r.Manual {
+		switch {
+		case r.Automatic:
+			fmt.Printf("  %s: no roll needed — the GM rules it a success\n", r.Label)
 			continue
+		case r.Skipped:
+			fmt.Printf("  %s: not rolled, so it doesn't happen\n", r.Label)
+			continue
+		case r.By == game.ByPlayer && r.Target > 0:
+			fmt.Printf("\n%s\n", dieArt(r.Dice))
 		}
-		fmt.Printf("  %s: rolled %s %+d = %d", r.Label, joinDice(r.Dice), r.Modifier, r.Total)
+		who := "GM rolls"
+		if r.By == game.ByPlayer {
+			who = "you roll"
+		}
+		fmt.Printf("  %s: %s %s: %s %+d = %d", r.Label, who, r.Notation, joinDice(r.Dice), r.Modifier, r.Total)
 		if r.Target > 0 {
-			verdict := "miss"
+			verdict := "failure"
 			if r.Success {
-				verdict = "hit"
+				verdict = "success"
+			}
+			if r.Critical {
+				verdict = "critical hit"
 			}
 			fmt.Printf(" vs %d — %s", r.Target, verdict)
 		}

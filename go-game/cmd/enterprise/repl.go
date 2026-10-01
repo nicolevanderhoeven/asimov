@@ -77,7 +77,7 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 		case "quit", "exit", "/quit":
 			return nil
 		case "/help":
-			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\nYou can also try anything not on the list, or ask a question; the GM sets a check if it needs one.\nWhen the GM asks for a check, roll it yourself with /roll ABILITY, e.g. /roll Intelligence.\n/try ABILITY[/SKILL] DIFFICULTY EFFECT APPROACH improvises without the model, e.g.\n  /try strength/athletics hard disable_drone rip the drone off its mount\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\nProgress is not saved; each run starts a new game.")
+			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\nYou can also try anything not on the list, or ask a question; the GM sets a check if it needs one.\nWhen the GM asks for a roll, make it yourself with /roll and what it names, e.g. /roll Intelligence, /roll initiative, or /roll damage.\n/try ABILITY[/SKILL] DIFFICULTY EFFECT APPROACH improvises without the model, e.g.\n  /try strength/athletics hard disable_drone rip the drone off its mount\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\nProgress is not saved; each run starts a new game.")
 			continue
 		case "/status", "/actions":
 			show(s, false)
@@ -97,10 +97,16 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 			fmt.Println("This adventure has ended. Restart the game to play again.")
 			continue
 		}
-		fmt.Printf("\n%s\n", heading(fmt.Sprintf("Turn %d", s.Turn+1)))
+		// An action that has already rolled something has counted its turn;
+		// the rolls that finish it belong to the same turn.
+		turnNumber := s.Turn + 1
+		if s.Locked() {
+			turnNumber = s.Turn
+		}
+		fmt.Printf("\n%s\n", heading(fmt.Sprintf("Turn %d", turnNumber)))
 		turnCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		turnCtx, span := otel.Tracer(telemetry.Service).Start(turnCtx, "game.turn")
-		span.SetAttributes(attribute.String("gen_ai.conversation.id", s.ConversationID), attribute.Int("game.turn", s.Turn+1))
+		span.SetAttributes(attribute.String("gen_ai.conversation.id", s.ConversationID), attribute.Int("game.turn", turnNumber))
 		var result game.Result
 		var err error
 		if isTry {
@@ -113,7 +119,7 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 			}
 			ability, skill, _ := strings.Cut(parts[1], "/")
 			im := game.Improvisation{Ability: ability, Skill: skill, Difficulty: parts[2], Effect: parts[3], Approach: strings.Join(parts[4:], " ")}
-			result = g.Improvise(turnCtx, &s, im, agentobservability.NewGenerationID())
+			result = g.Improvise(turnCtx, &s, im, game.Ruling{}, agentobservability.NewGenerationID())
 		} else if isRoll {
 			result = g.RollPending(turnCtx, &s, strings.TrimSpace(strings.TrimPrefix(input, "/roll")), agentobservability.NewGenerationID())
 		} else if strings.HasPrefix(input, "/do ") {
@@ -124,7 +130,7 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 				cancel()
 				continue
 			}
-			result = g.Execute(turnCtx, &s, game.Action{Kind: parts[1], Target: parts[2]}, agentobservability.NewGenerationID())
+			result = g.Execute(turnCtx, &s, game.Action{Kind: parts[1], Target: parts[2]}, game.Ruling{}, agentobservability.NewGenerationID())
 		} else if offline {
 			fmt.Println("Offline mode requires an exact /do, /try, or /roll command; see /help.")
 			span.End()
@@ -136,24 +142,35 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "action resolution failed")
+			logger.ErrorContext(turnCtx, "action resolution failed", "error", err, "turn", s.Turn)
 			fmt.Fprintln(os.Stderr, "Action failed; state unchanged:", err)
 			span.End()
 			cancel()
 			continue
 		}
 		// The player hears one voice, the GM's. Online, the model narrates the
-		// engine's result, so its plain message is shown only as a fallback
-		// when narration fails; offline, that message is the GM's line.
-		printPlayerRolls(result.Rolls)
-		printOtherRolls(result)
+		// engine's result, making the GM's rolls as it goes, so the plain
+		// message is shown only as a fallback when narration fails; offline,
+		// the engine makes the GM's rolls and its message is the GM's line.
+		printRolls(result)
 		if offline {
+			before, damage := len(result.Rolls), result.Damage
+			result = g.AutoRoll(&s, result)
+			printRolls(game.Result{Rolls: result.Rolls[before:], Damage: result.Damage - damage})
 			fmt.Printf("\n%s\n", wrap("GM: "+result.Message, ""))
 		} else {
 			fmt.Print("\nGM: ")
 			var narration bytes.Buffer
-			if err = g.Narrate(turnCtx, history, input, result, io.MultiWriter(os.Stdout, &narration)); err != nil {
+			before := len(result.Rolls)
+			narrated, err := g.Narrate(turnCtx, &s, history, input, result, io.MultiWriter(os.Stdout, &narration))
+			// The GM's rolls came during the narration; show them after it.
+			fmt.Println()
+			printRolls(game.Result{Rolls: narrated.Result.Rolls[before:], Damage: narrated.Result.Damage - result.Damage})
+			result = narrated.Result
+			if err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, "narration failed")
+				logger.ErrorContext(turnCtx, "narration failed", "error", err, "turn", s.Turn)
 				fmt.Fprintln(os.Stderr, "\nThe GM was interrupted:", err)
 				fmt.Printf("\n%s\n", wrap("What happened: "+result.Message, ""))
 			}
@@ -212,7 +229,11 @@ func show(s game.State, withArt bool) {
 	if v.Advantage {
 		fmt.Printf("\n%s\n", wrap(">> Your next roll has advantage.", ""))
 	}
-	if v.Pending != nil {
-		fmt.Printf("\n%s\n", wrap(fmt.Sprintf(">> Waiting on your roll: %s vs %d. Type %s.", v.Pending.Check, v.Pending.Target, v.Pending.Command), ""))
+	if p := v.Pending; p != nil && p.By == game.ByPlayer {
+		target := ""
+		if p.Target > 0 {
+			target = fmt.Sprintf(" vs %d", p.Target)
+		}
+		fmt.Printf("\n%s\n", wrap(fmt.Sprintf(">> Waiting on your roll: %s (%s)%s. Type %s.", p.Check, p.Notation, target, p.Command), ""))
 	}
 }

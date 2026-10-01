@@ -29,7 +29,5 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /session/{id}/resolve", s.handleResolve)
 	mux.HandleFunc("POST /session/{id}/roll", s.handleRoll)
 	mux.HandleFunc("POST /session/{id}/improvise", s.handleImprovise)
-	mux.HandleFunc("POST /dm", s.handleCreateDM)
-	mux.HandleFunc("POST /dm/{id}/turns", s.handleDMTurn)
 	return mux
 }

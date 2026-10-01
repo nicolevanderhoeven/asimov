@@ -32,6 +32,7 @@ export default function () {
         fabricated: g.fabricated.map((m) => m.value),
         fabricated_kinds: g.fabricated.map((m) => m.kind),
         mentioned: g.calls.map((cc) => cc.mentioned_in_narration),
+        unused_narrated: g.unused_narrated,
         silent_reroll: g.silent_reroll
           ? {
             calls: g.silent_reroll.calls,
@@ -46,6 +47,7 @@ export default function () {
         [`${c.name}: fabricated kinds`]: (v) => same(v.fabricated_kinds, c.want.fabricated_kinds),
         [`${c.name}: mentioned`]: (v) => same(v.mentioned, c.want.mentioned),
         [`${c.name}: silent reroll`]: (v) => same(v.silent_reroll, c.want.silent_reroll),
+        ...(c.want.unused_narrated ? { [`${c.name}: unused roll narrated`]: (v) => same(v.unused_narrated, c.want.unused_narrated) } : {}),
       });
       if (!ok) console.error(`${c.name}: got ${JSON.stringify(got)}, want ${JSON.stringify(c.want)}`);
     }

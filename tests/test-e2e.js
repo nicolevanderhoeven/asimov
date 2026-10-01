@@ -334,7 +334,9 @@ function takeTurn(run, input) {
   const checks = {
     [`${label}: narration completed`]: (e) => e.narration.trim().length > 0 && !e.error,
     [`${label}: turn advances by at most one`]: () => delta === 0 || delta === 1,
-    [`${label}: questions and pending rolls take no turn`]: (e) => delta === 0 || (!e.result.question && !e.result.roll_required),
+    // An action counts its turn when its first roll is made (or at once, if
+    // it needs none), so only a roll not yet made keeps the turn from moving.
+    [`${label}: questions and rolls not yet made take no turn`]: (e) => delta === 0 || (!e.result.question && (!e.result.roll_required || (e.result.rolls || []).length > 0)),
     [`${label}: only an allowed action takes a turn`]: (e) => delta === 0 || e.result.allowed === true,
     [`${label}: discoveries are never lost`]: () => Object.keys(CLUES).every((k) => !was[k] || now[k]),
     [`${label}: HP stays between 0 and max`]: () => after.hp >= 0 && after.hp <= MAX_HP,
