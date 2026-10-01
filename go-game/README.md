@@ -11,7 +11,7 @@ Trek homebrew**.
 
 ## Run
 
-Requires Go 1.26.3 (Go's automatic toolchain download can install it). Dependencies
+Requires Go 1.26.3 (Go 1.21 or newer downloads it automatically). Dependencies
 are pinned in `go.mod`/`go.sum`, including the AI SDK revision used for this demo.
 
 From this repository:
@@ -21,16 +21,20 @@ cd go-game
 go run ./cmd/enterprise
 ```
 
-By default this reads `../.env`. Shell environment variables take precedence.
-Alternatively, copy `.env.example` to `.env`, fill it in, and run
-`go run ./cmd/enterprise --env .env`.
+By default this reads the repository's `../.env` (copy
+[`../env.example`](../env.example) to start). Shell environment variables take
+precedence, and `--env PATH` reads a different file.
+[`../docs/grafana-cloud-setup.md`](../docs/grafana-cloud-setup.md) explains
+where each value comes from, and `go run ./cmd/doctor` checks them.
 
 - `ANTHROPIC_API_KEY`: required for the AI GM.
 - `ANTHROPIC_MODEL`: defaults to `claude-sonnet-4-6`.
-- `AGENTO11Y_ENDPOINT`: generation export endpoint; the existing
+- `AGENTO11Y_ENDPOINT`: the Agent Observability API URL; the legacy
   `GRAFANA_CLOUD_SIGIL_ENDPOINT` is also accepted.
 - `GRAFANA_CLOUD_INSTANCE_ID` and `GRAFANA_CLOUD_API_KEY`: generation export auth.
-- `OTLP_ENDPOINT` and `OTLP_HEADERS`: existing OTLP gateway and base64 basic auth.
+- `OTLP_ENDPOINT` and `OTLP_HEADERS`: the OTLP gateway and its base64 basic
+  auth. A plain-HTTP `OTLP_ENDPOINT` on localhost (a local Collector) needs no
+  `OTLP_HEADERS`.
 - `ASIMOV_AGENT_VERSION`: optional, defaults to `go-experiment-v1`.
 
 Grafana configuration is required by default. To deliberately play without
@@ -47,7 +51,7 @@ and state lives only in memory until you quit.
 ## Serve
 
 `--serve` runs an HTTP API instead of the REPL, giving each client its own
-in-memory session — useful for load testing (see `../tests/*.js`) since
+in-memory session — useful for load testing (see [`../tests/`](../tests/README.md)) since
 concurrent clients never interleave turns into the same game state the way a
 single shared session would.
 
@@ -241,10 +245,11 @@ every response: its `gm_rolls` (each `roll_dice` call with its arguments, dice,
 and what it was applied to) against the rolls in its `result` and its
 narration.
 
+From the repository root (this starts the server for the run):
+
 ```sh
-go run ./cmd/enterprise --serve --addr :8080
-k6 run --summary-mode=full -e RUNS=50 -e VUS=4 \
-  --log-format=raw --console-output=traj.jsonl ../tests/test-trajectory.js
+scripts/k6.sh --summary-mode=full -e RUNS=50 -e VUS=4 \
+  --log-format=raw --console-output=traj.jsonl tests/test-trajectory.js
 ```
 
 With `--console-output`, every response is logged as one JSON line with its
@@ -290,7 +295,7 @@ to the generation endpoint's; set `AGENTO11Y_API_ENDPOINT` to override it, and
 to log a link to the experiment.
 
 The deterministic graders live in `tests/lib/trajectory-grader.js`.
-`k6 run ../tests/test-trajectory-graders.js` checks them against the cases in
+`make k6-graders` (from the repository root) checks them against the cases in
 `tests/fixtures/trajectory-graders.json`, with no server or API key; add new
 grader cases there.
 

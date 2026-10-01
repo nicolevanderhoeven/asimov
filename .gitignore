@@ -1,10 +1,12 @@
+# Secrets and local output
 .env
-__pycache__
-otel-config.yml
 logs/
+otel-config.yml
 .DS_Store
 
-# Go experiment: local game state and compiled CLI
-go-game/.enterprise-save*.json
-go-game/.enterprise-save-*
+# Personal editor commands
+.cursor/
+
+# Compiled CLI and local game state
 go-game/enterprise
+go-game/.enterprise-save*
