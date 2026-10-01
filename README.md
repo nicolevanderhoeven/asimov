@@ -16,6 +16,7 @@ This repository consists of:
 - One k6 trajectory test in [`tests/test-trajectory.js`](tests/test-trajectory.js). It plays a fixed script against the game, where the GM decides when Data's checks need a roll and makes the drone's rolls itself with a `roll_dice` tool, and grades the path each response took: roll numbers the narration made up, rolls it narrated that the game never used, GM rolls it owed but never made, more than one call in a response, and rolls reported when nothing was rolled. For contrast, an output-only judge grades the same responses without the trajectory.
 - One k6 grader check in [`tests/test-trajectory-graders.js`](tests/test-trajectory-graders.js). It runs the trajectory test's graders against fixed cases in [`tests/fixtures/trajectory-graders.json`](tests/fixtures/trajectory-graders.json), with no server or API key.
 - One short k6 traffic seed in [`tests/test_traffic.js`](tests/test_traffic.js). It drives the game's natural-language endpoint to populate application telemetry in Grafana.
+- Agent Observability online evaluators and rules in [`agento11y/`](agento11y/). LLM judges score the game's live generations for its known defects, such as false endings, false kills, and rolls made by the wrong side of the table. See [Online evaluators](#online-evaluators).
 - (optional) A local OpenTelemetry Collector setup in [`collector/`](collector/) for routing telemetry through a Collector pipeline instead of direct OTLP. See [`collector/README.md`](collector/README.md).
 
 ![A diagram of the architecture from the original version of this talk: a Flask app sending traces, metrics, and logs to OpenTelemetry and generations to the Sigil API, with k6 driving load against it and everything terminating in Grafana Cloud. The app has since been rewritten in Go (see go-game/), but the OpenTelemetry/Grafana Cloud side of this diagram still applies.](/assets/Asimov's%20Zeroth%20Law%20of%20Robotics%20-%20ExpoQA%202026.jpg)
@@ -160,6 +161,87 @@ uploaded in the run's archive, so `--no-archive-upload` keeps the script and
 its environment on your machine.
 A fully cloud run (`k6 cloud run` without `--local-execution`) would need the
 game at a public URL and the API keys as Grafana Cloud k6 secrets.
+
+### Online evaluators
+
+The k6 tests grade the game when you run them. The definitions in
+[`agento11y/`](agento11y/) grade it all the time: Agent Observability
+rules send a sample of the `asimov-enterprise-go` agent's generations, from
+any source, to LLM-judge evaluators, and the scores appear on each
+conversation and on the agent's Performance view, per agent version. They
+check behavior the narrator's prompt forbids but the engine can't enforce,
+including the defects this demo keeps on purpose.
+
+Each narration's system prompt ends with the engine result as JSON, so a
+judge can compare what the GM says with the authoritative state. Generations
+carry a `component` tag (`narration` or `action_resolution`) from
+[`go-game/internal/gm/gm.go`](go-game/internal/gm/gm.go), which the rules
+match on. Every evaluator returns a single pass/fail key.
+
+| Evaluator | Scores | Fails when |
+| --- | --- | --- |
+| `asimov_no_false_ending` | Narration | The GM acts out the rescue or declares the scenario complete while the engine's status isn't `rescued`. |
+| `asimov_no_false_kill` | Narration | The GM says the drone is destroyed, disabled, or dark while the engine still has it at positive HP. |
+| `asimov_roll_ownership` | Narration | A roll is made by the wrong side of the table: the GM skips its own roll (the drone's or the relay discharge's) or tells the player to make it, rolls one of Data's rolls with `roll_dice`, asks the player to type their result, takes a number the player typed as a roll, or tells the player to `/roll` when no roll is due. |
+| `asimov_dice_fidelity` | Narration | A roll value or outcome isn't backed by the engine's rolls or a `roll_dice` result, including the outcome of a roll the game never applied. The online counterpart of [`tests/lib/trajectory-grader.js`](tests/lib/trajectory-grader.js). |
+| `asimov_gm_voice` | Narration | The GM mentions the engine or the game's internals, refuses or blocks the player instead of "yes, and", or narrates Data in the third person. |
+| `asimov_resolution_intent` | Action resolution | The resolver's single tool call doesn't match the player's input: the wrong action or tool, a player-dictated roll or fact handled as a normal action instead of `unsupported`, an in-character attempt marked `unsupported`, or `no_roll` on a task that could fail. |
+
+| Rule | Evaluators | Sample rate |
+| --- | --- | --- |
+| `asimov_narration_defects` | false ending, false kill, roll ownership | 0.5 |
+| `asimov_narration_quality` | dice fidelity, GM voice | 0.1 |
+| `asimov_resolution` | resolution intent | 0.1 |
+
+The defects rule samples more because false kills (about 1% of narrations)
+and GM rolls (about 1 in 11) are rare. All rules use the
+`all_assistant_generations` selector: resolver generations contain only a
+tool call, so `user_visible_turn` would never match them. No rule is scoped
+to an agent version, so versions such as `pre-roll-dice` and `roll-dice-v2`
+compare side by side. Each judge call reads about 3,000 tokens, so a full
+`tests/test-e2e.js` run costs a few hundred judge calls.
+
+To set them up on a new stack with the gcx CLI:
+
+1. Log in and select the stack: `gcx login`, then confirm with
+   `gcx config current-context`.
+2. Check the judge model is available on that stack:
+   `gcx agento11y judge list-providers` and
+   `gcx agento11y judge list-models --provider <provider>`. The definitions
+   use `anthropic-vertex` and `claude-sonnet-4-6`; if your stack offers
+   something else, change `provider` and `model` in each file under
+   `agento11y/evaluators/`.
+3. Create the evaluators, then the rules that use them:
+
+   ```sh
+   for f in agento11y/evaluators/*.yaml; do gcx agento11y evaluators upsert -f "$f"; done
+   for f in agento11y/rules/*.yaml; do gcx agento11y rules create -f "$f"; done
+   ```
+
+4. Play the game or run a k6 test, then check the scores, failures first:
+
+   ```sh
+   gcx agento11y rules list-scores asimov_narration_defects --passed=false -o json
+   ```
+
+   Rules only score generations that arrive after they exist, and the
+   evaluation is asynchronous, so allow a few minutes.
+
+To change an evaluator, edit its file, raise its `version` (re-using a
+version is rejected), and run `upsert` again. To change a rule, run
+`gcx agento11y rules update <rule-id> -f agento11y/rules/<rule-id>.yaml`.
+Before you upsert a changed judge, try it on a real generation without
+saving anything:
+
+```sh
+agento11y/test-evaluator.sh agento11y/evaluators/asimov_no_false_kill.yaml <generation-id> [<conversation-id>]
+```
+
+It needs [yq](https://github.com/mikefarah/yq). Find generation IDs with
+`gcx agento11y conversations get <conversation-id>`. In a judge's prompt,
+`{{tool_calls}}` holds only the calls in the judged generation's own output,
+not those from earlier steps of the same narration; `{{tool_results}}` holds
+them all.
 
 ## Resources
 

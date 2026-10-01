@@ -1,0 +1,13 @@
+# Agent Observability rule: the resolver's one tool call per player input. Its
+# generations carry no text, so user_visible_turn would never match them.
+rule_id: asimov_resolution
+enabled: true
+selector: all_assistant_generations
+sample_rate: 0.1
+evaluator_ids:
+  - asimov_resolution_intent
+match:
+  agent_name:
+    - asimov-enterprise-go
+  tags.component:
+    - action_resolution

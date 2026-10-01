@@ -1,0 +1,13 @@
+# Agent Observability rule: dice fidelity and GM table rules on a sample of narrations.
+rule_id: asimov_narration_quality
+enabled: true
+selector: all_assistant_generations
+sample_rate: 0.1
+evaluator_ids:
+  - asimov_dice_fidelity
+  - asimov_gm_voice
+match:
+  agent_name:
+    - asimov-enterprise-go
+  tags.component:
+    - narration

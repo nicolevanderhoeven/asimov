@@ -1,0 +1,18 @@
+# Agent Observability rule: routes asimov-enterprise-go narrations to the judges for
+# the known defects: false ending, false kill, and roll ownership (the
+# roll-dice-v2 regression). Higher sample rate than the others because false
+# kills (~1% of narrations) and GM rolls (~1 in 11) are rare. Not scoped to an
+# agent_version, so pre-roll-dice and roll-dice-v2 compare side by side.
+rule_id: asimov_narration_defects
+enabled: true
+selector: all_assistant_generations
+sample_rate: 0.5
+evaluator_ids:
+  - asimov_no_false_ending
+  - asimov_no_false_kill
+  - asimov_roll_ownership
+match:
+  agent_name:
+    - asimov-enterprise-go
+  tags.component:
+    - narration
