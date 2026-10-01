@@ -27,4 +27,23 @@ func TestRejectInsecureEndpoint(t *testing.T) {
 	if c.Validate() == nil {
 		t.Fatal("insecure export accepted")
 	}
+	c.GenerationEndpoint = "http://localhost:4318/export"
+	c.Endpoint = "https://example.com/otlp"
+	if c.Validate() == nil {
+		t.Fatal("insecure generation export accepted")
+	}
+}
+func TestLocalCollectorNeedsNoOTLPAuth(t *testing.T) {
+	for _, endpoint := range []string{"http://localhost:4318", "http://127.0.0.1:4318", "http://[::1]:4318"} {
+		c := Config{Endpoint: endpoint, GenerationEndpoint: "https://example.com/export", Instance: "test", Token: "test"}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("%s: %v", endpoint, err)
+		}
+		if c.OTLPHeaders() != nil {
+			t.Fatalf("%s: unexpected OTLP auth header", endpoint)
+		}
+	}
+	if (Config{Endpoint: "https://example.com/otlp", GenerationEndpoint: "https://example.com/export", Instance: "test", Token: "test"}).Validate() == nil {
+		t.Fatal("missing OTLP_HEADERS accepted for Grafana Cloud")
+	}
 }
