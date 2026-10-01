@@ -49,10 +49,19 @@ if (!API_KEY) throw new Error('ANTHROPIC_API_KEY is required for the Claude play
 
 http.setResponseCallback(http.expectedStatuses(200, 201, 409));
 
+// E2E_DURATION (such as 2h) keeps each scenario starting new playthroughs for
+// that long instead of playing one pass. A playthrough still in progress gets
+// up to 15 minutes to finish, so its trial completes before teardown.
+function scenario(vus, exec) {
+  return __ENV.E2E_DURATION
+    ? { executor: 'constant-vus', vus, duration: __ENV.E2E_DURATION, gracefulStop: '15m', exec }
+    : { executor: 'per-vu-iterations', vus, iterations: 1, exec, maxDuration: '40m' };
+}
+
 export const options = {
   scenarios: {
-    scripted: { executor: 'per-vu-iterations', vus: 1, iterations: 1, exec: 'scripted', maxDuration: '40m' },
-    claude_player: { executor: 'per-vu-iterations', vus: 3, iterations: 1, exec: 'claudePlayer', maxDuration: '40m' },
+    scripted: scenario(1, 'scripted'),
+    claude_player: scenario(3, 'claudePlayer'),
   },
   thresholds: {
     checks: ['rate==1'],
@@ -109,11 +118,11 @@ export function teardown(data) {
 
 export function scripted(data) {
   group('scripted playthrough', () => {
-    const run = play('scripted', { budget: SCRIPTED_BUDGET, beats: scriptedBeats, next: policy, trial: { data, caseID: 'scripted', attempt: 1 } });
+    const run = play('scripted', { budget: SCRIPTED_BUDGET, beats: scriptedBeats, next: policy, trial: { data, caseID: 'scripted', attempt: exec.scenario.iterationInTest + 1 } });
     if (run) publish(run, null);
   });
   group('adversarial playthrough', () => {
-    const run = play('adversarial', { budget: ADVERSARIAL_BUDGET, beats: adversarialBeats, next: policy, trial: { data, caseID: 'adversarial', attempt: 1 } });
+    const run = play('adversarial', { budget: ADVERSARIAL_BUDGET, beats: adversarialBeats, next: policy, trial: { data, caseID: 'adversarial', attempt: exec.scenario.iterationInTest + 1 } });
     if (run) publish(run, judge(run, ADVERSARIAL_BUDGET, adversarialNotes));
   });
 }
@@ -467,6 +476,10 @@ function rate(run, verdict) {
 function publish(run, verdict) {
   rate(run, verdict);
   reportTrial(run, verdict);
+  // E2E_LOG_TRANSCRIPTS=1 logs each playthrough whole, for reading afterwards.
+  if (__ENV.E2E_LOG_TRANSCRIPTS === '1') {
+    console.log(`${run.label}: transcript=${JSON.stringify({ conversation_id: run.id, trial_id: run.trialID || null, status: run.view.status, verdict, failures: run.failures, turns: run.transcript.map(compact) })}`);
+  }
 }
 
 // outcome is the playthrough's verdict, shared by its rating and its trial:

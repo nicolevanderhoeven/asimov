@@ -144,6 +144,13 @@ test sends `source` on every write and keeps the kind in each score's
 metadata. `e2e_trial_reported` counts trials whose scores and completion were
 accepted; like ratings, a failed report is logged but does not fail the run.
 
+For a longer sample, set `E2E_DURATION` (such as `2h`): each scenario keeps
+starting new playthroughs for that long, each as a new trial attempt, and a
+playthrough still in progress gets up to 15 minutes to finish. Set
+`E2E_LOG_TRANSCRIPTS=1` to log each playthrough whole (conversation, trial,
+verdict, failed checks, and every turn with its engine state) for reading
+afterwards.
+
 To see k6's own results in Grafana Cloud k6 next to those conversations, run
 the test locally and stream its results to the cloud:
 
