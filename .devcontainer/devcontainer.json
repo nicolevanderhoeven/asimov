@@ -1,0 +1,15 @@
+{
+  // A ready-made environment with Go and k6, for GitHub Codespaces or
+  // VS Code's Dev Containers. Create .env from env.example inside it; it is
+  // git-ignored, so it never leaves the container.
+  "name": "asimov",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": { "version": "1.26.3" }
+  },
+  "postCreateCommand": "bash .devcontainer/install-k6.sh",
+  "forwardPorts": [8080],
+  "customizations": {
+    "vscode": { "extensions": ["golang.go"] }
+  }
+}

@@ -1,0 +1,25 @@
+# Run the game without installing Go. Settings come from .env, which stays on
+# your machine; it is never copied into the image.
+#
+#   docker compose up --build                       # HTTP API on :8080, for the k6 tests
+#   docker compose run --rm play --offline          # play in the terminal, no keys needed
+#   docker compose run --rm play                    # play with the AI GM and telemetry
+#   docker compose run --rm --entrypoint doctor play  # check your .env
+x-game: &game
+  build: ./go-game
+  image: asimov-enterprise
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  game:
+    <<: *game
+    command: ["--serve", "--addr", ":8080"]
+    ports:
+      - "8080:8080"
+  play:
+    <<: *game
+    profiles: [play]
+    stdin_open: true
+    tty: true
