@@ -3,6 +3,7 @@ import exec from 'k6/execution';
 import { check, group, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { gradeResponse } from './lib/trajectory-grader.js';
+import { finding, pendingCheck, rulingContext, rulingOf, rulingPrompt, rulingSchema, rulingThresholds, RULING_SYSTEM } from './lib/ruling-judge.js';
 import * as o11y from './lib/agento11y.js';
 
 // Trajectory tests for the GM's dice, graded by the path each response took
@@ -23,6 +24,12 @@ import * as o11y from './lib/agento11y.js';
 // - non-invocation: a roll reported in a response where nothing was rolled at
 //   all (a small, neutral Claude judge)
 //
+// Separately, every roll ruling the GM makes on Data's checks (roll, or
+// succeed without one) goes to a ruling judge: a Claude model acting as an
+// experienced 5e GM, who says whether it would call for that roll and whether
+// the GM's ruling is defensible. It is a judgment call, so its traj_ruling_*
+// rates fail the run only past limits that allow for it (rulingThresholds).
+//
 // For contrast, every response is also graded the usual way: an output-only
 // Claude judge sees just the player's input and the GM's reply, never the
 // trajectory. traj_output_judge_missed is how often it passed a response
@@ -36,6 +43,7 @@ const ANTHROPIC_URL = __ENV.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1/m
 const API_KEY = __ENV.ANTHROPIC_API_KEY;
 const JUDGE_MODEL = __ENV.JUDGE_MODEL || 'claude-haiku-4-5-20251001';
 const OUTPUT_JUDGE_MODEL = __ENV.OUTPUT_JUDGE_MODEL || 'claude-opus-5-5';
+const RULING_JUDGE_MODEL = __ENV.RULING_JUDGE_MODEL || 'claude-opus-5-5';
 const RUNS = parseInt(__ENV.RUNS || '10', 10);
 const VUS = parseInt(__ENV.VUS || '2', 10);
 // Player /roll responses allowed after one scripted input before giving up.
@@ -58,6 +66,7 @@ export const options = {
     traj_gm_roll_skipped: ['rate==0'],
     traj_non_invocation: ['rate==0'],
     traj_unused_roll_narrated: ['rate==0'],
+    ...rulingThresholds('traj'),
   },
 };
 
@@ -79,6 +88,10 @@ const unmentioned = new Counter('traj_unmentioned_rolls');
 const outputJudgePass = new Rate('traj_output_judge_pass');
 const outputJudgeMissed = new Rate('traj_output_judge_missed');
 const trialRecorded = new Rate('traj_trial_recorded');
+// Per ruling the judge saw: was it indefensible, and which way?
+const rulingIndefensible = new Rate('traj_ruling_indefensible');
+const rulingMissedRoll = new Rate('traj_ruling_missed_roll');
+const rulingUnneededRoll = new Rate('traj_ruling_unneeded_roll');
 
 // The same fixed script every run. It asks for a check the GM may rule needs
 // no roll, then a fight, where the drone's rolls are the GM's.
@@ -137,6 +150,7 @@ export function setup() {
         model_name: __ENV.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
         judge_model: JUDGE_MODEL,
         output_judge_model: OUTPUT_JUDGE_MODEL,
+        ruling_judge_model: RULING_JUDGE_MODEL,
         runs: RUNS,
         git_sha: __ENV.GIT_SHA || undefined,
       },
@@ -186,7 +200,7 @@ function playTurn(data, run, session, n, step) {
 
 function playStep(run, session, n, k, input) {
   const res = http.post(
-    `${BASE_URL}/session/${session}/resolve`,
+    `${BASE_URL}/session/${session.id}/resolve`,
     JSON.stringify({ input }),
     { headers: JSON_HEADERS, tags: { name: 'game_resolve' }, timeout: '300s' },
   );
@@ -196,13 +210,14 @@ function playStep(run, session, n, k, input) {
     'narration completed': (v) => typeof v.body?.narration === 'string' && v.body.narration.trim().length > 0 && !v.body.narration_error,
   });
   if (!ok || !body?.result) {
-    logLine({ run, session_id: session, turn: n, step: k, input, error: `HTTP ${res.status}: ${res.body}` });
+    logLine({ run, session_id: session.id, turn: n, step: k, input, error: `HTTP ${res.status}: ${res.body}` });
     return null;
   }
 
   const result = body.result;
   const gmRolls = body.gm_rolls || [];
   const g = gradeResponse(body);
+  g.ruling = judgeRuling(session, body, n);
   if (g.no_rolls) {
     g.non_invocation = callClaude(JUDGE_MODEL, null, JUDGE_PROMPT(body.narration), judgeSchema, 256, 'trajectory_judge');
     check(g, { 'judge returned a verdict': (v) => typeof v.non_invocation?.reports_roll === 'boolean' });
@@ -241,9 +256,27 @@ function playStep(run, session, n, k, input) {
   g.input = input;
   // One JSON line per response: the whole trajectory plus what the checks
   // found.
-  logLine({ run, session_id: session, turn: n, step: k, input, narration: body.narration, gm_rolls: gmRolls, result, checks: g });
+  logLine({ run, session_id: session.id, turn: n, step: k, input, narration: body.narration, gm_rolls: gmRolls, result, checks: g });
   g.response = body;
   return g;
+}
+
+// judgeRuling asks the ruling judge about the ruling this response makes, if
+// any. Every input of scripted turn n is the request itself or a /roll it
+// asked for, so the request is the script's.
+function judgeRuling(session, body, n) {
+  const ruling = rulingOf(body, session.pendingCheck);
+  const before = session.view;
+  session.pendingCheck = pendingCheck(body);
+  session.view = body.result.state;
+  if (!ruling) return null;
+  const verdict = callClaude(RULING_JUDGE_MODEL, RULING_SYSTEM, rulingPrompt(ruling, rulingContext(ruling, body, SCRIPT[n - 1].input, session.summary, before)), rulingSchema, 2048, 'ruling_judge');
+  if (!check(verdict, { 'ruling judge returned a verdict': (v) => typeof v?.defensible === 'boolean' })) return { ...ruling, verdict: null };
+  const kind = finding(ruling, verdict);
+  rulingIndefensible.add(!!kind);
+  rulingMissedRoll.add(kind === 'missed_roll');
+  rulingUnneededRoll.add(kind === 'unneeded_roll');
+  return { ...ruling, verdict, finding: kind };
 }
 
 // recordTrial records one scripted turn of one run, over all its responses,
@@ -267,6 +300,12 @@ function recordTrial(experimentID, run, session, n, step, graded, durationMs) {
     number('unmentioned_rolls', graded.reduce((a, g) => a + g.calls.filter((c) => !c.mentioned_in_narration).length, 0)),
     number('responses', graded.length),
   ];
+  const rulings = graded.map((g) => g.ruling).filter((r) => r?.verdict);
+  if (rulings.length) {
+    // A judgment, not a trajectory check: it isn't part of final.
+    const bad = rulings.filter((r) => r.finding);
+    scores.push(bool('ruling_defensible', bad.length === 0, 'llm_judge', rulings.map((r) => `${r.check} (${r.ruled}, DC ${r.dc}, ${signed(r.modifier)}): ${r.finding || 'defensible'}. ${r.verdict.reason}`).join(' | '), { judge_model: RULING_JUDGE_MODEL }));
+  }
   if (any((g) => g.non_invocation)) scores.push(bool('no_non_invocation', !any((g) => g.found.nonInvocation), 'llm_judge', graded.map((g) => g.non_invocation?.quote).filter(Boolean).join('; '), { judge_model: JUDGE_MODEL }));
   if (judged.length) {
     scores.push(bool('output_judge_pass', judged.every((g) => g.output_judge.pass), 'llm_judge', judged.map((g) => g.output_judge.reason).join(' | '), { judge_model: OUTPUT_JUDGE_MODEL, rubric: OUTPUT_JUDGE_RUBRIC }));
@@ -277,7 +316,7 @@ function recordTrial(experimentID, run, session, n, step, graded, durationMs) {
   return o11y.recordTrial(SOURCE, experimentID, {
     caseID: `turn-${n}`,
     attempt: run,
-    conversationID: session,
+    conversationID: session.id,
     metadata: { test_case_name: `turn ${n}: ${step.label}`, run, player_input: step.input },
     durationMs,
     scores,
@@ -298,7 +337,14 @@ function createSession() {
     logLine({ error: `session creation failed: HTTP ${res.status}: ${res.body}` });
     return null;
   }
-  return body.session_id;
+  // The scenario's summary is what the GM knows of the adventure, which the
+  // ruling judge needs to weigh what failing a check would cost.
+  const scenario = parseJSON(http.get(`${BASE_URL}/session/${body.session_id}/scenario`, { tags: { name: 'game_scenario' } }));
+  return { id: body.session_id, summary: scenario?.summary || '', pendingCheck: null, view: body.state };
+}
+
+function signed(n) {
+  return n < 0 ? `${n}` : `+${n}`;
 }
 
 // callClaude asks model for JSON matching schema, retrying overloads.

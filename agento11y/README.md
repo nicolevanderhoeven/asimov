@@ -27,6 +27,8 @@ match on. Every evaluator returns a single pass/fail key.
 | `asimov_roll_ownership` | Narration | A roll is made by the wrong side of the table: the GM skips its own roll (the drone's or the relay discharge's, or a generated scenario's foe, challenge, or hazard rolls) or tells the player to make it, rolls one of Data's rolls with `roll_dice`, asks the player to type their result, takes a number the player typed as a roll, or tells the player to `/roll` when no roll is due. |
 | `asimov_dice_fidelity` | Narration | A roll value or outcome isn't backed by the engine's rolls or a `roll_dice` result, including the outcome of a roll the game never applied. The online counterpart of [`tests/lib/trajectory-grader.js`](../tests/lib/trajectory-grader.js). |
 | `asimov_gm_voice` | Narration | The GM mentions the engine or the game's internals, refuses or blocks the player instead of "yes, and", or narrates Data in the third person. |
+| `asimov_no_missed_roll` | Action resolution | The resolver rules `no_roll` on a check of Data's that an experienced 5e GM would have him roll: he could fail and failing costs something, or it's an attack. The online counterpart of the [ruling judge](../go-game/README.md#trajectory-evals)'s `missed_roll`. |
+| `asimov_no_unneeded_roll` | Action resolution | The resolver asks for a roll that an experienced 5e GM wouldn't call for: Data can't fail, or failing costs nothing. The counterpart of the ruling judge's `unneeded_roll`. |
 | `asimov_resolution_intent` | Action resolution | The resolver's single tool call doesn't match the player's input: the wrong action or tool, a player-dictated roll or fact handled as a normal action instead of `unsupported`, an in-character attempt marked `unsupported`, or `no_roll` on a task that could fail. |
 
 | Rule | Evaluators | Sample rate |
@@ -34,6 +36,7 @@ match on. Every evaluator returns a single pass/fail key.
 | `asimov_narration_defects` | false ending, false kill, roll ownership | 0.5 |
 | `asimov_narration_quality` | dice fidelity, GM voice | 0.1 |
 | `asimov_resolution` | resolution intent | 0.1 |
+| `asimov_roll_rulings` | missed roll, unneeded roll | 0.25 |
 
 The defects rule samples more because false kills (about 1% of narrations)
 and GM rolls (about 1 in 11) are rare. All rules use the
@@ -42,6 +45,13 @@ tool call, so `user_visible_turn` would never match them. No rule is scoped
 to an agent version, so versions such as `pre-roll-dice` and `roll-dice-v2`
 compare side by side. Each judge call reads about 3,000 tokens, so a full
 `tests/test-e2e.js` run costs a few hundred judge calls.
+
+The roll-rulings rule samples more than `asimov_resolution` because most
+resolver calls (moves, questions, actions with no check) have no ruling to
+judge, and its judges pass those.
+Either of its evaluators failing means an indefensible ruling. Watch the two
+pass rates on the agent's Performance view, or list the failures:
+`gcx agento11y rules list-scores asimov_roll_rulings --passed=false -o json`.
 
 ## Comparing scenarios
 

@@ -5,6 +5,7 @@ import { check, group, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 import * as o11y from './lib/agento11y.js';
 import { describeFindings, gradeResponse } from './lib/trajectory-grader.js';
+import { finding, pendingCheck, rulingContext, rulingOf, rulingPrompt, rulingSchema, rulingThresholds, RULING_SYSTEM } from './lib/ruling-judge.js';
 
 // Whole-conversation tests. Every playthrough uses one session, so each
 // /resolve call replays the game's own history, and must end with the crew
@@ -15,7 +16,9 @@ import { describeFindings, gradeResponse } from './lib/trajectory-grader.js';
 // the crew was rescued, and the game's HTTP behavior. Every response also
 // gets the code-based dice trajectory checks from tests/test-trajectory.js,
 // as e2e_traj_* rates and trial scores that never fail the run: the
-// fixed-script trajectory test is the one that fails on them. With Grafana
+// fixed-script trajectory test is the one that fails on them. Each roll
+// ruling the GM makes on Data's checks also goes to the ruling judge from that
+// test, an experienced-5e-GM Claude model, reported the same way. With Grafana
 // Cloud credentials, the run is an Agent Observability experiment with one
 // scored trial per playthrough, and each playthrough is rated on its
 // conversation.
@@ -24,6 +27,7 @@ const ANTHROPIC_URL = __ENV.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1/m
 const API_KEY = __ENV.ANTHROPIC_API_KEY;
 const PLAYER_MODEL = __ENV.PLAYER_MODEL || 'claude-sonnet-4-6';
 const JUDGE_MODEL = __ENV.JUDGE_MODEL || 'claude-opus-5-5';
+const RULING_JUDGE_MODEL = __ENV.RULING_JUDGE_MODEL || 'claude-opus-5-5';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 const MAX_HP = 24;
 // Which adventure every playthrough plays: classic (the original, fixed
@@ -70,6 +74,9 @@ export const options = {
   thresholds: {
     checks: ['rate==1'],
     e2e_rescued: ['rate==1'],
+    // The ruling judge's rates, past limits that allow for its judgment
+    // calls; the trajectory checks above have none.
+    ...rulingThresholds('e2e'),
   },
 };
 
@@ -92,6 +99,11 @@ const TRAJ_CHECKS = {
 };
 const trajFlagged = new Rate('e2e_traj_flagged');
 const trajRollCalls = new Trend('e2e_traj_roll_dice_calls');
+// Per ruling the ruling judge saw, as in tests/test-trajectory.js, with the
+// same thresholds.
+const rulingIndefensible = new Rate('e2e_ruling_indefensible');
+const rulingMissedRoll = new Rate('e2e_ruling_missed_roll');
+const rulingUnneededRoll = new Rate('e2e_ruling_unneeded_roll');
 
 // The view exposes clues only as discovered text, so each playthrough
 // recognizes them by the exact texts in its scenario, which the game's
@@ -226,6 +238,7 @@ export function setup() {
         model_name: __ENV.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
         player_model: PLAYER_MODEL,
         judge_model: JUDGE_MODEL,
+        ruling_judge_model: RULING_JUDGE_MODEL,
         git_sha: __ENV.GIT_SHA || undefined,
         budgets: Object.fromEntries(Object.values(PLAYTHROUGHS).map((p) => [p.label, p.budget])),
       },
@@ -315,7 +328,7 @@ function play(base) {
   }
   const spec = localize(base, session.scenario);
   const who = spec.persona ? persona() : null;
-  const run = { spec, label, id: session.id, view: session.state, scenario: session.scenario, clues: cluesOf(session.scenario), transcript: [], narrated: 0, failures: [], budget, persona: who, started: Date.now() };
+  const run = { spec, label, id: session.id, view: session.state, scenario: session.scenario, clues: cluesOf(session.scenario), transcript: [], narrated: 0, failures: [], budget, pendingCheck: null, persona: who, started: Date.now() };
   const system = playerSystem(spec, who);
   const schema = moveSchema(spec);
   const messages = [{ role: 'user', content: session.scenario.opening + testerView(run) }];
@@ -381,6 +394,7 @@ function takeTurn(run, input, intent) {
   run.view = after;
   if (entry.narration.trim()) run.narrated++;
   trajectory(run, entry, body);
+  judgeRuling(run, entry, body, before);
 
   // The engine's rules hold whatever the player says, so these stay in code.
   const was = found(run, before);
@@ -417,6 +431,28 @@ function trajectory(run, entry, body) {
   const findings = describeFindings(g);
   entry.trajectory = { found: g.found, flagged, findings, roll_dice_calls: g.gm_roll_calls };
   if (findings.length) console.log(`${run.label}: turn ${entry.n}: trajectory: ${findings.join('; ')}`);
+}
+
+// judgeRuling asks the ruling judge about the roll ruling this response
+// makes, if any, keeping its verdict on the entry. The player's request is
+// their latest input that wasn't a /roll.
+function judgeRuling(run, entry, body, before) {
+  const ruling = rulingOf(body, run.pendingCheck);
+  run.pendingCheck = pendingCheck(body);
+  if (!ruling) return;
+  const request = [...run.transcript].reverse().find((e) => !/^\s*\/roll\b/i.test(e.input))?.input || entry.input;
+  const verdict = callClaude(RULING_JUDGE_MODEL, RULING_SYSTEM, [{ role: 'user', content: rulingPrompt(ruling, rulingContext(ruling, body, request, run.scenario.summary, before)) }], rulingSchema, 2048, 'e2e_ruling_judge');
+  if (typeof verdict?.defensible !== 'boolean') {
+    console.error(`${run.label}: turn ${entry.n}: ruling judge returned no verdict`);
+    return;
+  }
+  const kind = finding(ruling, verdict);
+  const tags = { playthrough: run.label };
+  rulingIndefensible.add(!!kind, tags);
+  rulingMissedRoll.add(kind === 'missed_roll', tags);
+  rulingUnneededRoll.add(kind === 'unneeded_roll', tags);
+  entry.ruling = { ruled: ruling.ruled, check: ruling.check, dc: ruling.dc, modifier: ruling.modifier, would_roll: verdict.would_roll, finding: kind, reason: verdict.reason };
+  if (kind) console.log(`${run.label}: turn ${entry.n}: ruling ${kind}: ${ruling.check} (${ruling.ruled}, DC ${ruling.dc}): ${verdict.reason}`);
 }
 
 // finish checks that the playthrough ended with the rescue, and that the
@@ -652,6 +688,7 @@ function reportTrial(run, verdict, experimentID, attempt) {
     { key: 'engine_turns', value: { number: view.turn }, kind: 'deterministic' },
     { key: 'longest_stall', value: { number: longestStall(run) }, kind: 'deterministic', explanation: 'Most inputs in a row that never advanced the engine turn.' },
     ...trajectoryScores(run),
+    ...rulingScores(run),
   ];
   if (verdict) {
     const meta = { judge_model: JUDGE_MODEL };
@@ -701,6 +738,22 @@ function trajectoryScores(run) {
   ];
 }
 
+// rulingScores are the ruling judge's verdicts over the whole playthrough:
+// true when every ruling was defensible, with each ruling and its reason.
+// Like the trajectory scores, they are not part of the final score.
+function rulingScores(run) {
+  const rulings = run.transcript.filter((e) => e.ruling);
+  if (!rulings.length) return [];
+  const count = (k) => rulings.filter((e) => e.ruling.finding === k).length;
+  const bad = rulings.filter((e) => e.ruling.finding);
+  return [
+    { key: 'ruling_defensible', value: { bool: bad.length === 0 }, kind: 'llm_judge', passed: bad.length === 0, explanation: rulings.map((e) => `Turn ${e.n}: ${e.ruling.check} (${e.ruling.ruled}, DC ${e.ruling.dc}): ${e.ruling.finding || 'defensible'}. ${e.ruling.reason}`).join('\n'), metadata: { judge_model: RULING_JUDGE_MODEL } },
+    { key: 'rulings_judged', value: { number: rulings.length }, kind: 'deterministic' },
+    { key: 'ruling_missed_rolls', value: { number: count('missed_roll') }, kind: 'llm_judge', metadata: { judge_model: RULING_JUDGE_MODEL } },
+    { key: 'ruling_unneeded_rolls', value: { number: count('unneeded_roll') }, kind: 'llm_judge', metadata: { judge_model: RULING_JUDGE_MODEL } },
+  ];
+}
+
 // longestStall is the most inputs in a row that left the engine turn where it
 // was, the signal shared by the false ending and the false kill.
 function longestStall(run) {
@@ -729,6 +782,7 @@ function compact(e, run) {
     narration: e.narration,
     error: e.error || undefined,
     trajectory: e.trajectory?.findings.length ? e.trajectory.findings : undefined,
+    ruling: e.ruling,
     engine: r ? {
       allowed: r.allowed,
       question: r.question || undefined,

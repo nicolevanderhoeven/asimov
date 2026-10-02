@@ -34,8 +34,9 @@ are rough.
 > `E2E_DURATION` says (30 minutes by default), and it waits five seconds
 > before starting so you can stop it. Each 30 minutes costs roughly
 > **$40–60** in Anthropic calls, and two hours roughly $150–250. Most of
-> that is the game's own Sonnet calls; the rest is the Claude player and an
-> Opus judge per playthrough. These are estimates from a two-hour run on
+> that is the game's own Sonnet calls. The rest is the Claude player, an
+> Opus judge per playthrough, and the Opus ruling judge, which costs about a
+> cent per ruling. These are estimates from a two-hour run on
 > 2026-09-30 (3,389 turns, 139 playthroughs). Check the Anthropic Console
 > for your actual spend.
 
@@ -67,7 +68,9 @@ to change models. The end-to-end test uses `PLAYER_MODEL=claude-sonnet-4-6`
 and the same `JUDGE_MODEL`. The trajectory test uses
 `JUDGE_MODEL=claude-haiku-4-5-20251001` by default (a small judge asked only
 whether a zero-roll turn reports a die roll), and
-`OUTPUT_JUDGE_MODEL=claude-opus-5-5` for the output-only contrast. For the
+`OUTPUT_JUDGE_MODEL=claude-opus-5-5` for the output-only contrast. Both the
+trajectory and end-to-end tests use `RULING_JUDGE_MODEL=claude-opus-5-5` for
+the [ruling judge](../go-game/README.md#trajectory-evals). For the
 trajectory test, add `--log-format=raw --console-output=traj.jsonl` to save
 one JSON line per response with its full trajectory and findings, and
 `-e TRAJ_EXPERIMENT=0` to skip recording an Agent Observability experiment.
@@ -164,6 +167,14 @@ with a fabricated roll can still be GOOD. The fixed-script trajectory test
 (`make k6-trajectory`) is still the one that fails on them, and it still runs
 on its own.
 
+Each roll ruling the GM makes on Data's checks also goes to the trajectory
+test's [ruling judge](../go-game/README.md#trajectory-evals). A ruling is
+either "roll it" or "Data just succeeds". The judge is an Opus model acting as
+an experienced 5e GM. Unlike the dice checks, its rates have thresholds, so a
+run with too many bad rulings shows ✗ and fails (see the ruling judge's
+[thresholds](../go-game/README.md#trajectory-evals)). It's still not part of
+the rating or `final`.
+
 You can see the results in three places:
 
 - **The k6 summary**, under CUSTOM: `e2e_traj_fabrication`,
@@ -173,13 +184,18 @@ You can see the results in three places:
   `e2e_traj_flagged` (any of fabrication, reroll, skipped, or unused narrated)
   are the share of narrated responses with each problem, over all
   playthroughs. `e2e_traj_roll_dice_calls` is the GM's `roll_dice` calls per
-  response. Each sample is tagged with its `playthrough`, so a k6 output such
-  as Grafana Cloud k6 can split them.
+  response. `e2e_ruling_indefensible` is the share of rulings the ruling judge
+  found indefensible. It splits into `e2e_ruling_missed_roll` (Data succeeded
+  without a roll a GM should have called for) and `e2e_ruling_unneeded_roll`
+  (a roll a GM wouldn't have asked for). Each sample is tagged with its
+  `playthrough`, so a k6 output such as Grafana Cloud k6 can split them.
 - **The log**: a line such as `guided: turn 12: trajectory: fabricated 17
-  (unexplained)` for every response with a finding. With
-  `E2E_LOG_TRANSCRIPTS=1`, each flagged turn in the transcript also has a
-  `trajectory` field.
-- **Agent Observability**: each trial's `traj_*` scores (see below).
+  (unexplained)` for every response with a finding, and a `ruling
+  missed_roll: ...` line with the judge's reason for every indefensible
+  ruling. With `E2E_LOG_TRANSCRIPTS=1`, each flagged turn in the transcript
+  also has a `trajectory` field, and each ruling a `ruling` field.
+- **Agent Observability**: each trial's `traj_*` and `ruling_*` scores (see
+  below).
 
 Everything about the narration is graded by a Claude judge (`JUDGE_MODEL`) over
 the whole conversation, with the engine's result and state for every turn as
@@ -233,6 +249,11 @@ its conversation. Each trial gets these scores:
   `traj_no_unused_roll_narrated`. Each is true when no response in the
   playthrough failed that check, and a false one lists the failing turns. There's
   also the number `traj_roll_dice_calls`. None of them count toward `final`.
+- From the ruling judge, when the playthrough made a ruling:
+  `ruling_defensible`, true when every ruling was defensible, with each
+  ruling, its verdict, and the judge's reason. There are also the numbers
+  `rulings_judged`, `ruling_missed_rolls`, and `ruling_unneeded_rolls`. They
+  don't count toward `final` either.
 - From the judge: `judge_<category>` for each rubric, `intent_<id>` for each
   intent (`handled`, `mishandled`, `not_attempted`, or `not_applicable`, with
   the turns), `findings_<kind>` counts with each finding's turn and

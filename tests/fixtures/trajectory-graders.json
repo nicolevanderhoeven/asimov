@@ -221,5 +221,54 @@
         "no_rolls": true
       }
     }
+  ],
+  "rulings": [
+    {
+      "name": "the GM ruled a check needs no roll",
+      "body": {
+        "result": {
+          "rolls": [{ "label": "Intelligence (Investigation)", "purpose": "check", "by": "gm", "dice": [], "modifier": 9, "total": 0, "target": 10, "success": true, "automatic": true }],
+          "ruling": { "no_roll": true, "reason": "routine for an android" }
+        }
+      },
+      "want": { "ruled": "no_roll", "check": "Intelligence (Investigation)", "modifier": 9, "dc": 10, "advantage": false, "lowest_total": 10, "highest_total": 29 }
+    },
+    {
+      "name": "the GM asked the player to roll a check",
+      "body": {
+        "result": {
+          "roll_required": { "purpose": "check", "by": "player", "check": "Intelligence (Investigation)", "notation": "1d20+5", "target": 12, "command": "/roll intelligence", "action": { "kind": "scan", "target": "sensor_buffer" } }
+        }
+      },
+      "want": { "ruled": "roll", "check": "Intelligence (Investigation)", "modifier": 5, "dc": 12, "advantage": false, "lowest_total": 6, "highest_total": 25 }
+    },
+    {
+      "name": "a check rolled with advantage",
+      "body": {
+        "result": {
+          "roll_required": { "purpose": "check", "by": "player", "check": "Phaser attack", "notation": "2d20kh1-1", "target": 14, "command": "/roll dexterity" }
+        }
+      },
+      "want": { "ruled": "roll", "check": "Phaser attack", "modifier": -1, "dc": 14, "advantage": true, "lowest_total": 0, "highest_total": 19 }
+    },
+    {
+      "name": "the same check still pending is not a new ruling",
+      "repeat": true,
+      "body": {
+        "result": {
+          "roll_required": { "purpose": "check", "by": "player", "check": "Intelligence (Investigation)", "notation": "1d20+5", "target": 12, "command": "/roll intelligence", "action": { "kind": "scan", "target": "sensor_buffer" } }
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "a damage roll is not a ruling",
+      "body": {
+        "result": {
+          "roll_required": { "purpose": "data_damage", "by": "player", "check": "Phaser damage", "notation": "1d8+3", "command": "/roll damage" }
+        }
+      },
+      "want": null
+    }
   ]
 }

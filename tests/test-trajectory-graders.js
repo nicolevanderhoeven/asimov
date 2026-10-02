@@ -1,8 +1,10 @@
 import { check, group } from 'k6';
 import { grade, gradeResponse, rollMentions } from './lib/trajectory-grader.js';
+import { pendingCheck, rulingOf } from './lib/ruling-judge.js';
 
-// Checks the trajectory graders in tests/lib/trajectory-grader.js against the
-// cases in tests/fixtures/trajectory-graders.json. No network calls: it needs
+// Checks the trajectory graders in tests/lib/trajectory-grader.js, and how
+// tests/lib/ruling-judge.js finds rulings, against the cases in
+// tests/fixtures/trajectory-graders.json. No network calls: it needs
 // neither the game nor an API key.
 const fixture = JSON.parse(open('./fixtures/trajectory-graders.json'));
 
@@ -56,6 +58,16 @@ export default function () {
     for (const c of fixture.responses) {
       const g = gradeResponse(c.body);
       const got = { found: g.found, skipped: g.skipped, no_rolls: g.no_rolls };
+      if (!check(got, { [c.name]: (v) => same(v, c.want) })) {
+        console.error(`${c.name}: got ${JSON.stringify(got)}, want ${JSON.stringify(c.want)}`);
+      }
+    }
+  });
+  group('rulings', () => {
+    const fields = ['ruled', 'check', 'modifier', 'dc', 'advantage', 'lowest_total', 'highest_total'];
+    for (const c of fixture.rulings) {
+      const r = rulingOf(c.body, c.repeat ? pendingCheck(c.body) : null);
+      const got = r && Object.fromEntries(fields.map((k) => [k, r[k]]));
       if (!check(got, { [c.name]: (v) => same(v, c.want) })) {
         console.error(`${c.name}: got ${JSON.stringify(got)}, want ${JSON.stringify(c.want)}`);
       }

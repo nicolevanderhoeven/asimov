@@ -1,0 +1,15 @@
+# Agent Observability rule: the resolver's roll rulings on Data's checks,
+# judged as a 5e GM would. Most resolver calls have no check, and the judges
+# pass those, so this samples more than asimov_resolution.
+rule_id: asimov_roll_rulings
+enabled: true
+selector: all_assistant_generations
+sample_rate: 0.25
+evaluator_ids:
+  - asimov_no_missed_roll
+  - asimov_no_unneeded_roll
+match:
+  agent_name:
+    - asimov-enterprise-go
+  tags.component:
+    - action_resolution

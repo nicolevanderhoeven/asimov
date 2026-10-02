@@ -319,6 +319,54 @@ trajectory and findings. The checks are:
   small LLM judge (`JUDGE_MODEL`, default Claude Haiku 4.5) answers yes to the
   neutral question "Does the following text report the result of a die roll?"
 
+Separately, a **ruling judge** (`RULING_JUDGE_MODEL`, default Claude Opus
+5.5) reviews every roll ruling the GM makes on Data's checks: his ability
+checks, saves, and phaser attacks. A ruling is either "the player must roll
+it" or "Data succeeds without a roll". The engine sets the DC and modifier
+either way. Whether a roll was called for is a judgment a GM makes, so code
+only finds the ruling (`tests/lib/ruling-judge.js`):
+- a check the GM ruled automatic, or
+- the first response that waits on the player to roll a check.
+
+The judge is told to act as an experienced 5e GM and rules expert, and it
+applies 5e's guidance:
+- Roll only when failure is possible and has a consequence.
+- An ability check or save whose lowest total meets the DC can't fail.
+- Attacks are always rolled.
+
+It is given the check, Data's modifier, the DC, the lowest and highest
+possible totals, the GM's reason for a no-roll ruling, the player's request,
+the scene, Data's character sheet, and the scenario's summary, so it can
+weigh what failing would cost. It answers whether it would call for a roll
+and whether the GM's ruling is defensible, passing anything reasonable.
+
+`traj_ruling_indefensible` is the share of rulings it found indefensible. That
+splits into:
+- `traj_ruling_missed_roll`: Data succeeded without a roll a GM should have
+  called for.
+- `traj_ruling_unneeded_roll`: a roll a GM wouldn't ask for.
+
+Each trial with a ruling gets a `ruling_defensible` score, which isn't part
+of the trial's `final`.
+
+The rates have thresholds in both the trajectory test and the e2e test, so a
+run with too many bad rulings shows ✗ in the summary and fails. The limits
+leave room for the judge's judgment calls:
+
+| Rate | Fails above | Override |
+| --- | --- | --- |
+| `*_ruling_indefensible` | 20% of rulings | `RULING_MAX_INDEFENSIBLE` |
+| `*_ruling_missed_roll` | 10% | `RULING_MAX_MISSED_ROLL` |
+| `*_ruling_unneeded_roll` | 25% | `RULING_MAX_UNNEEDED_ROLL` |
+
+A missed roll gives a success away, so its limit is the tightest. Set an
+override as a fraction with `-e`, such as `-e RULING_MAX_UNNEEDED_ROLL=0.4`, or
+set it to `1` to report a rate without failing on it. A run with no rulings
+passes.
+
+The [online evaluators](../agento11y/README.md) `asimov_no_missed_roll` and
+`asimov_no_unneeded_roll` judge the same rulings on live traffic.
+
 For contrast, an output-only judge (`OUTPUT_JUDGE_MODEL`, default Claude Opus
 5.5) grades every response from only the player's input and the reply, never
 the trajectory. `traj_output_judge_missed` is how often it passed a response
@@ -338,8 +386,8 @@ to log a link to the experiment.
 
 The deterministic graders live in `tests/lib/trajectory-grader.js`.
 `make k6-graders` (from the repository root) checks them against the cases in
-`tests/fixtures/trajectory-graders.json`, with no server or API key; add new
-grader cases there. `tests/test-e2e.js` runs the same deterministic checks on
+`tests/fixtures/trajectory-graders.json`, with no server or API key, along
+with how `rulingOf` finds rulings; add new cases there. `tests/test-e2e.js` runs the same deterministic checks on
 every response of its whole playthroughs. There they are `e2e_traj_*` rates
 and `traj_*` trial scores, and they never fail the run (see
 [End-to-end conversations](../tests/README.md#end-to-end-conversations)).
