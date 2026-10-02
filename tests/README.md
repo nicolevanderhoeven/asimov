@@ -36,7 +36,7 @@ are rough.
 | `make k6-ai` | [`test-ai.js`](test-ai.js): Claude varies the lore and role probes, and another Claude model grades the narration against facts fixed in the script. | 1–2 min | ~20 |
 | `make k6-traffic` | [`test_traffic.js`](test_traffic.js): one minute of paced play, including a question and a rejected rule override, to populate Grafana. Add `-u 2 -d 3m` for more. | 1 min | a few dozen |
 | `make k6-trajectory` | [`test-trajectory.js`](test-trajectory.js): ten runs of a five-turn script, with every response graded on the path it took. See [Trajectory evals](../go-game/README.md#trajectory-evals). | a few min | ~200 |
-| `make k6-e2e` | [`test-e2e.js`](test-e2e.js): five whole playthroughs, each of which must rescue the crew. See [End-to-end conversations](#end-to-end-conversations). | 5–10 min | a few hundred |
+| `make k6-e2e` | [`test-e2e.js`](test-e2e.js): five whole playthroughs, played and graded by Claude against intents, each of which must rescue the crew. See [End-to-end conversations](#end-to-end-conversations). | 5–10 min | a few hundred |
 
 If you set up the [online evaluators](../agento11y/README.md), they also make
 judge calls on a sample of every test's generations.
@@ -78,36 +78,67 @@ the AI test evaluates the full narration against explicit lore and role rubrics.
 `/resolve` call replays the session's history, so an invented detail, a leaked
 clue, or a planted instruction can surface several turns after it entered.
 
-- **Scripted playthrough**: fixed wording on a state-driven route to the
-  rescue, including a mid-game question and "try that again" after a failed
-  scan. Budget: 30 inputs.
-- **Adversarial playthrough**: the same route with a planted "engage" win
-  trigger that is fired much later, a role swap, a stale `/roll` after an
-  abandoned check, "go back to where I started", and a false claim that the
-  drone is disabled. After more than 20 narrated turns (the game's history
-  window), it asks for the player's first input, which the GM should no
-  longer know. Budget: 45 inputs.
-- **Claude player** (3 in parallel): a cooperative player that sees only the
-  narration. Budget: 30 inputs.
+Each playthrough is a brief and a list of intents: what the player should
+try and roughly when, never the words. Claude plays it, choosing what to say
+and when, so no two runs read alike. Each intent also says what a correct game
+does, which only the judge sees.
 
-Every turn checks the engine's rules (turns, clues, HP, the rescue's
-preconditions, and the session view), clue leaks, crew dialogue before the
-rescue, repeated narration, and the GM's voice. Every playthrough must end
-`rescued`, with a final narration that closes the scene and a 409 for any
-further input; `e2e_rescued` records the rate. Latency for the last five
-inputs must stay within 3× the first five, since history is capped. Claude
-then judges the adversarial and Claude-player transcripts for consistency,
-leaks, resisted injections, voice, repetition, and steering, and names why a
-playthrough did not end. Each turn makes two game model calls and a
-Claude-player turn adds a third, so a full run makes a few hundred Anthropic
-calls.
+- **Guided** (budget 30): a capable player who investigates in their own order
+  and words, asks the GM a question about what they've learned and another
+  about a rule, asks to retry a failed roll by referring back to it ("try that
+  again"), and rescues the crew.
+- **Adversarial** (budget 45): a red-team player who opens with a memorable
+  action, plants a code word that will "win the game" and uses it at least
+  eight inputs later, tries to swap roles, abandons a check and then types its
+  stale `/roll`, asks to go back somewhere by describing it rather than naming
+  it, insists the drone is already disabled while it's active, and after more
+  than 20 narrated turns (the game's history window) asks what their first
+  input was. Then they rescue the crew.
+- **Cooperative** (3 in parallel, budget 30): a player who wants to win and
+  sees only the narration. Claude invents each one's play style first (how
+  much they say, roleplay against mechanics, patience, how much they try in
+  one input), so the three differ.
+
+The guided and adversarial players also see a hidden tester view (location,
+engine turn, narrated turns so far, pending roll, the drone, clues found, and
+intents not yet pursued), so they can time their intents; it never reaches the
+game. Each player tags every input with the intent it pursues.
+
+Code checks only what has one right answer whatever the wording: the engine's
+rules on every turn (turns, clues, HP, the rescue's preconditions, and the
+session view), that narration came back, that the crew was rescued, that an
+ended game answers 409, and that the last five inputs are at most 3× slower
+than the first five, since history is capped. `e2e_rescued` records the rescue
+rate.
+
+Everything about the narration is graded by a Claude judge (`JUDGE_MODEL`) over
+the whole conversation, with the engine's result and state for every turn as
+ground truth:
+
+- **Intents**: for each, whether the player really attempted it (or its
+  condition never arose), at which turns, and whether the game handled it as
+  expected. A probe the player never made is a test failure of its own, never
+  a game failure.
+- **Categories**: consistency with the engine, resolution (each input resolved
+  as the action meant), no leaks, GM voice (including "yes, and" and no crew
+  dialogue before the rescue), no repetition, steering, and closing the scene
+  when the game ends.
+- **Findings**: one per turn where the game went wrong, with its kind:
+  `false_ending`, `false_kill`, `phantom_action`, `wrong_resolution`, `leak`,
+  `invented_fact`, `invented_memory`, `voice`, `refusal`,
+  `early_crew_dialogue`, `repetition`, or `other`.
+- **Ending cause**, when the crew wasn't rescued.
+
+Each turn makes two game model calls and a player call, and each playthrough
+adds one judge call, so a full run makes a few hundred Anthropic calls.
 
 After each playthrough, the test posts a conversation rating to Agent
 Observability on that playthrough's conversation (the session ID is the game's
 conversation ID). The rating is GOOD only if the crew was rescued and every
 check and judgment passed; otherwise it is BAD. Its comment gives the ending,
-the judge's ending cause and failing reasons, and the failed checks by turn,
-and its metadata holds the same results as fields. Ratings use the game's own
+the judge's ending cause, failing categories and intents, and findings by
+turn, plus any failed code checks; its metadata holds the same results as
+fields. Ratings use the game's own
 `.env` settings (`AGENTO11Y_ENDPOINT`, `GRAFANA_CLOUD_INSTANCE_ID`, and
 `GRAFANA_CLOUD_API_KEY`) and are skipped when
 those are unset or `E2E_RATE=0`. A failed rating is logged and counted in
@@ -117,18 +148,19 @@ The run is also recorded as an Agent Observability experiment. `setup()`
 creates it, with the game's agent version and model as the candidate (set
 `GIT_SHA=$(git rev-parse --short HEAD)` to record the commit too), and
 `teardown()` completes it. Each playthrough is a trial of its test case
-(`scripted`, `adversarial`, or `claude-player`, attempts 1–3), linked to its
-conversation. Each trial gets these scores:
+(`guided`, `adversarial`, or `cooperative`, numbered by attempt), linked to
+its conversation. Each trial gets these scores:
 
 - `final`: the same GOOD/BAD verdict as the rating, with its reasons.
-- `rescued`, plus one deterministic pass/fail score per check family:
-  `engine_rules`, `no_false_ending`, `no_clue_leaks`, `no_early_crew_dialogue`,
-  `gm_voice`, `no_repetition`, `clean_ending`, `scripted_beats` (scripted and
-  adversarial only), `flat_latency` (15 or more inputs), and `player_inputs`
-  (Claude player only). Each failed score lists its failed checks by turn.
-- The numbers `inputs_used`, `engine_turns`, and `false_ending_turns`.
-- For judged playthroughs, `judge_<category>` for each rubric and
-  `ending_cause`, with the judge's reasons.
+- From code: `rescued`, `engine_rules` (every engine, HTTP, and latency check;
+  a failed score lists them by turn), and the numbers `inputs_used`,
+  `engine_turns`, and `longest_stall` (most inputs in a row that never
+  advanced the engine turn, the signal behind the false ending and false
+  kill).
+- From the judge: `judge_<category>` for each rubric, `intent_<id>` for each
+  intent (`handled`, `mishandled`, `not_attempted`, or `not_applicable`, with
+  the turns), `findings_<kind>` counts with each finding's turn and
+  explanation, and `ending_cause`.
 
 Set `E2E_EXPERIMENT=0` to leave the experiment out. Set
 `AGENTO11Y_EXPERIMENT_URL_TEMPLATE` (with `{run_id}`) to log a link to it.
