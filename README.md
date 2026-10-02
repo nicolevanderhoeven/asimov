@@ -108,16 +108,10 @@ Run `make` on its own to list every shortcut:
 
 ## How it fits together
 
-```mermaid
-flowchart LR
-  you["You (CLI)"] --> game
-  k6["k6 tests"] -- "HTTP API" --> game
-  game["The Silent Enterprise<br/>Go game engine + AI GM"] -- "Grafana AI SDK" --> claude["Anthropic Claude"]
-  game -- "generations and conversations" --> ao
-  game -- "OTLP: traces, metrics, logs" --> otlp["Grafana Cloud<br/>Tempo, Prometheus, Loki"]
-  k6 -- "ratings, experiments, scores" --> ao["Grafana Cloud<br/>Agent Observability"]
-  ao -- "online evaluators<br/>(LLM judges)" --> ao
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.png">
+  <img alt="Architecture: a player or k6 drives the Go game through its REPL or HTTP API. The game master calls Anthropic Claude, the rules engine owns the state, and telemetry sends generations to Agent Observability (where online evaluators judge them) and traces, metrics, and logs over OTLP to Grafana Cloud, optionally through a local Collector. k6 also calls Claude as player and judge and posts ratings and experiments." src="assets/architecture-light.png">
+</picture>
 
 The game engine owns the rules and the state. Claude only interprets the
 player's input, decides whether a check needs a roll, makes the GM's own rolls
