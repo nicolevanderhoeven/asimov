@@ -330,7 +330,10 @@ only finds the ruling (`tests/lib/ruling-judge.js`):
 
 The judge is told to act as an experienced 5e GM and rules expert, and it
 applies 5e's guidance:
-- Roll only when failure is possible and has a consequence.
+- A check Data could fail is fine to roll, even when he can retry it.
+- Skip the roll only when he can't fail, the task is trivial, or failing
+  would cost nothing; skipping it is wrong when failing has a real
+  consequence.
 - An ability check or save whose lowest total meets the DC can't fail.
 - Attacks are always rolled.
 

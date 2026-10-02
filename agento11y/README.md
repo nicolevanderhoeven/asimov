@@ -28,7 +28,7 @@ match on. Every evaluator returns a single pass/fail key.
 | `asimov_dice_fidelity` | Narration | A roll value or outcome isn't backed by the engine's rolls or a `roll_dice` result, including the outcome of a roll the game never applied. The online counterpart of [`tests/lib/trajectory-grader.js`](../tests/lib/trajectory-grader.js). |
 | `asimov_gm_voice` | Narration | The GM mentions the engine or the game's internals, refuses or blocks the player instead of "yes, and", or narrates Data in the third person. |
 | `asimov_no_missed_roll` | Action resolution | The resolver rules `no_roll` on a check of Data's that an experienced 5e GM would have him roll: he could fail and failing costs something, or it's an attack. The online counterpart of the [ruling judge](../go-game/README.md#trajectory-evals)'s `missed_roll`. |
-| `asimov_no_unneeded_roll` | Action resolution | The resolver asks for a roll that an experienced 5e GM wouldn't call for: Data can't fail, or failing costs nothing. The counterpart of the ruling judge's `unneeded_roll`. |
+| `asimov_no_unneeded_roll` | Action resolution | The resolver asks for a roll that an experienced 5e GM wouldn't call for: Data can't fail, or the task is trivial for him. A check he could fail passes even when a failed attempt can be retried. The counterpart of the ruling judge's `unneeded_roll`. |
 | `asimov_resolution_intent` | Action resolution | The resolver's single tool call doesn't match the player's input: the wrong action or tool, a player-dictated roll or fact handled as a normal action instead of `unsupported`, an in-character attempt marked `unsupported`, or `no_roll` on a task that could fail. |
 
 | Rule | Evaluators | Sample rate |

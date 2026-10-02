@@ -72,7 +72,7 @@ export function rulingPrompt(ruling, context) {
   return `A player is playing Data, the android officer from Star Trek, in a single-player adventure run with the 2014 D&D 5e rules. For each check Data makes, a game engine sets the DC and Data's modifier; the GM only rules whether the player must roll it, or Data succeeds without rolling. Decide what you would do as the GM, then whether this GM's ruling is one a competent 5e GM could reasonably make.
 
 Use 5e's guidance:
-- Call for an ability check only when the outcome is uncertain and failure matters: there is a real chance to fail, and failing has a consequence or cost (danger, lost time under pressure, alerting a foe, a chance that won't come again). If Data couldn't fail, or failing would only mean trying again with nothing lost, let him succeed without a roll.
+- When Data could fail an ability check, calling for a roll is reasonable, even if a failed attempt can simply be retried: the attempt still costs time, and the dice decide when he succeeds. Letting him succeed without a roll is also reasonable when failing would only mean trying again with nothing at stake. Skipping the roll is wrong when failing would have a real consequence (danger, alerting a foe, a chance that won't come again, time under pressure). A roll is unneeded only when Data can't fail or the task is trivial for him.
 - If the lowest possible total meets the DC, an ability check or save cannot fail: a natural 1 is not an automatic failure on either.
 - Attack rolls are not ability checks. An attack in combat is rolled, and a natural 1 always misses, so ruling one automatic is wrong unless the target is helpless.
 - A saving throw is rolled when Data is exposed to the danger it resists.
