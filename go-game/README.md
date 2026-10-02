@@ -339,7 +339,10 @@ to log a link to the experiment.
 The deterministic graders live in `tests/lib/trajectory-grader.js`.
 `make k6-graders` (from the repository root) checks them against the cases in
 `tests/fixtures/trajectory-graders.json`, with no server or API key; add new
-grader cases there.
+grader cases there. `tests/test-e2e.js` runs the same deterministic checks on
+every response of its whole playthroughs. There they are `e2e_traj_*` rates
+and `traj_*` trial scores, and they never fail the run (see
+[End-to-end conversations](../tests/README.md#end-to-end-conversations)).
 
 ## Test
 

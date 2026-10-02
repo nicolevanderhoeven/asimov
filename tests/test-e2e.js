@@ -4,6 +4,7 @@ import exec from 'k6/execution';
 import { check, group, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 import * as o11y from './lib/agento11y.js';
+import { describeFindings, gradeResponse } from './lib/trajectory-grader.js';
 
 // Whole-conversation tests. Every playthrough uses one session, so each
 // /resolve call replays the game's own history, and must end with the crew
@@ -11,9 +12,13 @@ import * as o11y from './lib/agento11y.js';
 // choosing what to say and when, and another Claude model grades the whole
 // conversation against the intents and rubrics below. Code checks only what
 // has one right answer whatever the wording: the engine's own rules, whether
-// the crew was rescued, and the game's HTTP behavior. With Grafana Cloud
-// credentials, the run is an Agent Observability experiment with one scored
-// trial per playthrough, and each playthrough is rated on its conversation.
+// the crew was rescued, and the game's HTTP behavior. Every response also
+// gets the code-based dice trajectory checks from tests/test-trajectory.js,
+// as e2e_traj_* rates and trial scores that never fail the run: the
+// fixed-script trajectory test is the one that fails on them. With Grafana
+// Cloud credentials, the run is an Agent Observability experiment with one
+// scored trial per playthrough, and each playthrough is rated on its
+// conversation.
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 const ANTHROPIC_URL = __ENV.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1/messages';
 const API_KEY = __ENV.ANTHROPIC_API_KEY;
@@ -72,6 +77,19 @@ const rescued = new Rate('e2e_rescued');
 const ratingSubmitted = new Rate('e2e_rating_submitted');
 const trialReported = new Rate('e2e_trial_reported');
 const resolveDuration = new Trend('e2e_resolve_duration', true);
+// The trajectory checks, per response, as in tests/test-trajectory.js. They
+// have no thresholds: they report on the GM's dice, they don't gate the run.
+const TRAJ_CHECKS = {
+  fabrication: new Rate('e2e_traj_fabrication'),
+  unexplained: new Rate('e2e_traj_fabrication_unexplained'),
+  arithmetic: new Rate('e2e_traj_fabrication_arithmetic'),
+  reroll: new Rate('e2e_traj_silent_reroll'),
+  skipped: new Rate('e2e_traj_gm_roll_skipped'),
+  misapplied: new Rate('e2e_traj_gm_roll_misapplied'),
+  unusedNarrated: new Rate('e2e_traj_unused_roll_narrated'),
+};
+const trajFlagged = new Rate('e2e_traj_flagged');
+const trajRollCalls = new Trend('e2e_traj_roll_dice_calls');
 
 // The view exposes clues only as discovered text, so each playthrough
 // recognizes them by the exact texts in its scenario, which the game's
@@ -360,6 +378,7 @@ function takeTurn(run, input, intent) {
   const after = entry.result.state;
   run.view = after;
   if (entry.narration.trim()) run.narrated++;
+  trajectory(run, entry, body);
 
   // The engine's rules hold whatever the player says, so these stay in code.
   const was = found(run, before);
@@ -380,6 +399,22 @@ function takeTurn(run, input, intent) {
       && session.discovered.length === after.discovered.length && samePending(session.pending_roll, after.pending_roll),
   }, `turn ${n}`);
   return entry;
+}
+
+// trajectory grades one response's dice as tests/test-trajectory.js does,
+// keeping what it found on the entry for the trial and the transcript.
+function trajectory(run, entry, body) {
+  if (!entry.narration.trim()) return;
+  const g = gradeResponse(body);
+  const tags = { playthrough: run.label };
+  for (const [k, rate] of Object.entries(TRAJ_CHECKS)) rate.add(g.found[k], tags);
+  // As in the trajectory test, a misapplied roll is reported but not flagged.
+  const flagged = g.found.fabrication || g.found.reroll || g.found.skipped || g.found.unusedNarrated;
+  trajFlagged.add(flagged, tags);
+  trajRollCalls.add(g.gm_roll_calls, tags);
+  const findings = describeFindings(g);
+  entry.trajectory = { found: g.found, flagged, findings, roll_dice_calls: g.gm_roll_calls };
+  if (findings.length) console.log(`${run.label}: turn ${entry.n}: trajectory: ${findings.join('; ')}`);
 }
 
 // finish checks that the playthrough ended with the rescue, and that the
@@ -614,6 +649,7 @@ function reportTrial(run, verdict, experimentID, attempt) {
     { key: 'inputs_used', value: { number: transcript.length }, kind: 'deterministic' },
     { key: 'engine_turns', value: { number: view.turn }, kind: 'deterministic' },
     { key: 'longest_stall', value: { number: longestStall(run) }, kind: 'deterministic', explanation: 'Most inputs in a row that never advanced the engine turn.' },
+    ...trajectoryScores(run),
   ];
   if (verdict) {
     const meta = { judge_model: JUDGE_MODEL };
@@ -643,6 +679,26 @@ function reportTrial(run, verdict, experimentID, attempt) {
   return trialID;
 }
 
+// trajectoryScores are the trajectory checks over the whole playthrough, one
+// bool per check (true when no response failed it) with the failing turns.
+// They are not part of the final score.
+function trajectoryScores(run) {
+  const graded = run.transcript.filter((e) => e.trajectory);
+  const failing = (k) => graded.filter((e) => e.trajectory.found[k]);
+  const explain = (es) => es.map((e) => `Turn ${e.n}: ${e.trajectory.findings.join('; ')}`).join('\n');
+  const bool = (key, es) => ({ key, value: { bool: es.length === 0 }, kind: 'deterministic', passed: es.length === 0, explanation: explain(es) });
+  return [
+    bool('traj_clean', graded.filter((e) => e.trajectory.flagged)),
+    bool('traj_no_fabrication', failing('fabrication')),
+    bool('traj_no_unexplained_roll', failing('unexplained')),
+    bool('traj_no_silent_reroll', failing('reroll')),
+    bool('traj_no_gm_roll_skipped', failing('skipped')),
+    bool('traj_no_gm_roll_misapplied', failing('misapplied')),
+    bool('traj_no_unused_roll_narrated', failing('unusedNarrated')),
+    { key: 'traj_roll_dice_calls', value: { number: graded.reduce((a, e) => a + e.trajectory.roll_dice_calls, 0) }, kind: 'deterministic' },
+  ];
+}
+
 // longestStall is the most inputs in a row that left the engine turn where it
 // was, the signal shared by the false ending and the false kill.
 function longestStall(run) {
@@ -670,6 +726,7 @@ function compact(e, run) {
     intent: e.intent,
     narration: e.narration,
     error: e.error || undefined,
+    trajectory: e.trajectory?.findings.length ? e.trajectory.findings : undefined,
     engine: r ? {
       allowed: r.allowed,
       question: r.question || undefined,

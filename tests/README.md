@@ -133,6 +133,35 @@ ended game answers 409, and that the last five inputs are at most 3× slower
 than the first five, since history is capped. `e2e_rescued` records the rescue
 rate.
 
+Every response also gets the code-based dice checks from the
+[trajectory test](../go-game/README.md#trajectory-evals), from the same
+[graders](lib/trajectory-grader.js). These are fabrication (with its
+unexplained and arithmetic kinds), silent reroll, skipped GM roll, misapplied
+GM roll, and unused roll narrated. The trajectory test's Haiku
+non-invocation judge and output-only judge don't run here, so these checks add
+no model calls. They report, they don't gate. They have no thresholds, aren't
+k6 checks, and leave the rating and the `final` score alone, so a playthrough
+with a fabricated roll can still be GOOD. The fixed-script trajectory test
+(`make k6-trajectory`) is still the one that fails on them, and it still runs
+on its own.
+
+You can see the results in three places:
+
+- **The k6 summary**, under CUSTOM: `e2e_traj_fabrication`,
+  `e2e_traj_fabrication_unexplained`, `e2e_traj_fabrication_arithmetic`,
+  `e2e_traj_silent_reroll`, `e2e_traj_gm_roll_skipped`,
+  `e2e_traj_gm_roll_misapplied`, `e2e_traj_unused_roll_narrated`, and
+  `e2e_traj_flagged` (any of fabrication, reroll, skipped, or unused narrated)
+  are the share of narrated responses with each problem, over all
+  playthroughs. `e2e_traj_roll_dice_calls` is the GM's `roll_dice` calls per
+  response. Each sample is tagged with its `playthrough`, so a k6 output such
+  as Grafana Cloud k6 can split them.
+- **The log**: a line such as `guided: turn 12: trajectory: fabricated 17
+  (unexplained)` for every response with a finding. With
+  `E2E_LOG_TRANSCRIPTS=1`, each flagged turn in the transcript also has a
+  `trajectory` field.
+- **Agent Observability**: each trial's `traj_*` scores (see below).
+
 Everything about the narration is graded by a Claude judge (`JUDGE_MODEL`) over
 the whole conversation, with the engine's result and state for every turn as
 ground truth:
@@ -179,6 +208,12 @@ its conversation. Each trial gets these scores:
   `engine_turns`, and `longest_stall` (most inputs in a row that never
   advanced the engine turn, the signal behind the false ending and false
   kill).
+- From the trajectory checks: `traj_clean` (no response flagged) and
+  `traj_no_fabrication`, `traj_no_unexplained_roll`, `traj_no_silent_reroll`,
+  `traj_no_gm_roll_skipped`, `traj_no_gm_roll_misapplied`, and
+  `traj_no_unused_roll_narrated`. Each is true when no response in the
+  playthrough failed that check, and a false one lists the failing turns. There's
+  also the number `traj_roll_dice_calls`. None of them count toward `final`.
 - From the judge: `judge_<category>` for each rubric, `intent_<id>` for each
   intent (`handled`, `mishandled`, `not_attempted`, or `not_applicable`, with
   the turns), `findings_<kind>` counts with each finding's turn and

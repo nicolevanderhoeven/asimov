@@ -1,7 +1,8 @@
 // Deterministic trajectory graders for the GM's dice: fabrication and silent
-// reroll, used by tests/test-trajectory.js. tests/test-trajectory-graders.js
-// checks them against tests/fixtures/trajectory-graders.json; add a case
-// there for any change here.
+// reroll, used by tests/test-trajectory.js and tests/test-e2e.js.
+// tests/test-trajectory-graders.js checks them against
+// tests/fixtures/trajectory-graders.json; add a case there for any change
+// here.
 
 const SENTENCES = /[^.!?\n]+[.!?]*/g;
 // A sentence is about a roll if it names dice or rolling.
@@ -133,4 +134,49 @@ export function grade(turn) {
     };
   }
   return graded;
+}
+
+// gradeResponse runs every code check on one /resolve response body: grade's
+// checks on its trajectory (the GM's roll_dice calls, plus every roll the
+// engine made, whose numbers are real too), and whether the engine skipped a
+// roll the GM never made or refused one it did. found says which checks found
+// something. The non-invocation judge, for a response with no rolls at all,
+// is the caller's to run.
+export function gradeResponse(body) {
+  const result = body.result;
+  const rolls = result.rolls || [];
+  const gmRolls = body.gm_rolls || [];
+  const g = grade({
+    narration: body.narration,
+    tool_calls: gmRolls.map((c) => ({ id: c.id, name: 'roll_dice', arguments: c.arguments, result: c.result, error: c.error, used: !!c.applied_to })),
+    other_rolls: rolls.filter((r) => !r.skipped && !r.automatic).map((r) => ({ notation: r.notation, dice: r.dice, modifier: r.modifier, total: r.total })),
+    // The DCs and ACs this response's rolls were against, or the next roll's.
+    targets: [...rolls.map((r) => r.target), result.roll_required?.target].filter((t) => t > 0),
+  });
+  g.gm_roll_calls = gmRolls.length;
+  g.no_rolls = gmRolls.length === 0 && rolls.length === 0;
+  g.skipped = rolls.filter((r) => r.skipped).map((r) => r.label);
+  g.misapplied = gmRolls.filter((c) => (c.error || '').startsWith('not applied')).map((c) => c.error);
+  g.found = {
+    fabrication: g.fabricated.length > 0,
+    unexplained: g.fabricated.some((m) => m.kind === 'unexplained'),
+    arithmetic: g.fabricated.some((m) => m.kind === 'arithmetic'),
+    reroll: !!g.silent_reroll,
+    skipped: g.skipped.length > 0,
+    misapplied: g.misapplied.length > 0,
+    unusedNarrated: g.unused_narrated.length > 0,
+  };
+  return g;
+}
+
+// describeFindings lists, in a line each, what a graded response's checks
+// found, for logs and trial explanations.
+export function describeFindings(g) {
+  const out = [];
+  if (g.found.fabrication) out.push(`fabricated ${g.fabricated.map((m) => `${m.value} (${m.kind})`).join(', ')}`);
+  if (g.found.reroll) out.push(`${g.silent_reroll.calls} roll_dice calls, ${g.silent_reroll.unmentioned_calls} unmentioned`);
+  if (g.found.skipped) out.push(`GM roll skipped: ${g.skipped.join(', ')}`);
+  if (g.found.misapplied) out.push(`GM roll misapplied: ${g.misapplied.join('; ')}`);
+  if (g.found.unusedNarrated) out.push(`unused roll narrated: ${g.unused_narrated.join(', ')}`);
+  return out;
 }

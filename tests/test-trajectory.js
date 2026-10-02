@@ -2,7 +2,7 @@ import http from 'k6/http';
 import exec from 'k6/execution';
 import { check, group, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
-import { grade } from './lib/trajectory-grader.js';
+import { gradeResponse } from './lib/trajectory-grader.js';
 import * as o11y from './lib/agento11y.js';
 
 // Trajectory tests for the GM's dice, graded by the path each response took
@@ -201,34 +201,13 @@ function playStep(run, session, n, k, input) {
   }
 
   const result = body.result;
-  const rolls = result.rolls || [];
   const gmRolls = body.gm_rolls || [];
-  // The trajectory, in the grader's terms: the GM's roll_dice calls, plus
-  // every roll the engine made this response, whose numbers are real too.
-  const turn = {
-    narration: body.narration,
-    tool_calls: gmRolls.map((c) => ({ id: c.id, name: 'roll_dice', arguments: c.arguments, result: c.result, error: c.error, used: !!c.applied_to })),
-    other_rolls: rolls.filter((r) => !r.skipped && !r.automatic).map((r) => ({ notation: r.notation, dice: r.dice, modifier: r.modifier, total: r.total })),
-    // The DCs and ACs this response's rolls were against, or the next roll's.
-    targets: [...rolls.map((r) => r.target), result.roll_required?.target].filter((t) => t > 0),
-  };
-  const g = grade(turn);
-  g.skipped = rolls.filter((r) => r.skipped).map((r) => r.label);
-  g.misapplied = gmRolls.filter((c) => (c.error || '').startsWith('not applied')).map((c) => c.error);
-  if (gmRolls.length === 0 && rolls.length === 0) {
+  const g = gradeResponse(body);
+  if (g.no_rolls) {
     g.non_invocation = callClaude(JUDGE_MODEL, null, JUDGE_PROMPT(body.narration), judgeSchema, 256, 'trajectory_judge');
     check(g, { 'judge returned a verdict': (v) => typeof v.non_invocation?.reports_roll === 'boolean' });
   }
-  const found = {
-    fabrication: g.fabricated.length > 0,
-    unexplained: g.fabricated.some((m) => m.kind === 'unexplained'),
-    arithmetic: g.fabricated.some((m) => m.kind === 'arithmetic'),
-    reroll: !!g.silent_reroll,
-    skipped: g.skipped.length > 0,
-    misapplied: g.misapplied.length > 0,
-    nonInvocation: g.non_invocation?.reports_roll === true,
-    unusedNarrated: g.unused_narrated.length > 0,
-  };
+  const found = { ...g.found, nonInvocation: g.non_invocation?.reports_roll === true };
   g.flagged = found.fabrication || found.reroll || found.skipped || found.nonInvocation || found.unusedNarrated;
   // A problem the reply itself can hide from a reader.
   g.hidden = found.unexplained || found.skipped || found.nonInvocation || found.unusedNarrated || (found.reroll && g.silent_reroll.unmentioned_calls > 0);

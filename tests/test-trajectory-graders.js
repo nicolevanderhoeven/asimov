@@ -1,5 +1,5 @@
 import { check, group } from 'k6';
-import { grade, rollMentions } from './lib/trajectory-grader.js';
+import { grade, gradeResponse, rollMentions } from './lib/trajectory-grader.js';
 
 // Checks the trajectory graders in tests/lib/trajectory-grader.js against the
 // cases in tests/fixtures/trajectory-graders.json. No network calls: it needs
@@ -50,6 +50,15 @@ export default function () {
         ...(c.want.unused_narrated ? { [`${c.name}: unused roll narrated`]: (v) => same(v.unused_narrated, c.want.unused_narrated) } : {}),
       });
       if (!ok) console.error(`${c.name}: got ${JSON.stringify(got)}, want ${JSON.stringify(c.want)}`);
+    }
+  });
+  group('responses', () => {
+    for (const c of fixture.responses) {
+      const g = gradeResponse(c.body);
+      const got = { found: g.found, skipped: g.skipped, no_rolls: g.no_rolls };
+      if (!check(got, { [c.name]: (v) => same(v, c.want) })) {
+        console.error(`${c.name}: got ${JSON.stringify(got)}, want ${JSON.stringify(c.want)}`);
+      }
     }
   });
 }

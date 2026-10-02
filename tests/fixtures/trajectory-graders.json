@@ -190,5 +190,36 @@
       },
       "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [], "silent_reroll": null }
     }
+  ],
+  "responses": [
+    {
+      "name": "skipped GM roll, refused call, and the player's roll with the wrong modifier",
+      "body": {
+        "narration": "You roll a 14, plus 3 is 17. The drone fires back.",
+        "gm_rolls": [
+          { "id": "a", "arguments": { "notation": "1d6", "reason": "damage" }, "result": { "notation": "1d6", "dice": [4], "modifier": 0, "total": 4 }, "error": "not applied: no damage roll is due" }
+        ],
+        "result": {
+          "rolls": [
+            { "label": "Data's attack", "notation": "1d20+5", "dice": [14], "modifier": 5, "total": 19, "target": 13 },
+            { "label": "drone attack", "skipped": true }
+          ]
+        }
+      },
+      "want": {
+        "found": { "fabrication": true, "unexplained": false, "arithmetic": true, "reroll": false, "skipped": true, "misapplied": true, "unusedNarrated": false },
+        "skipped": ["drone attack"],
+        "no_rolls": false
+      }
+    },
+    {
+      "name": "a response with no rolls at all",
+      "body": { "narration": "The bridge is quiet.", "result": {} },
+      "want": {
+        "found": { "fabrication": false, "unexplained": false, "arithmetic": false, "reroll": false, "skipped": false, "misapplied": false, "unusedNarrated": false },
+        "skipped": [],
+        "no_rolls": true
+      }
+    }
   ]
 }
