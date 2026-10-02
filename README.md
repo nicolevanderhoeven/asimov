@@ -108,10 +108,7 @@ Run `make` on its own to list every shortcut:
 
 ## How it fits together
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.png">
-  <img alt="Architecture: a player or k6 drives the Go game through its REPL or HTTP API. The game master calls Anthropic Claude, the rules engine owns the state, and telemetry sends generations to Agent Observability (where online evaluators judge them) and traces, metrics, and logs over OTLP to Grafana Cloud, optionally through a local Collector. k6 also calls Claude as player and judge and posts ratings and experiments." src="assets/architecture-light.png">
-</picture>
+![The Go game sends traces, metrics, and logs to Tempo, Prometheus, and Loki, and generations to Agent Observability, all viewed in Grafana. k6 drives the game and records scores and experiments in Agent Observability.](assets/talk-architecture.png)
 
 The game engine owns the rules and the state. Claude only interprets the
 player's input, decides whether a check needs a roll, makes the GM's own rolls
@@ -127,6 +124,30 @@ signals go straight to Grafana Cloud; a Collector is optional.
 | [`collector/`](collector/) | Optional OpenTelemetry Collector setup |
 | [`docs/`](docs/) | The Grafana Cloud setup guide |
 | [`scripts/`](scripts/) | The k6 runner the `make k6-*` targets use |
+
+### How calls are routed
+
+Inside the game, the REPL and the HTTP API both hand each turn to the game
+master, which calls Claude and has the rules engine, which owns the state,
+resolve the action.
+Generations go to Agent Observability, where online evaluators judge a sample
+of them. Traces, metrics, and logs go over OTLP, directly or through the
+optional Collector. k6 also calls Claude itself, as the player and the judge.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.png">
+  <img alt="Architecture: a player or k6 drives the Go game through its REPL or HTTP API. The game master calls Anthropic Claude, the rules engine owns the state, and telemetry sends generations to Agent Observability (where online evaluators judge them) and traces, metrics, and logs over OTLP to Grafana Cloud, optionally through a local Collector. k6 also calls Claude as player and judge and posts ratings and experiments." src="assets/architecture-light.png">
+</picture>
+
+Claude takes part in each turn twice: once to turn the player's words into a
+single tool call, and once to narrate the result. The engine sits between the
+two calls, so a narration that contradicts the saved state is a defect the
+evaluators can catch.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/turn-dark.png">
+  <img alt="One turn: the player types an action, Claude resolves it into one tool call, the engine validates it and resolves up to the first roll, the player rolls if one is due, the engine applies the rolls and saves the state, Claude narrates with the roll_dice tool, and the player reads the narration. The whole turn is one game.turn span." src="assets/turn-light.png">
+</picture>
 
 ## Talks
 
