@@ -34,21 +34,30 @@ match on. Every evaluator returns a single pass/fail key.
 | Rule | Evaluators | Sample rate |
 | --- | --- | --- |
 | `asimov_narration_defects` | false ending, false kill, roll ownership | 0.5 |
-| `asimov_narration_quality` | dice fidelity, GM voice | 0.1 |
-| `asimov_resolution` | resolution intent | 0.1 |
+| `asimov_narration_quality` | dice fidelity, GM voice | 1.0 |
+| `asimov_resolution` | resolution intent | 1.0 |
 | `asimov_roll_rulings` | missed roll, unneeded roll | 0.25 |
 
-The defects rule samples more because false kills (about 1% of narrations)
-and GM rolls (about 1 in 11) are rare. All rules use the
+The sample rate picks whole conversations, not single generations: a
+conversation a rule picks has every matching generation judged, and one it
+skips has none. With a rate of 0.1, a five-playthrough experiment arm has
+about a 59% chance of getting no scores at all from that rule, which is what
+left the first scenario experiment without quality or resolution scores.
+The quality and resolution rules therefore judge every conversation, so each
+arm of an experiment is scored. That costs about one judge call per narration
+or per player input: roughly 180 per rule for a five-playthrough e2e run.
+Lower them again for long or high-volume runs, keeping in mind that each
+conversation is then either fully scored or not at all. All rules use the
 `all_assistant_generations` selector: resolver generations contain only a
 tool call, so `user_visible_turn` would never match them. No rule is scoped
 to an agent version, so versions such as `pre-roll-dice` and `roll-dice-v2`
-compare side by side. Each judge call reads about 3,000 tokens, so a full
-`tests/test-e2e.js` run costs a few hundred judge calls.
+compare side by side. Each judge call reads about 3,000 tokens; a
+five-playthrough `tests/test-e2e.js` run costs close to a thousand judge
+calls across all four rules, most of them from the quality and resolution
+rules.
 
-The roll-rulings rule samples more than `asimov_resolution` because most
-resolver calls (moves, questions, actions with no check) have no ruling to
-judge, and its judges pass those.
+Most resolver calls (moves, questions, actions with no check) have no ruling
+for the roll-rulings judges to judge, and they pass those.
 Either of its evaluators failing means an indefensible ruling. Watch the two
 pass rates on the agent's Performance view, or list the failures:
 `gcx agento11y rules list-scores asimov_roll_rulings --passed=false -o json`.

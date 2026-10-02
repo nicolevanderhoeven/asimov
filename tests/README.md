@@ -56,7 +56,9 @@ To change the defaults for yourself only, copy `local.mk.example` to
 | `make test` | The same e2e test, starting new playthroughs for 30 minutes. Set `E2E_DURATION` for a different length, such as `make test E2E_DURATION=2h`. See the cost warning above. | 30 min, plus up to 15 min to finish | about a thousand |
 
 If you set up the [online evaluators](../agento11y/README.md), they also make
-judge calls on a sample of every test's generations.
+judge calls on every test's generations: the quality and resolution rules
+judge every conversation, and the others a sample of them (see
+[sample rates](../agento11y/README.md#online-evaluators)).
 
 All the scripts fail the run when a check fails. For the trajectory test, a
 failure means the model misbehaved, which is the point; the `traj_*` rates

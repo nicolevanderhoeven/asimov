@@ -1,9 +1,11 @@
 # Agent Observability rule: the resolver's one tool call per player input. Its
 # generations carry no text, so user_visible_turn would never match them.
+# Sampling picks whole conversations, so a low rate leaves small experiment
+# arms with no scores at all; it judges every conversation.
 rule_id: asimov_resolution
 enabled: true
 selector: all_assistant_generations
-sample_rate: 0.1
+sample_rate: 1.0
 evaluator_ids:
   - asimov_resolution_intent
 match:
