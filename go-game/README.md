@@ -97,6 +97,7 @@ Agent Observability's Conversations view. History lives only in memory (not in
 | `/roll Intelligence` | Make the roll the GM just asked for: `/roll` and what it names (`Intelligence`, `initiative`, `damage`) or its notation (`1d20+6`) |
 | `/status` | Show location, health, and discovered evidence |
 | `/sheet` | Show Data's fixed character sheet |
+| `/rate good the relay twist was great` | Rate the game `good` or `bad`, with an optional comment, at any time; the game asks for one when the adventure ends. Needs Grafana telemetry (see [Player ratings](../agento11y/README.md#player-ratings)) |
 | `/quit` | Flush telemetry and exit |
 
 Dice work the way they do at a table. The GM decides when a roll is called

@@ -44,6 +44,9 @@ func runREPL(ctx context.Context, g *gm.GM, sc *game.Scenario, offline bool, log
 	fmt.Printf("\n%s\n", wrap(sc.Opening, ""))
 	show(s, true)
 	scene := sceneKey(s)
+	// ratings counts the player's /rate commands, and asked records whether
+	// the game has asked for one at the end of the adventure.
+	ratings, asked := 0, false
 	// Read input in a goroutine so Ctrl-C also shuts down exporters while idle.
 	lines := make(chan string)
 	inputErrors := make(chan error, 1)
@@ -80,7 +83,7 @@ func runREPL(ctx context.Context, g *gm.GM, sc *game.Scenario, offline bool, log
 		case "quit", "exit", "/quit":
 			return nil
 		case "/help":
-			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\nYou can also try anything not on the list, or ask a question; the GM sets a check if it needs one.\nWhen the GM asks for a roll, make it yourself with /roll and what it names, e.g. /roll Intelligence, /roll initiative, or /roll damage.\n/try ABILITY[/SKILL] DIFFICULTY EFFECT APPROACH improvises without the model, e.g.\n  /try strength/athletics hard disable_drone rip the drone off its mount\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\nProgress is not saved; each run starts a new game.")
+			fmt.Println("Type an action naturally, or /do KIND TARGET from /actions.\nYou can also try anything not on the list, or ask a question; the GM sets a check if it needs one.\nWhen the GM asks for a roll, make it yourself with /roll and what it names, e.g. /roll Intelligence, /roll initiative, or /roll damage.\n/try ABILITY[/SKILL] DIFFICULTY EFFECT APPROACH improvises without the model, e.g.\n  /try strength/athletics hard disable_drone rip the drone off its mount\n/actions lists supported actions; /status shows state; /sheet shows Data's sheet; /quit exits.\n/rate good|bad [comment] tells us how the game went, at any time.\nProgress is not saved; each run starts a new game.")
 			continue
 		case "/status", "/actions":
 			show(s, false)
@@ -88,6 +91,15 @@ func runREPL(ctx context.Context, g *gm.GM, sc *game.Scenario, offline bool, log
 		case "/sheet":
 			b, _ := json.MarshalIndent(game.Data(), "", "  ")
 			fmt.Println(string(b))
+			continue
+		}
+		if input == "/rate" || strings.HasPrefix(input, "/rate ") {
+			if err := rate(ctx, g.Client, s, sc, strings.TrimPrefix(input, "/rate"), ratings+1); err != nil {
+				fmt.Println("Rating not sent:", err)
+			} else {
+				ratings++
+				fmt.Println("Thanks! Your rating is on this game's conversation in Agent Observability.")
+			}
 			continue
 		}
 		isRoll := input == "/roll" || strings.HasPrefix(input, "/roll ")
@@ -194,6 +206,12 @@ func runREPL(ctx context.Context, g *gm.GM, sc *game.Scenario, offline bool, log
 			show(s, true)
 		} else {
 			fmt.Printf("\n%s\n", statusLine(s.View()))
+		}
+		// A real player's verdict on the whole story is the one an LLM judge
+		// can only approximate, so ask for it once the adventure ends.
+		if (s.Won || s.HP <= 0) && !asked && g.Client != nil {
+			asked = true
+			fmt.Println("\nHow was the story? Rate it with /rate good or /rate bad, and add a comment if you like; /quit when you're done.")
 		}
 	}
 }

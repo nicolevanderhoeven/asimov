@@ -47,3 +47,13 @@ func TestLocalCollectorNeedsNoOTLPAuth(t *testing.T) {
 		t.Fatal("missing OTLP_HEADERS accepted for Grafana Cloud")
 	}
 }
+func TestRatingsUseTheAPIEndpoint(t *testing.T) {
+	c := Config{GenerationEndpoint: "https://sigil.example.com/api/v1/generations:export", Instance: "1", Token: "t"}
+	if got := GenerationConfig(c, nil).API.Endpoint; got != c.GenerationEndpoint {
+		t.Fatalf("API endpoint %q, want the generation endpoint", got)
+	}
+	c.APIEndpoint = "https://api.example.com"
+	if got := GenerationConfig(c, nil).API.Endpoint; got != c.APIEndpoint {
+		t.Fatalf("API endpoint %q, want AGENTO11Y_API_ENDPOINT", got)
+	}
+}

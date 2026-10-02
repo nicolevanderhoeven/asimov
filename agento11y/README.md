@@ -62,6 +62,27 @@ Either of its evaluators failing means an indefensible ruling. Watch the two
 pass rates on the agent's Performance view, or list the failures:
 `gcx agento11y rules list-scores asimov_roll_rulings --passed=false -o json`.
 
+## Player ratings
+
+The judges above check what a narrator's prompt forbids. Whether a story was
+creative and enjoyable is a matter of taste, and the only ground truth for it
+is the people who play. In the REPL, `/rate good` or `/rate bad`, with an
+optional comment (`/rate bad the drone fight dragged on`), posts a
+conversation rating to Agent Observability on the game's own conversation,
+next to its generations and these judges' scores; the game asks for one when
+the adventure ends. Each rating carries `source: asimov-repl` and the game's
+status, turn, and scenario, and is also counted in the `game.ratings` metric
+(labels `rating`, `status`, and `generated`), so a dashboard can chart good
+and bad ratings per agent version through `service.version`.
+
+Ratings go to the host of `AGENTO11Y_ENDPOINT`, or to `AGENTO11Y_API_ENDPOINT`
+if set, with the same credentials as generation export; with telemetry off,
+`/rate` says so and sends nothing. `tests/test-e2e.js` rates its own
+playthroughs too, but with `source: k6-e2e`, so the two never mix. Its story
+judge scores the same quality from the whole transcript (see [Story
+quality](../tests/README.md#story-quality)); comparing its scores with real
+ratings, version by version, shows how far the judge's taste can be trusted.
+
 ## Comparing scenarios
 
 Generated scenarios (see [Scenarios](../go-game/README.md#scenarios)) are an
