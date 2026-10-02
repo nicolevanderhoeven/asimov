@@ -218,7 +218,44 @@ ground truth:
 - **Ending cause**, when the crew wasn't rescued.
 
 Each turn makes two game model calls and a player call, and each playthrough
-adds one judge call, so a full run makes a few hundred Anthropic calls.
+adds a judge call and a story-judge call, so a full run makes a few hundred
+Anthropic calls.
+
+### Story quality
+
+How creative and enjoyable the GM's story was is a matter of taste, so a
+separate story judge (`STORY_JUDGE_MODEL`, by default `JUDGE_MODEL`) scores it
+apart from the correctness judge and never fails the run. It reads each whole
+game as the player saw it (every input and narration, the player's style, and
+the outcome), plus the scenario's solution so it can tell whether the story
+paid off what it set up. It scores 1 to 5, each with a reason citing turns:
+
+- **Vividness**: concrete, specific imagery rather than generic science fiction.
+- **Creativity**: fresh touches the GM adds within the scenario's facts.
+- **Responsiveness**: the story builds on what this player did and how they
+  played.
+- **Continuity**: early details come back and discoveries build on each other.
+- **Pacing**: tension rises and varies, and nothing drags or repeats.
+- **Character**: Data, the empty ship, and the Star Trek world feel true.
+- **Arc**: a setup, a rising problem, and a resolution that pays off what came
+  before.
+- **Overall**: how enjoyable the game was to play.
+
+The scale is anchored so that 3 is competent but generic, what an average GM
+reading the scenario aloud would give, and a 4 or 5 needs turns that earn it.
+Most sessions land on 3, so compare versions by the distribution, not single
+runs. The judge also names up to three highlights and lowlights with their
+turns and quotes, and writes a short critique. Rule and state errors count only
+as far as they hurt the story: a false ending is graded by the correctness
+judge, and here it only costs what it does to pacing and arc.
+
+The overall score is the `e2e_story_overall` trend in k6 (by playthrough), and
+each trial gets `story_overall` (with the critique, highlights, and lowlights)
+and `story_<dimension>` numbers. The rating's comment and metadata carry the
+scores too, but they never decide GOOD or BAD. `e2e_story_judged` counts story
+verdicts that came back. Real players' own verdicts come from the game's
+[`/rate` command](../agento11y/README.md#player-ratings), which is the ground
+truth this judge can only approximate.
 
 After each playthrough, the test posts a conversation rating to Agent
 Observability on that playthrough's conversation (the session ID is the game's
@@ -260,6 +297,8 @@ its conversation. Each trial gets these scores:
   intent (`handled`, `mishandled`, `not_attempted`, or `not_applicable`, with
   the turns), `findings_<kind>` counts with each finding's turn and
   explanation, and `ending_cause`.
+- From the story judge: `story_overall` and `story_<dimension>`, 1 to 5 (see
+  [Story quality](#story-quality)). They don't count toward `final`.
 
 Set `E2E_EXPERIMENT=0` to leave the experiment out. Set
 `AGENTO11Y_EXPERIMENT_URL_TEMPLATE` (with `{run_id}`) to log a link to it.
@@ -276,8 +315,8 @@ progress gets up to 15 minutes to finish. If you only want the traffic, add
 `-e E2E_RATE=0 -e E2E_EXPERIMENT=0` to leave out the ratings and the
 experiment. Set
 `E2E_LOG_TRANSCRIPTS=1` to log each playthrough whole (conversation, trial,
-verdict, failed checks, and every turn with its engine state) for reading
-afterwards.
+verdict, story verdict, failed checks, and every turn with its engine state)
+for reading afterwards.
 
 ## Results in Grafana Cloud k6
 
