@@ -6,6 +6,13 @@
 #
 #   scripts/k6.sh tests/test-code.js
 #   scripts/k6.sh --summary-mode=full -e RUNS=50 tests/test-trajectory.js
+#
+# With K6_CLOUD=1 (in the shell or .env), the test still runs here but streams
+# its results to Grafana Cloud k6; run k6 cloud login once first.
+#
+# Every test except tests/test-trajectory-graders.js spends Anthropic credits,
+# and tests/test-e2e.js with E2E_DURATION keeps spending for that long:
+# roughly $40-60 per 30 minutes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -54,4 +61,10 @@ if ! up; then
   up || { echo "The game server didn't start within 30s; see logs/server.log." >&2; exit 1; }
 fi
 
-k6 run "$@"
+if [ "${K6_CLOUD:-}" = 1 ]; then
+  # Local execution reaches the game on localhost. Without the archive upload,
+  # the script and the environment it reads (API keys) stay on this machine.
+  k6 cloud run --local-execution --no-archive-upload --include-system-env-vars "$@"
+else
+  k6 run "$@"
+fi

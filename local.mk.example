@@ -1,0 +1,7 @@
+# Personal make settings. Copy to local.mk (git ignores it) and edit.
+
+# Run make test for two hours instead of 30 minutes: roughly $150-250.
+# E2E_DURATION = 2h
+
+# Stream k6's results to Grafana Cloud k6 (run k6 cloud login once first).
+# K6_CLOUD = 1

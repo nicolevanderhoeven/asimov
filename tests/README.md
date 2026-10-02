@@ -29,6 +29,22 @@ Every model call costs Anthropic credits. Each game turn makes about two
 model calls, and the AI-judged tests add judge calls on top. The counts below
 are rough.
 
+> [!WARNING]
+> `make test` keeps playing whole e2e conversations for as long as
+> `E2E_DURATION` says (30 minutes by default), and it waits five seconds
+> before starting so you can stop it. Each 30 minutes costs roughly
+> **$40–60** in Anthropic calls, and two hours roughly $150–250. Most of
+> that is the game's own Sonnet calls; the rest is the Claude player and an
+> Opus judge per playthrough. These are estimates from a two-hour run on
+> 2026-09-30 (3,389 turns, 139 playthroughs). Check the Anthropic Console
+> for your actual spend.
+
+To change the defaults for yourself only, copy `local.mk.example` to
+`local.mk` (git ignores it). For example, set `E2E_DURATION = 2h` and
+`K6_CLOUD = 1` to stream the results to
+[Grafana Cloud k6](#results-in-grafana-cloud-k6). A value on the command line
+(`make test E2E_DURATION=10m`) still wins.
+
 | Command | What it does | Time | Model calls |
 | --- | --- | --- | --- |
 | `make k6-graders` | Runs [the trajectory graders](lib/trajectory-grader.js) against [fixed cases](fixtures/trajectory-graders.json). Needs no server and no API key. | ~1 s | none |
@@ -36,6 +52,7 @@ are rough.
 | `make k6-ai` | [`test-ai.js`](test-ai.js): Claude varies the lore and role probes, and another Claude model grades the narration against facts fixed in the script. | 1–2 min | ~20 |
 | `make k6-trajectory` | [`test-trajectory.js`](test-trajectory.js): ten runs of a five-turn script, with every response graded on the path it took. See [Trajectory evals](../go-game/README.md#trajectory-evals). | a few min | ~200 |
 | `make k6-e2e` | [`test-e2e.js`](test-e2e.js): five whole playthroughs, played and graded by Claude against intents, each of which must rescue the crew. See [End-to-end conversations](#end-to-end-conversations). | 5–10 min | a few hundred |
+| `make test` | The same e2e test, starting new playthroughs for 30 minutes. Set `E2E_DURATION` for a different length, such as `make test E2E_DURATION=2h`. See the cost warning above. | 30 min, plus up to 15 min to finish | about a thousand |
 
 If you set up the [online evaluators](../agento11y/README.md), they also make
 judge calls on a sample of every test's generations.
@@ -57,7 +74,8 @@ one JSON line per response with its full trajectory and findings, and
 
 Every test populates the game's own telemetry through its server; for a
 steady stream of realistic traffic, run the end-to-end test with
-`E2E_DURATION` (see [End-to-end conversations](#end-to-end-conversations)).
+`E2E_DURATION`, as `make test` does (see
+[End-to-end conversations](#end-to-end-conversations)).
 k6's own metrics need a separate k6 output to appear in Grafana; see
 [Results in Grafana Cloud k6](#results-in-grafana-cloud-k6).
 
@@ -245,9 +263,13 @@ the test locally and stream its results to the cloud:
 
 ```sh
 k6 cloud login --stack <your-stack>   # once, with a Grafana Cloud k6 token
-set -a; . ./.env; set +a              # give k6 the game's settings
-k6 cloud run --local-execution --no-archive-upload --include-system-env-vars tests/test-e2e.js
+K6_CLOUD=1 scripts/k6.sh tests/test-e2e.js
 ```
+
+`K6_CLOUD=1` (in the shell, `.env`, or `local.mk` for `make test`) makes
+`scripts/k6.sh` run
+`k6 cloud run --local-execution --no-archive-upload --include-system-env-vars`
+in place of `k6 run`, with the game's settings from `.env`.
 
 The test still runs on your machine, so it can reach the game on
 `localhost:8080`; only its metrics, checks, and thresholds go to Grafana Cloud

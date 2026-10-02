@@ -52,8 +52,10 @@ if (!API_KEY) throw new Error('ANTHROPIC_API_KEY is required for the Claude play
 http.setResponseCallback(http.expectedStatuses(200, 201, 409));
 
 // E2E_DURATION (such as 2h) keeps each scenario starting new playthroughs for
-// that long instead of playing one pass. A playthrough still in progress gets
-// up to 15 minutes to finish, so its trial completes before teardown.
+// that long instead of playing one pass. It spends Anthropic credits all that
+// time: roughly $40-60 per 30 minutes (see tests/README.md). A playthrough
+// still in progress gets up to 15 minutes to finish, so its trial completes
+// before teardown.
 function scenario(vus, exec) {
   return __ENV.E2E_DURATION
     ? { executor: 'constant-vus', vus, duration: __ENV.E2E_DURATION, gracefulStop: '15m', exec }

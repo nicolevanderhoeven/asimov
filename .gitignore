@@ -1,5 +1,6 @@
 # Secrets and local output
 .env
+local.mk
 logs/
 otel-config.yml
 .DS_Store

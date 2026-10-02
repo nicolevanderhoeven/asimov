@@ -98,7 +98,8 @@ Run `make` on its own to list every shortcut:
   play             Play with the AI GM, sending telemetry to Grafana Cloud
   serve            Run the HTTP API on :8080 for the k6 tests
   doctor           Check .env and send one test span, metric, log, and generation to Grafana Cloud
-  test             Run the Go unit tests (no credentials needed)
+  test             The full e2e eval for E2E_DURATION (default 30m): costs about 40-60 USD per 30 min
+  unit             Run the Go unit tests (no credentials needed)
   k6-graders       Trajectory graders against fixed cases: about 1s, no server or API calls
   k6-code          Fixed prompts with code checks: under 1 min, ~10 model calls
   k6-ai            Varied probes judged by Claude: 1-2 min, ~20 model calls
