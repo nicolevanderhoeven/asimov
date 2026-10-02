@@ -57,10 +57,6 @@ k6-code: .env ## Fixed prompts with code checks: under 1 min, ~10 model calls
 k6-ai: .env ## Varied probes judged by Claude: 1-2 min, ~20 model calls
 	$(K6) tests/test-ai.js
 
-.PHONY: k6-traffic
-k6-traffic: .env ## One minute of game traffic to populate Grafana: a few dozen model calls
-	$(K6) tests/test_traffic.js
-
 .PHONY: k6-trajectory
 k6-trajectory: .env ## Dice trajectory evals: a few min, ~200 model calls
 	$(K6) --summary-mode=full tests/test-trajectory.js

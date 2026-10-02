@@ -102,7 +102,6 @@ Run `make` on its own to list every shortcut:
   k6-graders       Trajectory graders against fixed cases: about 1s, no server or API calls
   k6-code          Fixed prompts with code checks: under 1 min, ~10 model calls
   k6-ai            Varied probes judged by Claude: 1-2 min, ~20 model calls
-  k6-traffic       One minute of game traffic to populate Grafana: a few dozen model calls
   k6-trajectory    Dice trajectory evals: a few min, ~200 model calls
   k6-e2e           Five whole playthroughs: 5-10 min, a few hundred model calls
 ```

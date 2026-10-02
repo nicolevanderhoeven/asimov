@@ -34,7 +34,6 @@ are rough.
 | `make k6-graders` | Runs [the trajectory graders](lib/trajectory-grader.js) against [fixed cases](fixtures/trajectory-graders.json). Needs no server and no API key. | ~1 s | none |
 | `make k6-code` | [`test-code.js`](test-code.js): fixed prompts with code assertions, plus basic game and HTTP behavior. Only the game calls Anthropic. | < 1 min | ~10 |
 | `make k6-ai` | [`test-ai.js`](test-ai.js): Claude varies the lore and role probes, and another Claude model grades the narration against facts fixed in the script. | 1–2 min | ~20 |
-| `make k6-traffic` | [`test_traffic.js`](test_traffic.js): one minute of paced play, including a question and a rejected rule override, to populate Grafana. Add `-u 2 -d 3m` for more. | 1 min | a few dozen |
 | `make k6-trajectory` | [`test-trajectory.js`](test-trajectory.js): ten runs of a five-turn script, with every response graded on the path it took. See [Trajectory evals](../go-game/README.md#trajectory-evals). | a few min | ~200 |
 | `make k6-e2e` | [`test-e2e.js`](test-e2e.js): five whole playthroughs, played and graded by Claude against intents, each of which must rescue the crew. See [End-to-end conversations](#end-to-end-conversations). | 5–10 min | a few hundred |
 
@@ -56,8 +55,10 @@ trajectory test, add `--log-format=raw --console-output=traj.jsonl` to save
 one JSON line per response with its full trajectory and findings, and
 `-e TRAJ_EXPERIMENT=0` to skip recording an Agent Observability experiment.
 
-The traffic seed populates the game's own telemetry through its server. k6's
-own metrics need a separate k6 output to appear in Grafana; see
+Every test populates the game's own telemetry through its server; for a
+steady stream of realistic traffic, run the end-to-end test with
+`E2E_DURATION` (see [End-to-end conversations](#end-to-end-conversations)).
+k6's own metrics need a separate k6 output to appear in Grafana; see
 [Results in Grafana Cloud k6](#results-in-grafana-cloud-k6).
 
 ## Original code-based AI checks
@@ -75,7 +76,7 @@ the AI test evaluates the full narration against explicit lore and role rubrics.
 ## Classic and generated scenarios
 
 The code, AI, and trajectory tests check facts of the classic scenario, so
-they always ask for it. The end-to-end and traffic tests play whichever
+they always ask for it. The end-to-end test plays whichever
 `ASIMOV_SCENARIO` names: `classic` (the default) or `generated`, a new
 scenario built from modules for every playthrough (see
 [Scenarios](../go-game/README.md#scenarios)). Each e2e playthrough fetches its
@@ -227,9 +228,12 @@ test sends `source` on every write and keeps the kind in each score's
 metadata. `e2e_trial_reported` counts trials whose scores and completion were
 accepted; like ratings, a failed report is logged but does not fail the run.
 
-For a longer sample, set `E2E_DURATION` (such as `2h`): each scenario keeps
-starting new playthroughs for that long, each as a new trial attempt, and a
-playthrough still in progress gets up to 15 minutes to finish. Set
+For a longer sample, or realistic traffic to populate Grafana, set
+`E2E_DURATION` (such as `2h`): each scenario keeps starting new playthroughs
+for that long, each as a new trial attempt, and a playthrough still in
+progress gets up to 15 minutes to finish. If you only want the traffic, add
+`-e E2E_RATE=0 -e E2E_EXPERIMENT=0` to leave out the ratings and the
+experiment. Set
 `E2E_LOG_TRANSCRIPTS=1` to log each playthrough whole (conversation, trial,
 verdict, failed checks, and every turn with its engine state) for reading
 afterwards.
