@@ -40,8 +40,8 @@ func TestCreateSessionChoosesTheScenario(t *testing.T) {
 	if _, again := postSession(t, srv.URL, `{"seed":99}`); again.Scenario.Variant != want.Variant() {
 		t.Fatal("a seed alone should replay the generated scenario")
 	}
-	if _, random := postSession(t, srv.URL, `{"scenario":"generated"}`); random.Scenario.Seed == 0 {
-		t.Fatal("a random generated scenario should report its seed")
+	if _, random := postSession(t, srv.URL, `{"scenario":"generated"}`); random.Scenario.Seed == 0 || random.Scenario.Seed >= 1<<53 {
+		t.Fatalf("a random generated scenario should report a seed JavaScript can hold exactly: %d", random.Scenario.Seed)
 	}
 	for _, bad := range []string{`{"scenario":"bogus"}`, `{"scenario":"classic","seed":3}`, `{`} {
 		if code, _ := postSession(t, srv.URL, bad); code != http.StatusBadRequest {

@@ -501,8 +501,10 @@ func Choose(mode string, seed uint64) (*Scenario, error) {
 		}
 		return Classic(), nil
 	case "generated":
+		// Random seeds stay below 2^53, so they survive JSON in JavaScript
+		// (the k6 tests) exactly and can be replayed from what they report.
 		for seed == 0 {
-			seed = rand.Uint64()
+			seed = rand.Uint64N(1 << 53)
 		}
 		return Generate(seed), nil
 	}
