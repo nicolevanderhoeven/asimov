@@ -47,6 +47,16 @@ var sceneArt = map[string]string{
                |   ___   |===----- - -  *
                 \_______/
                ___|___|___   security drone`,
+	// deck is any other room, and fight a fight with any foe but the drone.
+	"deck": `
+          _____________________________________________
+         |  ___   ___   ___   LCARS   ___   ___   ___  |
+         | |___| |___| |___|  =====  |___| |___| |___| |
+         |_____________________________________________|`,
+	"fight": `
+                    \  |  /
+                 --  ( ! )  --     incoming!
+                    /  |  \`,
 	"rescued": `
             .  *  .      *    .   *      .  *  .
           *   | |   .  | |   *   | |  .   | |   *
@@ -68,8 +78,13 @@ func sceneKey(s game.State) string {
 		return "rescued"
 	case s.HP <= 0:
 		return "disabled"
-	case s.Combat:
+	case s.Combat && s.Scenario().Encounter.Target == "drone":
 		return "combat"
+	case s.Combat:
+		return "fight"
+	}
+	if _, ok := sceneArt[s.Location]; !ok {
+		return "deck"
 	}
 	return s.Location
 }
@@ -115,7 +130,12 @@ func hpBar(hp, max int) string {
 // statusLine is the one-line summary shown after every turn.
 func statusLine(v game.View) string {
 	s := fmt.Sprintf("%s  |  HP %s  |  %s", strings.ToUpper(v.Location), hpBar(v.HP, v.Character.MaxHP), v.Status)
-	if v.Combat {
+	switch e := v.Encounter; {
+	case e != nil && e.Kind == game.Combat && v.Combat:
+		s += fmt.Sprintf("  |  %s HP %d", e.Name, e.HP)
+	case e != nil && e.Kind == game.Challenge && e.Status == "active" && e.Successes > 0:
+		s += fmt.Sprintf("  |  %s %d/%d", e.Name, e.Successes, e.Needed)
+	case v.Combat:
 		s += fmt.Sprintf("  |  drone HP %d", v.DroneHP)
 	}
 	return s

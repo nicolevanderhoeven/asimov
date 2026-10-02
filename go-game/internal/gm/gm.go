@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 
@@ -24,6 +25,30 @@ import (
 )
 
 type componentKey struct{}
+
+type scenarioKey struct{}
+
+// withScenario records the adventure a model call is for, for its tags.
+func withScenario(ctx context.Context, sc *game.Scenario) context.Context {
+	return context.WithValue(ctx, scenarioKey{}, sc)
+}
+
+func scenarioOf(ctx context.Context) *game.Scenario {
+	if sc, ok := ctx.Value(scenarioKey{}).(*game.Scenario); ok {
+		return sc
+	}
+	return game.Classic()
+}
+
+// scenarioTags are the tags that say which adventure a call is for:
+// "scenario" is silent-enterprise for the classic adventure or generated
+// for one built from modules, which also get their variant and seed.
+func scenarioTags(sc *game.Scenario) map[string]string {
+	if sc.IsClassic() {
+		return map[string]string{"scenario": game.ClassicID}
+	}
+	return map[string]string{"scenario": "generated", "scenario_variant": sc.Variant(), "scenario_seed": fmt.Sprint(sc.Seed)}
+}
 
 // Wrap adds Agent Observability recording to model. Record errors are written
 // to diag.
@@ -51,7 +76,8 @@ func Wrap(model provider.LanguageModel, client *agento11y.Client, version string
 func contextInfo(ctx context.Context, version string) agentobservability.ContextInfo {
 	info := agentobservability.ContextInfo{AgentName: telemetry.Service, AgentVersion: version}
 	if component, ok := ctx.Value(componentKey{}).(string); ok {
-		info.Tags = map[string]string{"component": component, "scenario": "silent-enterprise"}
+		info.Tags = scenarioTags(scenarioOf(ctx))
+		info.Tags["component"] = component
 	}
 	return info
 }
@@ -144,6 +170,7 @@ func (g *GM) record(ctx context.Context, span trace.Span, s *game.State, tool, c
 	if rec != nil {
 		rec.SetResult(agento11y.ToolExecutionEnd{Arguments: args, Result: result})
 	}
+	span.SetAttributes(attribute.String("game.scenario", scenarioTags(s.Scenario())["scenario"]), attribute.String("game.scenario.variant", s.Scenario().Variant()))
 	span.SetAttributes(attribute.Bool("game.allowed", result.Allowed), attribute.Bool("game.roll_required", result.RollRequired != nil), attribute.Bool("game.gm_roll_required", result.GMRollRequired != nil), attribute.Int("game.hp", s.HP), attribute.Bool("game.won", s.Won))
 	for _, roll := range result.Rolls {
 		span.AddEvent("dice.roll", traceEvent(roll))
@@ -241,7 +268,7 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	if s.Locked() {
 		return s.Apply(game.Action{}, game.Ruling{}), nil
 	}
-	ctx = context.WithValue(ctx, componentKey{}, "action_resolution")
+	ctx = withScenario(context.WithValue(ctx, componentKey{}, "action_resolution"), s.Scenario())
 	candidate := *s
 	candidate.Clues = make(map[string]bool, len(s.Clues))
 	for k, v := range s.Clues {
@@ -295,7 +322,7 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 		return result, err
 	}
 	generation, err := aisdk.GenerateText(ctx, g.Model,
-		aisdk.WithSystem(resolvePrompt+"\nCurrent authoritative view:\n"+s.View().JSON()),
+		aisdk.WithSystem(resolvePromptFor(s.Scenario())+"\nCurrent authoritative view:\n"+s.View().JSON()),
 		aisdk.WithModelMessages(withHistory(history, input)...),
 		aisdk.WithTools(aisdk.ToolSet{"resolve_action": action, "propose_improvisation": improvise, "answer_question": answer}),
 		aisdk.WithToolChoice(provider.ToolChoice{Type: provider.ToolChoiceRequired}),
@@ -312,6 +339,18 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	}
 	*s = candidate
 	return result, nil
+}
+
+// resolvePromptFor and narratePromptFor are the prompts with sc's own
+// examples in place of the classic adventure's, which they leave unchanged.
+func resolvePromptFor(sc *game.Scenario) string {
+	c := game.Classic().Prompt
+	return strings.NewReplacer(c.Elsewhere, sc.Prompt.Elsewhere, c.LongShot, sc.Prompt.LongShot, `"`+c.Approach+`"`, `"`+sc.Prompt.Approach+`"`).Replace(resolvePrompt)
+}
+
+func narratePromptFor(sc *game.Scenario) string {
+	c := game.Classic().Prompt
+	return strings.NewReplacer(c.NotReady, sc.Prompt.NotReady, c.GMRolls, sc.Prompt.GMRolls).Replace(narratePrompt)
 }
 
 const resolvePrompt = `You interpret one player input for The Silent Enterprise, a single-player Star Trek adventure using a bounded 2014 5e rules subset. The player is Data. The table follows the improv rule "yes, and": every in-character attempt is accepted and resolved somehow; none is refused. Call exactly one tool, once:
@@ -373,15 +412,44 @@ type Narration struct {
 
 // rollDiceTool has no Execute: Narrate runs the calls itself, one at a time
 // in the order the model made them, since each can change what the game
-// waits on next.
-var rollDiceTool = aisdk.Tool{Description: "Roll dice and return each die and the total.", InputSchema: rollDiceSchema}
+// waits on next. Its purposes are the scenario's GM rolls.
+func rollDiceTool(sc *game.Scenario) aisdk.Tool {
+	return aisdk.Tool{Description: "Roll dice and return each die and the total.", InputSchema: rollSchemaFor(sc)}
+}
+
+var rollSchemas sync.Map
+
+// rollSchemaFor is roll_dice's schema with sc's GM roll purposes; the classic
+// adventure's is the schema as declared.
+func rollSchemaFor(sc *game.Scenario) schema.Schema {
+	purposes := sc.GMPurposes()
+	if slices.Equal(purposes, game.Classic().GMPurposes()) {
+		return rollDiceSchema
+	}
+	key := strings.Join(purposes, ",")
+	if s, ok := rollSchemas.Load(key); ok {
+		return s.(schema.Schema)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rollDiceSchema.JSON(), &raw); err != nil {
+		panic(err)
+	}
+	raw["properties"].(map[string]any)["purpose"].(map[string]any)["enum"] = purposes
+	b, _ := json.Marshal(raw)
+	s, err := schema.SchemaFromJSON(b)
+	if err != nil {
+		panic(err)
+	}
+	rollSchemas.Store(key, s)
+	return s
+}
 
 // Narrate has the GM narrate result, making the GM's rolls with roll_dice as
 // it goes: a roll the game is waiting on is applied to s as soon as it is
 // made, and the GM hears what happens next. Nothing forces a roll, and a GM
 // roll still due when the narration ends is skipped: it didn't happen.
 func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Message, input string, result game.Result, out io.Writer) (Narration, error) {
-	ctx = context.WithValue(ctx, componentKey{}, "narration")
+	ctx = withScenario(context.WithValue(ctx, componentKey{}, "narration"), s.Scenario())
 	n := Narration{Result: result, Rolls: []RollCall{}}
 	data, _ := json.Marshal(result)
 	messages := withHistory(history, input)
@@ -389,9 +457,9 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 	wrote := false
 	for step := 1; step <= MaxNarrationSteps; step++ {
 		stream := aisdk.StreamText(ctx, g.Model,
-			aisdk.WithSystem(narratePrompt+"\n"+string(data)),
+			aisdk.WithSystem(narratePromptFor(s.Scenario())+"\n"+string(data)),
 			aisdk.WithModelMessages(messages...),
-			aisdk.WithTools(aisdk.ToolSet{"roll_dice": rollDiceTool}),
+			aisdk.WithTools(aisdk.ToolSet{"roll_dice": rollDiceTool(s.Scenario())}),
 			aisdk.WithStopWhen(aisdk.StepCountIs(1)), aisdk.WithMaxRetries(0), aisdk.WithMaxOutputTokens(600),
 		)
 		first := true
@@ -472,7 +540,7 @@ func (g *GM) rollDice(ctx context.Context, s *game.State, n *Narration, tool str
 			} else {
 				call.AppliedTo = a.Purpose
 				n.Result = merge(n.Result, r)
-				output["game"] = update(r)
+				output["game"] = update(r, s.Scenario())
 				for _, roll := range r.Rolls {
 					span.AddEvent("dice.roll", traceEvent(roll))
 				}
@@ -494,8 +562,14 @@ func (g *GM) rollDice(ctx context.Context, s *game.State, n *Narration, tool str
 
 // update is what the GM hears after one of its rolls is applied: what
 // happened and what the game waits on now.
-func update(r game.Result) map[string]any {
-	u := map[string]any{"message": r.Message, "rolls": r.Rolls, "hp": r.State.HP, "combat": r.State.Combat, "drone_hp": r.State.DroneHP, "status": r.State.Status}
+func update(r game.Result, sc *game.Scenario) map[string]any {
+	u := map[string]any{"message": r.Message, "rolls": r.Rolls, "hp": r.State.HP, "combat": r.State.Combat, "status": r.State.Status}
+	// The classic adventure reports its drone; every other one, its encounter.
+	if sc.IsClassic() {
+		u["drone_hp"] = r.State.DroneHP
+	} else if r.State.Encounter != nil {
+		u["encounter"] = r.State.Encounter
+	}
 	if r.Damage > 0 {
 		u["damage"] = r.Damage
 	}

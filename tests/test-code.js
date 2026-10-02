@@ -147,7 +147,8 @@ const legacyCases = [
 ];
 
 function createSession() {
-  const res = http.post(`${BASE_URL}/session`, null, { tags: { name: 'game_session' } });
+  // Its checks are written for the classic scenario, whatever the server's default.
+  const res = http.post(`${BASE_URL}/session`, JSON.stringify({ scenario: 'classic' }), { headers: { 'Content-Type': 'application/json' }, tags: { name: 'game_session' } });
   const body = parseJSON(res);
   const state = body && body.state;
   const valid = check({ res, body, state }, {

@@ -126,7 +126,7 @@ func TestNoSpoilersInInitialView(t *testing.T) {
 func TestRescueRequiresEvidence(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
-	s.DroneHP = 0
+	s.FoeHP = 0
 	s.Isolated = true
 	r := s.Apply(Action{"rescue", "crew"}, Ruling{})
 	if r.Allowed || s.Won || s.Turn != 0 {
@@ -151,7 +151,7 @@ func TestCombatAndCriticalDamage(t *testing.T) {
 	s.Location = "engineering"
 	// Player wins initiative, critically hits, and deals 6+4+2 damage.
 	r := play(&s, Action{"attack", "drone"}, sequence(t, 15, 1, 20, 6, 4))
-	if s.DroneHP != 0 || s.Combat || s.HP != 24 || len(r.Rolls) != 4 || r.Rolls[3].Notation != "2d6+2" {
+	if s.FoeHP != 0 || s.Combat || s.HP != 24 || len(r.Rolls) != 4 || r.Rolls[3].Notation != "2d6+2" {
 		t.Fatalf("bad critical or retaliation after defeat: %+v %+v", s, r)
 	}
 }
@@ -161,7 +161,7 @@ func TestDroneActsFirstAndCanDisableData(t *testing.T) {
 	s.Location = "engineering"
 	s.HP = 1
 	r := play(&s, Action{"attack", "drone"}, sequence(t, 1, 20, 20, 4, 4))
-	if s.HP != 0 || s.DroneHP != 10 || r.State.Status != "disabled" {
+	if s.HP != 0 || s.FoeHP != 10 || r.State.Status != "disabled" {
 		t.Fatal(s, r)
 	}
 	if s.Apply(Action{"retreat", "bridge"}, Ruling{}).Allowed {
@@ -178,7 +178,7 @@ func TestDodgeAndRetreat(t *testing.T) {
 		t.Fatal("disadvantage not respected")
 	}
 	s.Apply(Action{"retreat", "bridge"}, Ruling{})
-	if s.Combat || s.Location != "bridge" || s.DroneHP != 10 {
+	if s.Combat || s.Location != "bridge" || s.FoeHP != 10 {
 		t.Fatal(s)
 	}
 }
@@ -187,7 +187,7 @@ func TestBypassFailureStartsCombat(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
 	play(&s, Action{"bypass", "drone"}, sequence(t, 1, 15, 1))
-	if !s.Combat || s.DroneHP != 10 {
+	if !s.Combat || s.FoeHP != 10 {
 		t.Fatal(s)
 	}
 	if s.Apply(Action{"isolate", "relay"}, Ruling{}).Allowed {
@@ -198,7 +198,7 @@ func TestBypassFailureStartsCombat(t *testing.T) {
 func TestHazardAndSave(t *testing.T) {
 	s := New("test")
 	s.Location = "engineering"
-	s.DroneHP = 0
+	s.FoeHP = 0
 	r := play(&s, Action{"isolate", "relay"}, sequence(t, 1, 6))
 	if !s.Isolated || s.HP != 18 || r.Damage != 6 {
 		t.Fatal(s, r)
@@ -274,7 +274,7 @@ func TestImprovisedCheckUsesEffectMinimumDC(t *testing.T) {
 	}
 	// Strength 18 (+4) plus athletics proficiency (+2): 14 + 6 = 20.
 	r = s.Roll("athletics", sequence(t, 14))
-	if !r.Allowed || s.DroneHP != 0 || s.Combat || s.Turn != 1 || len(r.Rolls) != 1 || r.Rolls[0].By != ByPlayer || r.Rolls[0].Total != 20 || r.Improvisation == nil {
+	if !r.Allowed || s.FoeHP != 0 || s.Combat || s.Turn != 1 || len(r.Rolls) != 1 || r.Rolls[0].By != ByPlayer || r.Rolls[0].Total != 20 || r.Improvisation == nil {
 		t.Fatalf("improvised disable did not resolve: %+v", r)
 	}
 }
@@ -341,7 +341,7 @@ func TestImprovisedDamageInCombatDrawsFire(t *testing.T) {
 	r := s.Improvise(improvisation("strength", "athletics", "medium", "damage_drone"), Ruling{})
 	// Check 15+6 hits, 4 damage, then the drone attacks and misses.
 	r = drive(&s, s.Roll("Strength", sequence(t, 15)), sequence(t, 4, 2))
-	if s.DroneHP != 6 || !s.Combat || len(r.Rolls) != 3 || r.Rolls[1].Label != "Improvised damage" || r.Rolls[2].Label != "Drone attack" {
+	if s.FoeHP != 6 || !s.Combat || len(r.Rolls) != 3 || r.Rolls[1].Label != "Improvised damage" || r.Rolls[2].Label != "Drone attack" {
 		t.Fatalf("%+v %+v", s, r)
 	}
 }
@@ -404,7 +404,7 @@ func TestLeadsSteerTowardUnfinishedSteps(t *testing.T) {
 		t.Fatal(s.View().Leads)
 	}
 	s.Clues = map[string]bool{"logs": true, "frequency": true, "biopattern": true, "source": true}
-	s.DroneHP, s.Isolated = 0, true
+	s.FoeHP, s.Isolated = 0, true
 	if l := s.View().Leads; len(l) != 1 || !strings.Contains(l[0], "transporter") {
 		t.Fatal(l)
 	}
@@ -439,8 +439,8 @@ func TestGMCanRuleACheckNeedsNoRoll(t *testing.T) {
 	s = New("test")
 	s.Location, s.Combat = "engineering", true
 	got := pending(t, &s, s.Apply(Action{"attack", "drone"}, Ruling{NoRoll: true}), 3, 2)
-	if !slices.Equal(got, []string{"data_damage:player", "drone_attack:gm"}) || s.DroneHP != 5 {
-		t.Fatalf("got %v, drone HP %d", got, s.DroneHP)
+	if !slices.Equal(got, []string{"data_damage:player", "drone_attack:gm"}) || s.FoeHP != 5 {
+		t.Fatalf("got %v, drone HP %d", got, s.FoeHP)
 	}
 }
 

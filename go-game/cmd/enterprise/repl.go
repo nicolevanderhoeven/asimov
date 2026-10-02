@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, diag *telemetry.Diagnostics, telemetryNote string) error {
+func runREPL(ctx context.Context, g *gm.GM, sc *game.Scenario, offline bool, logger *slog.Logger, diag *telemetry.Diagnostics, telemetryNote string) error {
 	// Telemetry diagnostics arrive from background goroutines at any time.
 	// Hold them and print them just before each prompt, so they never land on
 	// the line where the player is typing.
@@ -31,14 +31,17 @@ func runREPL(ctx context.Context, g *gm.GM, offline bool, logger *slog.Logger, d
 	defer diag.Release()
 	// Every run starts a fresh game; state and dialogue history live only in
 	// memory for the lifetime of the process.
-	s := game.New(agentobservability.NewGenerationID())
+	s := game.NewScenario(agentobservability.NewGenerationID(), sc)
 	var history []provider.Message
 	ctx = agento11y.WithConversationID(ctx, s.ConversationID)
 	ctx = agento11y.WithConversationTitle(ctx, game.Title)
 	fmt.Println(banner())
 	fmt.Println(center(telemetryNote))
 	fmt.Println(center("Type /help for commands."))
-	fmt.Printf("\n%s\n", wrap(game.Opening, ""))
+	if sc.Generated() {
+		fmt.Println(center(fmt.Sprintf("Generated scenario, seed %d (replay with --scenario generated --seed %d).", sc.Seed, sc.Seed)))
+	}
+	fmt.Printf("\n%s\n", wrap(sc.Opening, ""))
 	show(s, true)
 	scene := sceneKey(s)
 	// Read input in a goroutine so Ctrl-C also shuts down exporters while idle.

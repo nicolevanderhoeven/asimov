@@ -47,9 +47,12 @@ func NewStore(ttl time.Duration) *Store {
 // Create starts a new session with a fresh game.State, keyed by its own
 // ConversationID (which doubles as the session id, so telemetry keys on the
 // same identifier whether the turn came from the REPL or the HTTP API).
-func (st *Store) Create() (string, game.View) {
+func (st *Store) Create() (string, game.View) { return st.CreateScenario(game.Classic()) }
+
+// CreateScenario starts a new session playing sc.
+func (st *Store) CreateScenario(sc *game.Scenario) (string, game.View) {
 	id := agentobservability.NewGenerationID()
-	s := &session{state: game.New(id), lastAccess: time.Now()}
+	s := &session{state: game.NewScenario(id, sc), lastAccess: time.Now()}
 	st.mu.Lock()
 	st.sessions[id] = s
 	st.mu.Unlock()
@@ -69,6 +72,20 @@ func (st *Store) View(id string) (game.View, bool) {
 	defer s.mu.Unlock()
 	s.lastAccess = time.Now()
 	return s.state.View(), true
+}
+
+// Scenario reports the adventure session id is playing.
+func (st *Store) Scenario(id string) (*game.Scenario, bool) {
+	st.mu.RLock()
+	s, ok := st.sessions[id]
+	st.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastAccess = time.Now()
+	return s.state.Scenario(), true
 }
 
 // WithSession locks the named session for the duration of fn, which may

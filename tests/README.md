@@ -72,6 +72,28 @@ session so a prior answer cannot supply a keyword. The code checks are useful
 regression signals, but a keyword match alone does not prove a factual answer;
 the AI test evaluates the full narration against explicit lore and role rubrics.
 
+## Classic and generated scenarios
+
+The code, AI, and trajectory tests check facts of the classic scenario, so
+they always ask for it. The end-to-end and traffic tests play whichever
+`ASIMOV_SCENARIO` names: `classic` (the default) or `generated`, a new
+scenario built from modules for every playthrough (see
+[Scenarios](../go-game/README.md#scenarios)). Each e2e playthrough fetches its
+scenario's solution from `GET /session/{id}/scenario`, so its engine checks
+and its judge follow that scenario, and its trial and rating carry the
+scenario's mode, variant, and seed.
+
+To compare how the GM does on the two, run the suite once each way, with an
+agent version per arm so the online evaluators' scores split cleanly in Agent
+Observability. Stop any server you started yourself first, so `k6.sh` starts
+one with these settings, and set them in the shell as below rather than in
+`.env`: `k6.sh` loads `.env` over the shell's values.
+
+```sh
+ASIMOV_AGENT_VERSION=scenarios-classic make k6-e2e
+ASIMOV_SCENARIO=generated ASIMOV_AGENT_VERSION=scenarios-generated make k6-e2e
+```
+
 ## End-to-end conversations
 
 `tests/test-e2e.js` tests what only shows up across a whole conversation. Every

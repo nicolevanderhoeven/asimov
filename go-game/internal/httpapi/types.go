@@ -6,8 +6,30 @@ import (
 )
 
 type sessionResponse struct {
-	SessionID string    `json:"session_id"`
-	State     game.View `json:"state"`
+	SessionID string        `json:"session_id"`
+	Scenario  *scenarioInfo `json:"scenario,omitempty"`
+	State     game.View     `json:"state"`
+}
+
+// createSessionRequest optionally names the scenario: "classic" or
+// "generated", with a seed to replay a generated one.
+type createSessionRequest struct {
+	Scenario string `json:"scenario,omitempty"`
+	Seed     uint64 `json:"seed,omitempty"`
+}
+
+// scenarioInfo is what a player may know about the scenario: which one it
+// is, and the opening they read before their first input.
+type scenarioInfo struct {
+	ID      string `json:"id"`
+	Mode    string `json:"mode"`
+	Variant string `json:"variant"`
+	Seed    uint64 `json:"seed,omitempty"`
+	Opening string `json:"opening"`
+}
+
+func infoOf(sc *game.Scenario) *scenarioInfo {
+	return &scenarioInfo{ID: sc.ID, Mode: sc.Mode(), Variant: sc.Variant(), Seed: sc.Seed, Opening: sc.Opening}
 }
 
 // actionRequest is an exact action. NoRoll rules its check an automatic

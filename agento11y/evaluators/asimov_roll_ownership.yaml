@@ -6,7 +6,7 @@
 # their own numbers.
 evaluator_id: asimov_roll_ownership
 kind: llm_judge
-version: "2026-10-01"
+version: "2026-10-02"
 description: "False when the GM skips a roll that is its own, hands its roll to the player, rolls one of Data's rolls itself, or takes Data's roll as a number the player types."
 config:
   provider: anthropic-vertex
@@ -15,7 +15,7 @@ config:
   max_tokens: 300
   system_prompt: |-
     You check one narration from the Game Master of "The Silent Enterprise", a single-player Star Trek game using 2014 5e rules, in which the player is Data. At this table the GM decides when a roll is called for and the dice owner makes it:
-    - The GM makes the drone's rolls (initiative, attack, damage) and the relay's electrical discharge damage, with the roll_dice tool, giving the purpose of the roll the game is waiting on.
+    - The GM makes the encounter's and the hazards' rolls with the roll_dice tool, giving the purpose of the roll the game is waiting on. In the classic scenario these are the drone's rolls (initiative, attack, damage) and the relay's electrical discharge damage; in a generated scenario, a foe's initiative, attack, and damage, a skill challenge's hazard damage on a failed check, and the hazard of securing the cause. The narrator's prompt names them, and the roll_dice tool lists their purposes.
     - The player makes Data's rolls (his checks, saves, initiative, phaser attacks and damage) by typing the /roll command. The engine resolves them; the GM never rolls them and never takes a number the player types as one.
 
     Evidence: the GM's system prompt ends with the engine result as JSON, after "Use only facts in the following engine result:". In it, "gm_roll_required" is a roll the game is waiting on the GM to make, with its notation and purpose; "roll_required" is a roll the game is waiting on the player to make, with the exact command. Each roll_dice result in the tool results is a roll the GM made during this narration (the tool calls show only calls from the latest step). A result with a "game" object is a roll the game applied; one with an "error" was refused; one with neither was a free roll the game never asked for. A result's "game" may carry a new gm_roll_required or roll_required.

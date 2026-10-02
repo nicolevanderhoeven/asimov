@@ -36,6 +36,8 @@ where each value comes from, and `go run ./cmd/doctor` checks them.
   auth. A plain-HTTP `OTLP_ENDPOINT` on localhost (a local Collector) needs no
   `OTLP_HEADERS`.
 - `ASIMOV_AGENT_VERSION`: optional, defaults to `go-experiment-v1`.
+- `ASIMOV_SCENARIO`: optional, `classic` (the default) or `generated`; see
+  [Scenarios](#scenarios). The `--scenario` flag overrides it.
 
 Grafana configuration is required by default. To deliberately play without
 exporting telemetry, use `--no-telemetry`. To play without an API key, LLM, or any
@@ -62,8 +64,9 @@ go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve retur
 
 | Method & path | Purpose |
 | --- | --- |
-| `POST /session` | Create a new session; returns its id and initial state |
+| `POST /session` | Create a new session; returns its id, its `scenario` (id, mode, variant, seed, and the opening), and its initial state. An optional body chooses the scenario: `{"scenario": "classic"}`, `{"scenario": "generated"}` for a random one, or `{"seed": N}` to replay one. Without it, the session plays the server's default (`--scenario`) |
 | `GET /session/{id}` | Current state |
+| `GET /session/{id}/scenario` | The whole scenario, solution included, for tests that grade a playthrough against it; a player never sees it |
 | `POST /session/{id}/actions` | Submit an exact `{"kind","target"}` action, as `/do` does; `"no_roll": true` rules its check an automatic success. The engine makes the GM's rolls |
 | `POST /session/{id}/resolve` | Submit natural-language `{"input"}`, as free-text play does; an input of `/roll ...` makes the player's pending roll. The response's `gm_rolls` lists every `roll_dice` call the GM made while narrating |
 | `POST /session/{id}/improvise` | Submit an exact improvisation, as `/try` does: `{"approach","ability","skill","difficulty","effect"}`, optionally `"no_roll": true`. The engine makes the GM's rolls |
@@ -161,6 +164,44 @@ scenario facts. A failed narration
 does not undo a resolved action. Model interpretation and prose can still be wrong;
 direct `/do` and `/try` commands bypass interpretation for reproducible demonstrations.
 
+## Scenarios
+
+Every game has the same shape: gather the evidence, get past whatever guards
+the cause of the disappearance, secure the cause, then bring the crew home.
+What fills that shape is a `game.Scenario`, and one engine plays them all.
+
+- **Classic** (the default) is the original adventure: a phase relay in
+  engineering, the bridge sensors and sickbay's records, a security drone,
+  and an electrical discharge. It plays exactly as it always has; the
+  engine's tests check that its views, results, prompts, and tool schemas are
+  unchanged.
+- **Generated** (`--scenario generated`, or `ASIMOV_SCENARIO=generated`)
+  builds a new scenario from one module of each kind, so where to go, what to
+  do, and which checks it takes change from game to game:
+
+  | Module | Options |
+  | --- | --- |
+  | Cause (what took the crew, and where) | phase relay in engineering, pattern buffer in the transporter room, holomatrix on the holodeck, alien artifact in the cargo bay, temporal field from deflector control |
+  | Key reading (a retryable check) | bridge sensor buffer (Intelligence (Investigation) DC 12), astrometrics sensor array (Wisdom (Perception) DC 12), computer core memory (Intelligence (Investigation) DC 13) |
+  | Crew records (no roll) | sickbay medical records, security office internal sensors |
+  | Encounter | a fight with a security drone, a malfunctioning exocomp, or a holographic security officer, each with its own statistics and a tricorder bypass; or a skill challenge, a cascading containment field or a security lockout, that needs three successes from any of three approaches, with the GM rolling damage for each failure |
+  | Hazard of securing the cause | electrical discharge (Dexterity save), radiation burst (Constitution save), venting plasma (Dexterity save) |
+
+  That's 450 scenarios. The seed picks them, so the same seed always builds
+  the same one: the REPL prints it (replay with `--seed N`), and over HTTP the
+  session's `scenario` reports it. Every combination is tested to be valid
+  and winnable.
+
+A generated scenario's view carries an `encounter` object (`kind`, `name`,
+`status` of `active` or `cleared`, and `hp` or `successes` of `needed`) in
+place of the classic view's `drone_hp`, and the GM's prompts and `roll_dice`
+purposes name its own places and rolls. Generations are tagged
+`scenario=silent-enterprise` for the classic adventure, or
+`scenario=generated` with `scenario_variant` (such as
+`holodeck/astrometrics/security/containment_field/plasma`) and
+`scenario_seed`, so evaluator scores can be compared between them; see
+[the evaluators](../agento11y/README.md#comparing-scenarios).
+
 ## Rules and adaptations
 
 Implemented mechanics: floor((ability score − 10)/2), proficiency, d20 ability
@@ -211,7 +252,8 @@ Rules references:
    happens next. Any other call rolls and changes nothing. A GM roll still
    due when the narration ends is skipped.
 5. `agentobservability` middleware records the calls under one conversation ID,
-   with `component=action_resolution` or `component=narration`; every
+   with `component=action_resolution` or `component=narration`, and the
+   scenario's tags (see [Scenarios](#scenarios)); every
    `roll_dice` call is also a recorded tool execution and a `game.gm_roll`
    span.
 

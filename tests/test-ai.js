@@ -156,7 +156,8 @@ function validInput(generated, probe) {
 }
 
 function createSession() {
-  const res = http.post(`${BASE_URL}/session`, null, { tags: { name: 'game_session' } });
+  // Its checks are written for the classic scenario, whatever the server's default.
+  const res = http.post(`${BASE_URL}/session`, JSON.stringify({ scenario: 'classic' }), { headers: { 'Content-Type': 'application/json' }, tags: { name: 'game_session' } });
   const body = parseJSON(res);
   const valid = check({ res, body }, {
     'session created': (v) => v.res.status === 201 && typeof v.body?.session_id === 'string' && !!v.body.state,

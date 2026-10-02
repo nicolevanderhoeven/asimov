@@ -88,6 +88,7 @@ This is the point of the demo. It takes about 15 minutes, and the
 | Score live traffic all the time with Agent Observability online evaluators (LLM judges for each known flaw) | [`agento11y/README.md`](agento11y/README.md) |
 | Route telemetry through a local OpenTelemetry Collector | [`collector/README.md`](collector/README.md) |
 | How the game, its rules, its HTTP API, and its instrumentation work | [`go-game/README.md`](go-game/README.md) |
+| Play a new scenario every game, built from modules, and compare how the GM does against the classic one | [`go-game/README.md#scenarios`](go-game/README.md#scenarios) |
 
 Run `make` on its own to list every shortcut:
 

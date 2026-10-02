@@ -309,7 +309,8 @@ function recordTrial(experimentID, run, session, n, step, graded, durationMs) {
 
 // createSession starts a game; its ID is also its conversation ID.
 function createSession() {
-  const res = http.post(`${BASE_URL}/session`, null, { tags: { name: 'game_session' } });
+  // Its checks are written for the classic scenario, whatever the server's default.
+  const res = http.post(`${BASE_URL}/session`, JSON.stringify({ scenario: 'classic' }), { headers: { 'Content-Type': 'application/json' }, tags: { name: 'game_session' } });
   const body = parseJSON(res);
   const ok = check({ res, body }, {
     'session created': (v) => v.res.status === 201 && typeof v.body?.session_id === 'string' && v.body.session_id.length > 0,

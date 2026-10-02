@@ -24,7 +24,9 @@ const inputs = [
 export default function () {
   // New session per iteration gives each run a stable path and avoids old
   // state, pending rolls, or the session TTL changing later requests.
-  const session = http.post(`${BASE_URL}/session`, null, { tags: { name: 'game_session' } });
+  // ASIMOV_SCENARIO=generated plays a new generated scenario each iteration;
+  // the inputs are written for the classic one, which the GM improvises around.
+  const session = http.post(`${BASE_URL}/session`, JSON.stringify({ scenario: __ENV.ASIMOV_SCENARIO || 'classic' }), { headers: JSON_HEADERS, tags: { name: 'game_session' } });
   const created = parseJSON(session);
   const valid = check({ session, created }, {
     'session created': (v) => v.session.status === 201 && typeof v.created?.session_id === 'string',

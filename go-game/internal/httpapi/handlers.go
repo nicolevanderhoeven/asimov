@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -39,9 +41,38 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg})
 }
 
+// handleCreateSession starts a session. Its optional body names the
+// scenario; without one, the session plays the server's default.
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	id, v := s.store.Create()
-	writeJSON(w, http.StatusCreated, sessionResponse{SessionID: id, State: v})
+	var req createSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	switch {
+	case req.Scenario == "" && req.Seed != 0:
+		req.Scenario = "generated"
+	case req.Scenario == "":
+		req.Scenario = s.DefaultScenario
+	}
+	sc, err := game.Choose(req.Scenario, req.Seed)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id, v := s.store.CreateScenario(sc)
+	writeJSON(w, http.StatusCreated, sessionResponse{SessionID: id, Scenario: infoOf(sc), State: v})
+}
+
+// handleGetScenario returns the whole scenario, solution included, for
+// tests that grade a playthrough against it. A player never sees it.
+func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.store.Scenario(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, sc)
 }
 
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {

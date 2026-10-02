@@ -23,8 +23,8 @@ match on. Every evaluator returns a single pass/fail key.
 | Evaluator | Scores | Fails when |
 | --- | --- | --- |
 | `asimov_no_false_ending` | Narration | The GM acts out the rescue or declares the scenario complete while the engine's status isn't `rescued`. |
-| `asimov_no_false_kill` | Narration | The GM says the drone is destroyed, disabled, or dark while the engine still has it at positive HP. |
-| `asimov_roll_ownership` | Narration | A roll is made by the wrong side of the table: the GM skips its own roll (the drone's or the relay discharge's) or tells the player to make it, rolls one of Data's rolls with `roll_dice`, asks the player to type their result, takes a number the player typed as a roll, or tells the player to `/roll` when no roll is due. |
+| `asimov_no_false_kill` | Narration | The GM says the drone is destroyed, disabled, or dark while the engine still has it at positive HP; in a generated scenario, that whatever guards the cause (a foe or a skill challenge) is defeated or cleared while the engine has it active. |
+| `asimov_roll_ownership` | Narration | A roll is made by the wrong side of the table: the GM skips its own roll (the drone's or the relay discharge's, or a generated scenario's foe, challenge, or hazard rolls) or tells the player to make it, rolls one of Data's rolls with `roll_dice`, asks the player to type their result, takes a number the player typed as a roll, or tells the player to `/roll` when no roll is due. |
 | `asimov_dice_fidelity` | Narration | A roll value or outcome isn't backed by the engine's rolls or a `roll_dice` result, including the outcome of a roll the game never applied. The online counterpart of [`tests/lib/trajectory-grader.js`](../tests/lib/trajectory-grader.js). |
 | `asimov_gm_voice` | Narration | The GM mentions the engine or the game's internals, refuses or blocks the player instead of "yes, and", or narrates Data in the third person. |
 | `asimov_resolution_intent` | Action resolution | The resolver's single tool call doesn't match the player's input: the wrong action or tool, a player-dictated roll or fact handled as a normal action instead of `unsupported`, an in-character attempt marked `unsupported`, or `no_roll` on a task that could fail. |
@@ -42,6 +42,27 @@ tool call, so `user_visible_turn` would never match them. No rule is scoped
 to an agent version, so versions such as `pre-roll-dice` and `roll-dice-v2`
 compare side by side. Each judge call reads about 3,000 tokens, so a full
 `tests/test-e2e.js` run costs a few hundred judge calls.
+
+## Comparing scenarios
+
+Generated scenarios (see [Scenarios](../go-game/README.md#scenarios)) are an
+experiment in how the GM copes when the facts change every game. The judges
+read the ground truth from each generation, so the same evaluators score
+both: in the classic adventure, `asimov_no_false_kill` judges the drone as it
+always has; in a generated one, it judges the `encounter` the view reports,
+whether a foe or a skill challenge, and `asimov_roll_ownership` covers that
+scenario's own GM rolls. The scenario is in each generation's tags:
+`scenario` is `silent-enterprise` or `generated`, and generated ones add
+`scenario_variant` and `scenario_seed`. For a clean split on the agent's
+Performance view, run each arm under its own agent version, as
+[the k6 tests](../tests/README.md#classic-and-generated-scenarios) show.
+
+The classic game's prompts are unchanged, so its defect rates stay
+comparable with earlier versions. The judges' wording did change (version
+`2026-10-02`) to cover generated scenarios; to check that changed nothing
+for classic traffic, run `test-evaluator.sh` on an old classic generation.
+
+## Set up
 
 To set them up on a new stack with the [gcx](https://github.com/grafana/gcx) CLI, from the repository root:
 

@@ -50,7 +50,7 @@ func (s State) effects() []Effect {
 		return nil
 	}
 	e := s.effectsAt(s.Location, s.Combat)
-	for _, loc := range Locations {
+	for _, loc := range s.Scenario().Locations {
 		if loc != s.Location {
 			for _, x := range s.effectsAt(loc, false) {
 				x.Location = loc
@@ -59,64 +59,61 @@ func (s State) effects() []Effect {
 		}
 	}
 	if !s.Advantage {
-		e = append(e, Effect{ID: "gain_advantage", Description: "Set up a later attempt: your next roll (a check, save, or phaser attack) has advantage.", MinDC: 10, OnFailure: "no advantage; in combat the drone still fires"})
+		enc := s.Scenario().Encounter
+		failure := "no advantage"
+		if enc.Kind == Combat {
+			failure = fmt.Sprintf("no advantage; in combat the %s still %s", enc.Short, enc.Fires)
+		}
+		e = append(e, Effect{ID: "gain_advantage", Description: "Set up a later attempt: your next roll (a check, save, or phaser attack) has advantage.", MinDC: 10, OnFailure: failure})
 	}
 	return append(e, Effect{ID: "flavor", Description: "Anything else: an attempt with no mechanical effect, from sitting in the captain's chair to a long shot the scenario can't support yet. No roll; the GM narrates it and points to a way forward."})
 }
 
 // effectsAt lists the location-bound effects at loc, as they would be with
-// Data there and, if combat is set, fighting the drone.
+// Data there and, if combat is set, fighting the encounter's foe.
 func (s State) effectsAt(loc string, combat bool) []Effect {
-	switch {
-	case combat:
-		return []Effect{{ID: "damage_drone", Description: "Damage the drone by some means other than your phaser: 1d6 damage on a success.", MinDC: 15, OnFailure: "no damage; the drone fires either way unless disabled"}}
-	case loc == "bridge" && !s.Clues["frequency"]:
-		return []Effect{{ID: "recover_frequency", Description: "Recover the pulse frequency from the damaged sensor buffer by another method.", MinDC: 15, OnFailure: "nothing is recovered; you may try again"}}
-	case loc == "engineering" && s.DroneHP > 0:
-		return []Effect{{ID: "disable_drone", Description: "Disable the security drone without a fight.", MinDC: 20, OnFailure: "the drone activates and combat starts"}}
+	sc := s.Scenario()
+	e := sc.Encounter
+	if combat {
+		return []Effect{{ID: "damage_" + e.Target, Description: fmt.Sprintf("Damage the %s by some means other than your phaser: 1d6 damage on a success.", e.Short), MinDC: 15, OnFailure: fmt.Sprintf("no damage; the %s %s either way unless disabled", e.Short, e.Fires)}}
 	}
-	return nil
+	var o []Effect
+	for _, c := range sc.Clues {
+		if c.Location == loc && c.Effect != nil && !s.Clues[c.Key] {
+			o = append(o, *c.Effect)
+		}
+	}
+	if e.Location == loc && !s.cleared() {
+		if e.Kind == Combat {
+			o = append(o, Effect{ID: "disable_" + e.Target, Description: fmt.Sprintf("Disable the %s without a fight.", e.Name), MinDC: 20, OnFailure: fmt.Sprintf("the %s activates and combat starts", e.Short)})
+		} else {
+			o = append(o, *e.Advance)
+		}
+	}
+	return o
 }
 
 // details are authored, spoiler-free facts about the current scene that the
 // GM may use to describe flavor actions and answer questions.
 func (s State) details() []string {
-	computer := "The ship's computer answers queries anywhere aboard, but reports no biological life signs and cannot say where the crew went."
+	sc := s.Scenario()
+	e := sc.Encounter
 	if s.Combat {
-		return []string{
-			"The drone is a fixed-mount security unit with a cracked casing. It tracks Data and fires short bursts.",
-			"The phase relay's control panel is behind the drone.",
-			computer,
-		}
+		return append(slices.Clone(e.SceneDetails), sc.Computer)
 	}
-	switch s.Location {
-	case "bridge":
-		return []string{
-			"The captain's chair, conn, and ops stations are unoccupied. Every console is still powered.",
-			"The main viewscreen shows the ship holding position.",
-			"A turbolift at the rear of the bridge reaches every deck.",
-			computer,
-		}
-	case "sickbay":
-		return []string{
-			"The biobeds are made up and unoccupied. A tray of instruments sits untouched.",
-			"The door to the chief medical officer's office is open, and her desk console is on.",
-			computer,
-		}
-	case "engineering":
-		d := []string{
-			"The warp core pulses steadily, and main power reads nominal.",
-			"The phase relay is a temporary installation, cabled into a power conduit beside the core.",
-			"Tools lie where the engineering crew set them down.",
-		}
-		if s.DroneHP > 0 {
-			d = append(d, "A fixed-mount security drone with a cracked casing guards the relay's control panel. It has not fired.")
+	room, ok := sc.Rooms[s.Location]
+	if !ok {
+		return []string{sc.Computer}
+	}
+	d := slices.Clone(room.Details)
+	if e.Location == s.Location {
+		if s.cleared() {
+			d = append(d, e.ClearedDetail)
 		} else {
-			d = append(d, "The security drone hangs inert on its mount.")
+			d = append(d, e.ActiveDetail)
 		}
-		return append(d, computer)
 	}
-	return []string{computer}
+	return append(d, sc.Computer)
 }
 
 func title(s string) string {
@@ -228,35 +225,40 @@ func (s *State) resolveImprovised(t *turn) Result {
 	s.Turn++
 	t.r.Improvisation = im
 	x := t.check(improvisedCheck(*im), Data().CheckBonus(im.Ability, im.Skill), improvisedDC(*im, effect), false)
+	sc := s.Scenario()
+	enc := sc.Encounter
+	for _, c := range sc.Clues {
+		if c.Effect != nil && im.Effect == c.Effect.ID {
+			if x.Success {
+				s.Clues[c.Key] = true
+				return t.finish(c.Text)
+			}
+			return t.finish(c.EffectRetry)
+		}
+	}
 	switch im.Effect {
-	case "recover_frequency":
+	case "disable_" + enc.Target:
 		if x.Success {
-			s.Clues["frequency"] = true
-			return t.finish(clueText["frequency"])
+			s.FoeHP = 0
+			return t.finish(fmt.Sprintf("The attempt disables the %s. %s", enc.Name, enc.Access))
 		}
-		return t.finish("The attempt yields no stable frequency. You may try again.")
-	case "disable_drone":
-		if x.Success {
-			s.DroneHP = 0
-			return t.finish("The attempt disables the security drone. The relay controls are accessible.")
-		}
-		t.r.Message = "The attempt fails and the drone activates."
+		t.r.Message = fmt.Sprintf("The attempt fails and the %s activates.", enc.Short)
 		t.startCombat()
-		return t.finish("The attempt fails and the drone activates. Initiative determines whether it fires before your next action.")
-	case "damage_drone":
+		return t.finish(t.r.Message + " Initiative determines whether it fires before your next action.")
+	case "damage_" + enc.Target:
 		msg := "The attempt does no damage."
 		if x.Success {
 			damage := t.damage("Improvised damage", "1d6")
-			s.DroneHP = max(0, s.DroneHP-damage)
-			if s.DroneHP == 0 {
+			s.FoeHP = max(0, s.FoeHP-damage)
+			if s.FoeHP == 0 {
 				s.Combat = false
-				return t.finish(fmt.Sprintf("The attempt deals %d damage and disables the drone.", damage))
+				return t.finish(fmt.Sprintf("The attempt deals %d damage and disables the %s.", damage, enc.Short))
 			}
 			msg = fmt.Sprintf("The attempt deals %d damage.", damage)
 		}
 		t.r.Message = msg
-		t.droneAttack(false)
-		return t.finish(msg + " The drone takes its next turn.")
+		t.foeAttack(false)
+		return t.finish(msg + t.foeTurn())
 	case "gain_advantage":
 		msg := "The setup doesn't pay off."
 		if x.Success {
@@ -265,10 +267,13 @@ func (s *State) resolveImprovised(t *turn) Result {
 		}
 		if s.Combat {
 			t.r.Message = msg
-			t.droneAttack(false)
-			msg += " The drone takes its next turn."
+			t.foeAttack(false)
+			msg += t.foeTurn()
 		}
 		return t.finish(msg)
+	}
+	if enc.Advance != nil && im.Effect == enc.Advance.ID {
+		return t.challenge(x)
 	}
 	panic("unhandled validated improvisation")
 }

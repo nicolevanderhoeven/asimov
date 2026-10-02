@@ -15,6 +15,9 @@ type Server struct {
 	store   *Store
 	logger  *slog.Logger
 	offline bool
+	// DefaultScenario is the scenario a new session plays when its request
+	// doesn't name one: "classic" (the default) or "generated".
+	DefaultScenario string
 }
 
 func NewServer(g *gm.GM, store *Store, logger *slog.Logger, offline bool) *Server {
@@ -25,6 +28,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /session", s.handleCreateSession)
 	mux.HandleFunc("GET /session/{id}", s.handleGetSession)
+	mux.HandleFunc("GET /session/{id}/scenario", s.handleGetScenario)
 	mux.HandleFunc("POST /session/{id}/actions", s.handleAction)
 	mux.HandleFunc("POST /session/{id}/resolve", s.handleResolve)
 	mux.HandleFunc("POST /session/{id}/roll", s.handleRoll)

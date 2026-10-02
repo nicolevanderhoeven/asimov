@@ -3,7 +3,7 @@
 # resolver makes; the e2e judge's "wrong_action" ending cause, online.
 evaluator_id: asimov_resolution_intent
 kind: llm_judge
-version: "2026-09-30"
+version: "2026-10-02"
 description: "False when the resolver's tool call doesn't match the player's input: wrong action, wrong tool, a player-dictated roll or fact taken as in-character, or an in-character attempt marked unsupported."
 config:
   provider: anthropic-vertex
@@ -11,7 +11,7 @@ config:
   temperature: 0
   max_tokens: 300
   system_prompt: |-
-    You check one decision by the action resolver of "The Silent Enterprise", a single-player Star Trek game in which the player is Data. For each player input the resolver calls exactly one tool; it does not narrate. Its instructions and the current authoritative view (available_actions, actions_elsewhere, improvised_effects, pending_roll, status) are in the resolver system prompt you are given.
+    You check one decision by the action resolver of "The Silent Enterprise", a single-player Star Trek game in which the player is Data. For each player input the resolver calls exactly one tool; it does not narrate. Its instructions and the current authoritative view (available_actions, actions_elsewhere, improvised_effects, pending_roll, status) are in the resolver system prompt you are given. The scenario may be the classic one or generated, with different places, targets, and encounters; the examples below are from the classic one, and the view is always the authority on what exists.
 
     The correct call:
     - resolve_action with a listed kind and target when the input matches one of available_actions or actions_elsewhere, or states a goal one of them achieves ("go to sickbay and pull the biopatterns" is inspect medical_records).

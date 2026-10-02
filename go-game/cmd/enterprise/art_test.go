@@ -16,9 +16,25 @@ func TestEverySceneHasArtThatFits(t *testing.T) {
 		func(s *game.State) { s.Won = true },
 		func(s *game.State) { s.HP = 0 },
 	}
+	states := []game.State{}
 	for _, set := range scenes {
 		s := game.New("test")
 		set(&s)
+		states = append(states, s)
+	}
+	// Every room and foe of a generated scenario falls back to art that fits.
+	for seed := range uint64(300) {
+		sc := game.Generate(seed)
+		for _, loc := range sc.Locations {
+			s := game.NewScenario("test", sc)
+			s.Location = loc
+			states = append(states, s)
+		}
+		s := game.NewScenario("test", sc)
+		s.Location, s.Combat = sc.Encounter.Location, sc.Encounter.Kind == game.Combat
+		states = append(states, s)
+	}
+	for _, s := range states {
 		art, ok := sceneArt[sceneKey(s)]
 		if !ok {
 			t.Fatalf("no art for scene %q", sceneKey(s))
