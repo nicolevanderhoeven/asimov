@@ -333,3 +333,35 @@ func TestAutoRollMakesTheGMsRollsWithoutAModel(t *testing.T) {
 		t.Fatalf("%+v HP %d", r.Rolls, s.HP)
 	}
 }
+
+func TestNarrateTellsTheGMHowAPlayerRollCameUp(t *testing.T) {
+	m := &fakeModel{}
+	g := newGM(m)
+	s := game.New("test")
+	s.Apply(game.Action{Kind: "scan", Target: "sensors"}, game.Ruling{})
+	r := g.RollPending(context.Background(), &s, "Intelligence", "roll")
+	var out strings.Builder
+	if _, err := g.Narrate(context.Background(), &s, nil, "/roll Intelligence", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	last := m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text
+	if last != "/roll Intelligence\n\n(Rolled: Intelligence (Investigation), 1d20+6: die 15, total 21 against 12: success. Tell the player the die and total, then what happens.)" {
+		t.Fatalf("the GM should hear how the roll came up next to the command: %q", last)
+	}
+
+	r = g.RollPending(context.Background(), &s, "1d20+6", "roll")
+	if _, err := g.Narrate(context.Background(), &s, nil, "/roll 1d20+6", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	last = m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text
+	if !strings.Contains(last, "(The roll was not made: No roll is needed right now.") {
+		t.Fatalf("the GM should hear why a refused roll was not made: %q", last)
+	}
+
+	if _, err := g.Narrate(context.Background(), &s, nil, "I scan the sensors", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	if last = m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != "I scan the sensors" {
+		t.Fatalf("other input should reach the GM unchanged: %q", last)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -452,7 +453,7 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 	ctx = withScenario(context.WithValue(ctx, componentKey{}, "narration"), s.Scenario())
 	n := Narration{Result: result, Rolls: []RollCall{}}
 	data, _ := json.Marshal(result)
-	messages := withHistory(history, input)
+	messages := withHistory(history, input+rollNote(input, result))
 	var errs []error
 	wrote := false
 	for step := 1; step <= MaxNarrationSteps; step++ {
@@ -503,6 +504,35 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 		n.Result = merge(n.Result, s.SkipGMRoll())
 	}
 	return n, errors.Join(append(errs, ctx.Err())...)
+}
+
+// rollNote is what the GM hears about a typed /roll right after it, where
+// the GM reads it: how the dice came up, or why no roll was made. Left only
+// in the result, the GM often missed that the roll had happened at all and
+// asked the player to roll again or to say what they rolled.
+func rollNote(input string, result game.Result) string {
+	if text, ok := strings.CutPrefix(input, "/roll"); !ok || (text != "" && text[0] != ' ') {
+		return ""
+	}
+	var made []string
+	for _, r := range result.Rolls {
+		if r.By != game.ByPlayer || r.Skipped {
+			continue
+		}
+		dice := make([]string, len(r.Dice))
+		for i, d := range r.Dice {
+			dice[i] = strconv.Itoa(d)
+		}
+		x := fmt.Sprintf("%s, %s: die %s, total %d", r.Label, r.Notation, strings.Join(dice, " and "), r.Total)
+		if r.Target > 0 {
+			x += fmt.Sprintf(" against %d: %s", r.Target, map[bool]string{true: "success", false: "failure"}[r.Success])
+		}
+		made = append(made, x)
+	}
+	if len(made) == 0 {
+		return "\n\n(The roll was not made: " + result.Message + ")"
+	}
+	return "\n\n(Rolled: " + strings.Join(made, "; ") + ". Tell the player the die and total, then what happens.)"
 }
 
 // rollDice runs one roll_dice call: it rolls exactly what was asked and, when
