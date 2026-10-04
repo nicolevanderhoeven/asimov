@@ -175,7 +175,15 @@ is kept for reference.
 
 ## References
 
-Asimov, I. (1942). Runaround. In I, Robot (pp. 1-42). Gnome Press.
+Asimov, I. (1942). Runaround. In *I, Robot* (pp. 1–42). Gnome Press.
+
+Chia, O., & Cress, L. (2026). *Anthropic's Claude AI escapes to hack into three organisations*. BBC. https://www.bbc.com/news/articles/cz7dl7w8y7po
+
+Elkins, S., & Stern, J. (2026). *A rogue OpenAI model hacked a startup, and some experts worry that's just the start*. NBC News. https://www.nbcnews.com/tech/tech-news/openai-model-hack-hugging-face-divides-security-experts-rcna588835
+
+Schmelzer, R. (2026, February 5). *Rentahuman.ai turns humans into on-demand labor force for AI agents*. Forbes. https://www.forbes.com/sites/ronschmelzer/2026/02/05/when-ai-agents-start-hiring-humans-rentahumanai-turns-the-tables/
+
+Watwe, S. (2026). *Character.AI, Google agree to settle teen chatbot harm lawsuits*. Bloomberg Law. https://news.bloomberglaw.com/litigation/character-ai-google-agree-to-settle-teen-chatbot-harm-lawsuits
 
 Pictures in presentation:
 - https://animalia-life.club/qa/pictures/hal-9000-im-sorry-dave
