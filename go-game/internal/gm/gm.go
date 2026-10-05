@@ -375,7 +375,9 @@ const MaxNarrationSteps = 10
 type RollCall struct {
 	ID        string          `json:"id"`
 	Arguments json.RawMessage `json:"arguments"`
-	Result    *DiceResult     `json:"result,omitempty"`
+	// Result is what was rolled; nil when the call wasn't applied, since
+	// only the roll the game waits on is rolled.
+	Result *DiceResult `json:"result,omitempty"`
 	// AppliedTo is the game roll the dice were used for; empty for a roll
 	// the game wasn't waiting on.
 	AppliedTo string `json:"applied_to,omitempty"`
@@ -448,7 +450,10 @@ func rollSchemaFor(sc *game.Scenario) schema.Schema {
 // Narrate has the GM narrate result, making the GM's rolls with roll_dice as
 // it goes: a roll the game is waiting on is applied to s as soon as it is
 // made, and the GM hears what happens next. Nothing forces a roll, and a GM
-// roll still due when the narration ends is skipped: it didn't happen.
+// roll still due when the narration ends is skipped: it didn't happen. The GM
+// may call roll_dice only in a step that starts with a GM roll due; offered
+// at any other time, it rolled for Data or for nothing and narrated the
+// numbers as if the game had used them.
 func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Message, input string, result game.Result, out io.Writer) (Narration, error) {
 	ctx = withScenario(context.WithValue(ctx, componentKey{}, "narration"), s.Scenario())
 	n := Narration{Result: result, Rolls: []RollCall{}}
@@ -457,10 +462,17 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 	var errs []error
 	wrote := false
 	for step := 1; step <= MaxNarrationSteps; step++ {
+		// roll_dice stays declared, so every narration has the same tools,
+		// but with no GM roll due the model can't call it.
+		choice := provider.ToolChoiceNone
+		if gmRollDue(s) {
+			choice = provider.ToolChoiceAuto
+		}
 		stream := aisdk.StreamText(ctx, g.Model,
 			aisdk.WithSystem(narratePromptFor(s.Scenario())+"\n"+string(data)),
 			aisdk.WithModelMessages(messages...),
 			aisdk.WithTools(aisdk.ToolSet{"roll_dice": rollDiceTool(s.Scenario())}),
+			aisdk.WithToolChoice(provider.ToolChoice{Type: choice}),
 			aisdk.WithStopWhen(aisdk.StepCountIs(1)), aisdk.WithMaxRetries(0), aisdk.WithMaxOutputTokens(600),
 		)
 		first := true
@@ -500,10 +512,15 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 		}
 		messages = append(messages, assistant, results)
 	}
-	for s.Pending != nil && s.Pending.By == game.ByGM {
+	for gmRollDue(s) {
 		n.Result = merge(n.Result, s.SkipGMRoll())
 	}
 	return n, errors.Join(append(errs, ctx.Err())...)
+}
+
+// gmRollDue reports whether the game is waiting on one of the GM's rolls.
+func gmRollDue(s *game.State) bool {
+	return s.Pending != nil && s.Pending.By == game.ByGM
 }
 
 // rollNote is what the GM hears about a typed /roll right after it, where
@@ -535,9 +552,19 @@ func rollNote(input string, result game.Result) string {
 	return "\n\n(Rolled: " + strings.Join(made, "; ") + ". Tell the player the die and total, then what happens.)"
 }
 
-// rollDice runs one roll_dice call: it rolls exactly what was asked and, when
-// the call names the roll the game is waiting on, applies it. The output is
-// what the model sees; the RollCall is what the trace records.
+// noPurpose is why a roll_dice call without a purpose isn't rolled: the GM
+// rolls only what the game waits on.
+func noPurpose(s *game.State) string {
+	if !gmRollDue(s) {
+		return "no GM roll is due right now"
+	}
+	return fmt.Sprintf("the roll due is %s (%s); give it as purpose", s.Pending.Purpose, s.Pending.Notation)
+}
+
+// rollDice runs one roll_dice call: when the call names the roll the game is
+// waiting on, with its dice, it rolls them and applies the roll. Any other
+// call rolls nothing and returns only why. The output is what the model sees;
+// the RollCall is what the trace records.
 func (g *GM) rollDice(ctx context.Context, s *game.State, n *Narration, tool string, input json.RawMessage, callID string) (json.RawMessage, RollCall) {
 	args := input
 	if !json.Valid(args) {
@@ -559,21 +586,23 @@ func (g *GM) rollDice(ctx context.Context, s *game.State, n *Narration, tool str
 		call.Error = "invalid arguments: " + err.Error()
 	} else if d, err := game.ParseNotation(a.Notation); err != nil {
 		call.Error = err.Error()
+	} else if a.Purpose == "" {
+		call.Error = "not applied: " + noPurpose(s)
 	} else {
 		dice := d.Roll(g.Roll)
-		call.Result = &DiceResult{Notation: game.NormalizeNotation(a.Notation), Dice: dice, Modifier: d.Modifier, Total: d.Total(dice)}
-		output["notation"], output["dice"], output["modifier"], output["total"] = call.Result.Notation, dice, d.Modifier, call.Result.Total
-		span.SetAttributes(attribute.String("roll.notation", call.Result.Notation), attribute.String("roll.reason", a.Reason), attribute.String("roll.purpose", a.Purpose), attribute.IntSlice("roll.dice", dice), attribute.Int("roll.total", call.Result.Total))
-		if a.Purpose != "" {
-			if r, err := s.GMRoll(a.Purpose, a.Notation, dice); err != nil {
-				call.Error = "not applied: " + err.Error()
-			} else {
-				call.AppliedTo = a.Purpose
-				n.Result = merge(n.Result, r)
-				output["game"] = update(r, s.Scenario())
-				for _, roll := range r.Rolls {
-					span.AddEvent("dice.roll", traceEvent(roll))
-				}
+		if r, err := s.GMRoll(a.Purpose, a.Notation, dice); err != nil {
+			// The dice are discarded: a roll the game can't use returns no
+			// numbers, so the GM has none to narrate.
+			call.Error = "not applied: " + err.Error()
+		} else {
+			call.Result = &DiceResult{Notation: game.NormalizeNotation(a.Notation), Dice: dice, Modifier: d.Modifier, Total: d.Total(dice)}
+			output["notation"], output["dice"], output["modifier"], output["total"] = call.Result.Notation, dice, d.Modifier, call.Result.Total
+			span.SetAttributes(attribute.String("roll.notation", call.Result.Notation), attribute.String("roll.reason", a.Reason), attribute.String("roll.purpose", a.Purpose), attribute.IntSlice("roll.dice", dice), attribute.Int("roll.total", call.Result.Total))
+			call.AppliedTo = a.Purpose
+			n.Result = merge(n.Result, r)
+			output["game"] = update(r, s.Scenario())
+			for _, roll := range r.Rolls {
+				span.AddEvent("dice.roll", traceEvent(roll))
 			}
 		}
 	}

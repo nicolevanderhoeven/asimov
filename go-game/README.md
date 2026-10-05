@@ -249,8 +249,11 @@ Rules references:
 4. The state is saved; AI SDK `StreamText` narrates with one tool,
    `roll_dice` (`notation`, `reason`, optional `purpose`). The GM's calls run
    one at a time in the order it made them; one naming the roll the game
-   waits on, with its exact notation, is applied, and the GM hears what
-   happens next. Any other call rolls and changes nothing. A GM roll still
+   waits on, with its exact notation, is rolled and applied, and the GM hears
+   what happens next. Any other call rolls nothing and returns only why, so
+   the GM has no numbers it could narrate as a roll the game never used. The
+   GM can call `roll_dice` only in a step that starts with a GM roll due;
+   otherwise the tool stays declared with tool choice `none`. A GM roll still
    due when the narration ends is skipped.
 5. `agentobservability` middleware records the calls under one conversation ID,
    with `component=action_resolution` or `component=narration`, and the
@@ -308,10 +311,13 @@ trajectory and findings. The checks are:
   a lie: the maths may use a modifier the narration never states).
 - **Unused roll narrated** (deterministic): the narration reports the result
   of a `roll_dice` call the game didn't use: a free roll, or one it refused.
+  Since a call the game can't use now returns no numbers, a number narrated
+  from one shows up as a fabrication instead.
 - **Skipped GM roll** (deterministic): the game waited on a GM roll the GM
   never made, so it didn't happen.
-- **Misapplied GM roll** (deterministic): a roll naming the game's purpose
-  that the game refused, for the wrong dice or before it was due.
+- **Misapplied GM roll** (deterministic): a roll the game refused: one with
+  no purpose, or naming the game's purpose with the wrong dice or before it
+  was due.
 - **Silent reroll**: more than one `roll_dice` call in a response, with the
   totals, which were narrated, and how many never were. A combat round
   (initiative, attack, damage) counts too; the calls' `purpose`s tell them

@@ -19,9 +19,11 @@ type fakeModel struct {
 	calls  []string
 	fail   bool
 	params provider.CallOptions
-	// rolls are the roll_dice inputs the narrator calls on its first step;
-	// after their results come back, it narrates.
+	// rolls are the roll_dice inputs the narrator calls on its first step, if
+	// it may call tools then; after their results come back, it narrates.
 	rolls []string
+	// choices are the tool choices of every narration step, in order.
+	choices []provider.ToolChoiceType
 }
 
 // toolCall splits a scripted call into its tool name and JSON arguments. A
@@ -56,7 +58,12 @@ func (m *fakeModel) DoStream(_ context.Context, p provider.CallOptions) (*provid
 	}
 	c := make(chan provider.StreamPart, len(m.calls)+len(m.rolls)+4)
 	narrating := slices.ContainsFunc(p.Tools, func(t provider.Tool) bool { return t.Name == "roll_dice" })
-	if narrating && len(m.rolls) > 0 && p.Prompt[len(p.Prompt)-1].Role != provider.RoleTool {
+	canRoll := narrating
+	if narrating && p.ToolChoice != nil {
+		m.choices = append(m.choices, p.ToolChoice.Type)
+		canRoll = p.ToolChoice.Type != provider.ToolChoiceNone
+	}
+	if canRoll && len(m.rolls) > 0 && p.Prompt[len(p.Prompt)-1].Role != provider.RoleTool {
 		for i, input := range m.rolls {
 			c <- provider.StreamPart{Type: provider.PartToolCall, ToolCallID: "roll" + string(rune('a'+i)), ToolName: "roll_dice", Input: input}
 		}
@@ -134,8 +141,27 @@ func TestNarrationOffersOnlyRollDice(t *testing.T) {
 	if err != nil || out.Len() == 0 || len(m.params.Tools) != 1 || m.params.Tools[0].Name != "roll_dice" || len(n.Rolls) != 0 {
 		t.Fatal(out.String(), err, m.params.Tools)
 	}
-	if m.params.ToolChoice != nil && m.params.ToolChoice.Type != provider.ToolChoiceAuto {
-		t.Fatal("narration must not force tool use", m.params.ToolChoice)
+	// No GM roll is due, so roll_dice is declared but can't be called.
+	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceNone}) {
+		t.Fatal("roll_dice must not be callable with no GM roll due", m.choices)
+	}
+}
+
+func TestNarratorCannotRollWhileThePlayersRollIsDue(t *testing.T) {
+	m := &fakeModel{rolls: []string{`{"notation":"1d20+6","reason":"Data reconstructs the sensor buffer"}`}}
+	g := newGM(m)
+	s := game.New("test")
+	r := s.Apply(game.Action{Kind: "scan", Target: "sensors"}, game.Ruling{})
+	if r.RollRequired == nil {
+		t.Fatal(r)
+	}
+	var out strings.Builder
+	n, err := g.Narrate(context.Background(), &s, nil, "I scan the sensors", r, &out)
+	if err != nil || len(n.Rolls) != 0 || out.Len() == 0 || s.Pending == nil || s.Pending.By != game.ByPlayer {
+		t.Fatalf("%+v %v %+v", n.Rolls, err, s.Pending)
+	}
+	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceNone}) {
+		t.Fatal("roll_dice must not be callable while the player's roll is due", m.choices)
 	}
 }
 
@@ -290,6 +316,32 @@ func TestNarratorAppliesTheGMRollDue(t *testing.T) {
 	if b, _ := json.Marshal(m.params.Prompt[len(m.params.Prompt)-1]); !strings.Contains(string(b), "drone_damage") {
 		t.Fatalf("the GM was not told the damage roll was next: %+v", m.params.Prompt[len(m.params.Prompt)-1])
 	}
+	// The damage roll was due after the hit, so the GM could still roll it.
+	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceAuto, provider.ToolChoiceAuto}) {
+		t.Fatal(m.choices)
+	}
+}
+
+func TestNarratorRollsAHitsDamageInTheSameNarration(t *testing.T) {
+	m := &fakeModel{rolls: []string{
+		`{"notation":"2d20kl1+3","reason":"drone fires","purpose":"drone_attack"}`,
+		`{"notation":"1d4+1","reason":"drone damage","purpose":"drone_damage"}`,
+	}}
+	g := newGM(m)
+	g.Roll = func(sides int) int { return min(15, sides) } // hits, then 4+1 damage
+	s, r := dodge(t, g)
+	var out strings.Builder
+	n, err := g.Narrate(context.Background(), &s, nil, "I dodge", r, &out)
+	if err != nil || len(n.Rolls) != 2 || n.Rolls[0].AppliedTo != "drone_attack" || n.Rolls[1].AppliedTo != "drone_damage" {
+		t.Fatalf("%+v %v", n.Rolls, err)
+	}
+	if s.Pending != nil || s.HP != 24-(4+1) {
+		t.Fatalf("%+v HP %d", n.Result.Rolls, s.HP)
+	}
+	// With nothing left due, the GM narrates without roll_dice.
+	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceAuto, provider.ToolChoiceNone}) {
+		t.Fatal(m.choices)
+	}
 }
 
 func TestNarratorRollsAreRecordedEvenWhenNotApplied(t *testing.T) {
@@ -306,17 +358,22 @@ func TestNarratorRollsAreRecordedEvenWhenNotApplied(t *testing.T) {
 	if err != nil || len(n.Rolls) != 3 {
 		t.Fatalf("%+v %v", n.Rolls, err)
 	}
-	if got := strings.Count(logs.String(), `level=WARN msg="gm roll failed"`); got != 2 {
-		t.Fatalf("want the 2 failed rolls logged as warnings, got %d: %s", got, logs.String())
+	if got := strings.Count(logs.String(), `level=WARN msg="gm roll failed"`); got != 3 {
+		t.Fatalf("want the 3 failed rolls logged as warnings, got %d: %s", got, logs.String())
 	}
-	if n.Rolls[0].AppliedTo != "" || !strings.Contains(n.Rolls[0].Error, "2d20kl1+3") || n.Rolls[0].Result == nil {
-		t.Fatalf("a roll with the wrong dice must not apply: %+v", n.Rolls[0])
+	if n.Rolls[0].AppliedTo != "" || !strings.Contains(n.Rolls[0].Error, "2d20kl1+3") || n.Rolls[0].Result != nil {
+		t.Fatalf("a roll with the wrong dice must not apply or roll: %+v", n.Rolls[0])
 	}
-	if n.Rolls[1].AppliedTo != "" || n.Rolls[1].Error != "" || n.Rolls[1].Result == nil {
-		t.Fatalf("a free roll should roll and change nothing: %+v", n.Rolls[1])
+	if n.Rolls[1].AppliedTo != "" || !strings.Contains(n.Rolls[1].Error, "the roll due is drone_attack (2d20kl1+3)") || n.Rolls[1].Result != nil {
+		t.Fatalf("a roll with no purpose must not roll: %+v", n.Rolls[1])
 	}
 	if n.Rolls[2].Error == "" || n.Rolls[2].Result != nil {
 		t.Fatalf("bad notation should be recorded as an error: %+v", n.Rolls[2])
+	}
+	// The GM hears why each call failed, and no numbers to narrate.
+	results, _ := json.Marshal(m.params.Prompt[len(m.params.Prompt)-1])
+	if !strings.Contains(string(results), `"error":`) || strings.Contains(string(results), `"total":`) || strings.Contains(string(results), `"dice":`) {
+		t.Fatalf("an unapplied roll must return no numbers: %s", results)
 	}
 	// The drone's attack was never validly rolled, so it didn't happen.
 	if s.Pending != nil || s.HP != 24 || !n.Result.Rolls[0].Skipped {
