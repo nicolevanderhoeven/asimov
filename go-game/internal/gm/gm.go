@@ -458,7 +458,7 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 	ctx = withScenario(context.WithValue(ctx, componentKey{}, "narration"), s.Scenario())
 	n := Narration{Result: result, Rolls: []RollCall{}}
 	data, _ := json.Marshal(result)
-	messages := withHistory(history, input+rollNote(input, result))
+	messages := withHistory(history, input+rollNote(input, result)+dueNote(input, s))
 	var errs []error
 	wrote := false
 	for step := 1; step <= MaxNarrationSteps; step++ {
@@ -559,6 +559,27 @@ func noPurpose(s *game.State) string {
 		return "no GM roll is due right now"
 	}
 	return fmt.Sprintf("the roll due is %s (%s); give it as purpose", s.Pending.Purpose, s.Pending.Notation)
+}
+
+// dueNote is what the GM hears about the player's rolls after any input but
+// a /roll, which rollNote covers: while their roll is due, that nothing was
+// rolled for it and the exact command; with nothing due, that no roll is.
+// Without it, the GM took numbers the player typed ("I rolled a 14, so 20")
+// as the roll and narrated progress the game never applied, and asked for
+// rolls, or invented commands like /roll 1d20, that the game would refuse.
+// It is a note rather than a prompt rule so the classic prompts stay as
+// recorded.
+func dueNote(input string, s *game.State) string {
+	if strings.HasPrefix(input, "/roll") {
+		return ""
+	}
+	switch p := s.Pending; {
+	case p == nil:
+		return "\n\n(No roll is due: don't ask the player to roll or name a /roll command, and a number in their text is not a roll.)"
+	case p.By == game.ByPlayer:
+		return fmt.Sprintf("\n\n(Nothing has been rolled for %s. The player makes it by typing %s; a number in their text is not a roll.)", p.Check, p.Command)
+	}
+	return ""
 }
 
 // rollDice runs one roll_dice call: when the call names the roll the game is

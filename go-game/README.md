@@ -254,7 +254,12 @@ Rules references:
    the GM has no numbers it could narrate as a roll the game never used. The
    GM can call `roll_dice` only in a step that starts with a GM roll due;
    otherwise the tool stays declared with tool choice `none`. A GM roll still
-   due when the narration ends is skipped.
+   due when the narration ends is skipped. After the player's input, the GM
+   reads how a `/roll` came up (or why it wasn't made); after any other
+   input, that nothing has been rolled for the player's roll due and the
+   command that makes it, or, with nothing due, that no roll is. A number
+   the player typed is never a roll. These are notes on the input rather
+   than prompt rules, so the classic prompts stay as recorded.
 5. `agentobservability` middleware records the calls under one conversation ID,
    with `component=action_resolution` or `component=narration`, and the
    scenario's tags (see [Scenarios](#scenarios)); every

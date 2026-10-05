@@ -391,6 +391,45 @@ func TestAutoRollMakesTheGMsRollsWithoutAModel(t *testing.T) {
 	}
 }
 
+func TestNarrateTellsTheGMNothingWasRolledForATypedNumber(t *testing.T) {
+	m := &fakeModel{}
+	g := newGM(m)
+	s := game.New("test")
+	r := s.Apply(game.Action{Kind: "scan", Target: "sensors"}, game.Ruling{})
+	var out strings.Builder
+	for _, input := range []string{"I scan the sensors", "I rolled a 14 on the die, so 20 total"} {
+		if _, err := g.Narrate(context.Background(), &s, nil, input, r, &out); err != nil {
+			t.Fatal(err)
+		}
+		want := input + "\n\n(Nothing has been rolled for Intelligence (Investigation). The player makes it by typing /roll Intelligence; a number in their text is not a roll.)"
+		if last := m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != want {
+			t.Fatalf("the GM should hear the player's roll is still due: %q", last)
+		}
+	}
+	// A /roll gets rollNote's account of the roll instead.
+	r = g.RollPending(context.Background(), &s, "Intelligence", "roll")
+	if _, err := g.Narrate(context.Background(), &s, nil, "/roll Intelligence", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	if last := m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; strings.Contains(last, "Nothing has been rolled") || strings.Contains(last, "No roll is due") {
+		t.Fatalf("a made roll needs no reminder: %q", last)
+	}
+}
+
+func TestNarrateSaysNothingAboutThePlayersRollsWhileTheGMRolls(t *testing.T) {
+	m := &fakeModel{}
+	g := newGM(m)
+	s, r := dodge(t, g)
+	var out strings.Builder
+	if _, err := g.Narrate(context.Background(), &s, nil, "I dodge", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	// The GM's roll may lead to one of the player's, so no note is made.
+	if last := m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != "I dodge" {
+		t.Fatalf("%q", last)
+	}
+}
+
 func TestNarrateTellsTheGMHowAPlayerRollCameUp(t *testing.T) {
 	m := &fakeModel{}
 	g := newGM(m)
@@ -418,7 +457,8 @@ func TestNarrateTellsTheGMHowAPlayerRollCameUp(t *testing.T) {
 	if _, err := g.Narrate(context.Background(), &s, nil, "I scan the sensors", r, &out); err != nil {
 		t.Fatal(err)
 	}
-	if last = m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != "I scan the sensors" {
-		t.Fatalf("other input should reach the GM unchanged: %q", last)
+	// With nothing due, other input reaches the GM with only that said.
+	if last = m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != "I scan the sensors\n\n(No roll is due: don't ask the player to roll or name a /roll command, and a number in their text is not a roll.)" {
+		t.Fatalf("the GM should hear that no roll is due: %q", last)
 	}
 }
