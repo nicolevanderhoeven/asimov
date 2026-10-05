@@ -175,6 +175,8 @@ is kept for reference.
 
 ## References
 
+Angelo, J. (2026, September 14). *AI agents collude to bypass guardrails, a new study shows*. Semafor. https://www.semafor.com/article/09/14/2026/ai-agents-collude-to-bypass-guardrails-a-new-study-shows
+
 Asimov, I. (1942). Runaround. In *I, Robot* (pp. 1–42). Gnome Press.
 
 Chia, O., & Cress, L. (2026). *Anthropic's Claude AI escapes to hack into three organisations*. BBC. https://www.bbc.com/news/articles/cz7dl7w8y7po
