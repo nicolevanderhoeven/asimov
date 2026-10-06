@@ -146,3 +146,23 @@ It needs [yq](https://github.com/mikefarah/yq). Find generation IDs with
 not those from earlier steps of the same narration; `{{tool_results}}` holds
 them all.
 
+
+## Judging locally
+
+If the stack's judges aren't available (its LLM usage budget ran out, for
+example), `judge-local.py` runs the same evaluator definitions with your
+Anthropic key, on the same judge model, against an experiment's
+conversations:
+
+```sh
+agento11y/judge-local.py --experiment exp-... --sample 0.4 --export
+agento11y/judge-local.py --calibrate exp-... --limit 40   # compare with online scores
+```
+
+Rules sample whole conversations at their `sample_rate`, as online, unless
+`--sample` overrides them. `--export` sends each verdict to Agent
+Observability as a `local.<evaluator>` score, so it never mixes with the
+online evaluators' own. It approximates how the server fills in each
+`{{...}}` variable. Calibrated on two runs, it agreed with the online
+verdicts 94% and 97.5% of the time, and was a little stricter, mostly on
+`asimov_resolution_intent`. Each judge call costs about 1.4 cents.
