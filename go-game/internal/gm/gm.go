@@ -99,13 +99,27 @@ type GM struct {
 	// ending it guards against is a defect the demo keeps, and this is the
 	// version that fixes it, run under its own agent version to compare.
 	EndingGuard bool
+	// Fixes turns on the other opt-in fixes, for the version that fixes what
+	// the judges find: the engine makes the GM's rolls (so no model call
+	// touches dice), the resolver hears how to read inputs that act and ask
+	// at once, and the narrator hears a reminder of the GM's voice. Like
+	// EndingGuard it is off by default, so the demo keeps roll_dice.
+	Fixes bool
 }
+
+// engineRollsNote, voiceNote and resolveNote are Fixes' notes on the input.
+const (
+	engineRollsNote = "\n\n(The game has made the GM's rolls this turn; they are in the result's rolls. Narrate them as they came up, without rolling.)"
+	voiceNote       = "\n\n(Stay in the story as the GM: don't mention HP, armor class, the system, the engine, the rules, or leads. When an attempt doesn't work, show what happens without saying you can't, that something is locked, or that it isn't ready, and offer one way forward.)"
+	resolveNote     = "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move.)"
+)
 
 // narratorNotes versions what the narrator hears beyond its system prompt,
 // which TestClassicPromptsAreUnchanged pins: the notes on each player input.
 // Raise it with any change to them. v1 is rollNote alone; v2 adds dueNote;
-// v3 notes a /roll inside an action and says a refused one rolled nothing.
-const narratorNotes = "narrator-notes-v3"
+// v3 notes a /roll inside an action and says a refused one rolled nothing;
+// v4 has the no-roll note say to name the check rather than a command.
+const narratorNotes = "narrator-notes-v4"
 
 // gmRolls versions how the narrator's roll_dice is offered: v1 let the GM
 // call it at will; forced-gm-rolls-v1 makes it roll exactly the roll due.
@@ -114,6 +128,9 @@ const gmRolls = "forced-gm-rolls-v1"
 // endingGuard versions the ending guard's notes: v2 adds the closing note.
 const endingGuard = "ending-guard-v2"
 
+// gmFixes versions what Fixes changes.
+const gmFixes = "gm-fixes-v1"
+
 // PromptVersion names what g's model is told, for comparing versions in
 // prompt analysis: the notes and roll_dice versions, plus the ending guard
 // when it is on. Every game call is tagged prompt_version with it.
@@ -121,6 +138,9 @@ func (g *GM) PromptVersion() string {
 	v := narratorNotes + "+" + gmRolls
 	if g.EndingGuard {
 		v += "+" + endingGuard
+	}
+	if g.Fixes {
+		v += "+" + gmFixes
 	}
 	return v
 }
@@ -365,9 +385,13 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	if err != nil {
 		return result, err
 	}
+	resolverInput := input
+	if g.Fixes {
+		resolverInput += resolveNote
+	}
 	generation, err := aisdk.GenerateText(ctx, g.Model,
 		aisdk.WithSystem(resolvePromptFor(s.Scenario())+"\nCurrent authoritative view:\n"+s.View().JSON()),
-		aisdk.WithModelMessages(withHistory(history, input)...),
+		aisdk.WithModelMessages(withHistory(history, resolverInput)...),
 		aisdk.WithTools(aisdk.ToolSet{"resolve_action": action, "propose_improvisation": improvise, "answer_question": answer}),
 		aisdk.WithToolChoice(provider.ToolChoice{Type: provider.ToolChoiceRequired}),
 		aisdk.WithStopWhen(aisdk.StepCountIs(1)), aisdk.WithMaxRetries(0), aisdk.WithMaxOutputTokens(512),
@@ -538,13 +562,20 @@ func rollSchemaFor(sc *game.Scenario) schema.Schema {
 func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Message, input string, result game.Result, out io.Writer) (Narration, error) {
 	ctx = withScenario(context.WithValue(ctx, componentKey{}, "narration"), s.Scenario())
 	ctx = context.WithValue(ctx, promptVersionKey{}, g.PromptVersion())
-	note := rollNote(input, result) + dueNote(input, s)
+	engineRolled := ""
+	if g.Fixes && gmRollDue(s) {
+		result = g.AutoRoll(s, result)
+		engineRolled = engineRollsNote
+	}
+	note := rollNote(input, result) + dueNote(input, s) + engineRolled
 	if g.EndingGuard {
 		ctx = context.WithValue(ctx, endingGuardKey{}, true)
 		note += endingNote(s)
 	}
+	if g.Fixes {
+		note += voiceNote
+	}
 	n := Narration{Result: result, Rolls: []RollCall{}}
-	data, _ := json.Marshal(result)
 	messages := withHistory(history, input+note)
 	var errs []error
 	wrote := false
@@ -558,6 +589,10 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 		if gmRollDue(s) && rollErrors(n.Rolls) < maxRollErrors {
 			tool, choice = dueRollTool(s.Pending), provider.ToolChoice{Type: provider.ToolChoiceTool, ToolName: "roll_dice"}
 		}
+		// Each step reads the result as it stands, with the GM's rolls so
+		// far: given the turn's opening result, a later step (and its judge)
+		// saw a roll as due that had already been made.
+		data, _ := json.Marshal(n.Result)
 		stream := aisdk.StreamText(ctx, g.Model,
 			aisdk.WithSystem(narratePromptFor(s.Scenario())+"\n"+string(data)),
 			aisdk.WithModelMessages(messages...),
@@ -677,7 +712,7 @@ func dueNote(input string, s *game.State) string {
 	}
 	switch p := s.Pending; {
 	case p == nil:
-		return "\n\n(No roll is due: don't ask the player to roll or name a /roll command, and a number in their text is not a roll.)"
+		return "\n\n(No roll is due: don't ask the player to roll or name a /roll command, and a number in their text is not a roll. If they ask what something takes, name the check and let them try it.)"
 	case p.By == game.ByPlayer:
 		return fmt.Sprintf("\n\n(Nothing has been rolled for %s. The player makes it by typing %s; a number in their text is not a roll.)", p.Check, p.Command)
 	}

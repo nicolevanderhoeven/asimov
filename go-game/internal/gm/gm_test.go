@@ -493,11 +493,11 @@ func TestEndingGuardTagsTheGMsCalls(t *testing.T) {
 
 func TestPromptVersionNamesTheEndingGuard(t *testing.T) {
 	g := newGM(&fakeModel{})
-	if v := g.PromptVersion(); v != "narrator-notes-v3+forced-gm-rolls-v1" {
+	if v := g.PromptVersion(); v != "narrator-notes-v4+forced-gm-rolls-v1" {
 		t.Fatal(v)
 	}
 	g.EndingGuard = true
-	if v := g.PromptVersion(); v != "narrator-notes-v3+forced-gm-rolls-v1+ending-guard-v2" {
+	if v := g.PromptVersion(); v != "narrator-notes-v4+forced-gm-rolls-v1+ending-guard-v2" {
 		t.Fatal(v)
 	}
 	ctx := context.WithValue(context.WithValue(context.Background(), componentKey{}, "narration"), promptVersionKey{}, g.PromptVersion())
@@ -549,6 +549,49 @@ func TestEndingGuardClosesTheSceneOnceTheGameIsOver(t *testing.T) {
 	}
 }
 
+func TestFixesHaveTheEngineMakeTheGMsRolls(t *testing.T) {
+	m := &fakeModel{rolls: []string{`{"notation":"2d20kl1+3","reason":"drone fires","purpose":"drone_attack"}`}}
+	g := newGM(m)
+	g.Fixes = true
+	g.Roll = func(sides int) int { return min(15, sides) } // hits, then 4+1 damage
+	s, r := dodge(t, g)
+	var out strings.Builder
+	n, err := g.Narrate(context.Background(), &s, nil, "I dodge", r, &out)
+	if err != nil || len(n.Rolls) != 0 || s.Pending != nil || s.HP != 24-(4+1) || len(n.Result.Rolls) != 2 {
+		t.Fatalf("%+v %v HP %d", n, err, s.HP)
+	}
+	// The GM narrates in one step, unable to roll, and hears why.
+	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceNone}) {
+		t.Fatal(m.choices)
+	}
+	last := m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text
+	if !strings.Contains(last, engineRollsNote[2:]) || !strings.Contains(last, voiceNote[2:]) {
+		t.Fatalf("%q", last)
+	}
+	if sys, _ := json.Marshal(m.params.Prompt[0]); !strings.Contains(string(sys), `\"label\":\"Drone damage\"`) {
+		t.Fatal("the narrator should read the result with the engine's rolls")
+	}
+}
+
+func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"logs"}`}}
+	g := newGM(m)
+	s := game.New("test")
+	g.Resolve(context.Background(), &s, nil, "I read the logs. What do they say?")
+	if strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNote[2:]) {
+		t.Fatal("the note is off by default")
+	}
+	g.Fixes = true
+	s = game.New("test")
+	g.Resolve(context.Background(), &s, nil, "I read the logs. What do they say?")
+	if !strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNote[2:]) {
+		t.Fatal("the resolver should hear the note")
+	}
+	if v := g.PromptVersion(); v != "narrator-notes-v4+forced-gm-rolls-v1+gm-fixes-v1" {
+		t.Fatal(v)
+	}
+}
+
 func TestNarrateTellsTheGMHowAPlayerRollCameUp(t *testing.T) {
 	m := &fakeModel{}
 	g := newGM(m)
@@ -577,7 +620,7 @@ func TestNarrateTellsTheGMHowAPlayerRollCameUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	// With nothing due, other input reaches the GM with only that said.
-	if last = m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != "I scan the sensors\n\n(No roll is due: don't ask the player to roll or name a /roll command, and a number in their text is not a roll.)" {
+	if last = m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != "I scan the sensors\n\n(No roll is due: don't ask the player to roll or name a /roll command, and a number in their text is not a roll. If they ask what something takes, name the check and let them try it.)" {
 		t.Fatalf("the GM should hear that no roll is due: %q", last)
 	}
 }

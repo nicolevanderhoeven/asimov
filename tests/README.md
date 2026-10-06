@@ -273,7 +273,7 @@ The run is also recorded as an Agent Observability experiment. `setup()`
 creates it, with the game's agent version and model as the candidate (set
 `GIT_SHA=$(git rev-parse --short HEAD)` to record the commit too), and
 `teardown()` completes it. The candidate's `prompt_version` is the one the
-server reports (`gm.GM.PromptVersion`, such as `narrator-notes-v3+forced-gm-rolls-v1`, with
+server reports (`gm.GM.PromptVersion`, such as `narrator-notes-v4+forced-gm-rolls-v1`, with
 `+ending-guard-v2` when `ASIMOV_ENDING_GUARD` is on); each trial and rating
 records it too, and every generation is tagged with it. Each playthrough is a trial of its test case
 (`guided`, `adversarial`, or `cooperative`, numbered by attempt), linked to

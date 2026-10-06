@@ -45,6 +45,13 @@ where each value comes from, and `go run ./cmd/doctor` checks them.
   Its generations are tagged `ending_guard=on`. The default keeps the defect
   for the demo, so run the guard under its own `ASIMOV_AGENT_VERSION` to
   compare the two.
+- `ASIMOV_GM_FIXES`: optional, off by default. `1` turns on every opt-in fix,
+  the ending guard included: the engine makes the GM's rolls, so no model
+  call touches dice and the narrator only narrates them; the resolver hears
+  that an input that both acts and asks is the attempt, that a `/roll` in it
+  means the player acts now, and that travel alone is a move; and the
+  narrator hears a reminder of the GM's voice. The default keeps `roll_dice`
+  for the demo.
 
 Grafana configuration is required by default. To deliberately play without
 exporting telemetry, use `--no-telemetry`. To play without an API key, LLM, or any

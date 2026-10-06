@@ -82,6 +82,11 @@ func run() error {
 		g.EndingGuard = true
 		telemetryNote += " Ending guard on."
 	}
+	// ASIMOV_GM_FIXES turns on every opt-in fix, the ending guard included.
+	if on, _ := strconv.ParseBool(os.Getenv("ASIMOV_GM_FIXES")); on && !*offline {
+		g.EndingGuard, g.Fixes = true, true
+		telemetryNote += " GM fixes on."
+	}
 	if !*offline {
 		model := os.Getenv("ANTHROPIC_MODEL")
 		if model == "" {
