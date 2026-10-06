@@ -129,7 +129,7 @@ func stillNeeded(s *game.State) string {
 // attempts phrased as the story had them ("fire the counter-pulse") went to
 // unrelated actions, and the engine's refusal left the GM to invent why.
 func resolveNoteFor(sc *game.Scenario) string {
-	return "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move. An attempt at the adventure's goal (" + strings.TrimSuffix(sc.Rescue.Option, ".") + "), however the player phrases it, is resolve_action rescue crew when that is listed, and a flavor improvisation until then. Rule roll only for an action whose description names a check, or an improvisation that could fail.)"
+	return "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move. An attempt at the adventure's goal (" + strings.TrimSuffix(sc.Rescue.Option, ".") + "), however the player phrases it, is resolve_action rescue crew, whether or not it is listed yet: the engine says what it still needs. Rule roll only for an action whose description names a check, or an improvisation that could fail.)"
 }
 
 // narratorNotes versions what the narrator hears beyond its system prompt,
@@ -137,8 +137,9 @@ func resolveNoteFor(sc *game.Scenario) string {
 // Raise it with any change to them. v1 is rollNote alone; v2 adds dueNote;
 // v3 notes a /roll inside an action and says a refused one rolled nothing;
 // v4 has the no-roll note say to name the check rather than a command; v5
-// has the due-roll note say not to describe a roll's outcome before it.
-const narratorNotes = "narrator-notes-v5"
+// has the due-roll note say not to describe a roll's outcome before it; v6
+// tells the GM how any player roll came up, not only a typed /roll's.
+const narratorNotes = "narrator-notes-v6"
 
 // gmRolls versions how the narrator's roll_dice is offered: v1 let the GM
 // call it at will; forced-gm-rolls-v1 makes it roll exactly the roll due.
@@ -150,8 +151,10 @@ const endingGuard = "ending-guard-v2"
 // gmFixes versions what Fixes changes: v2 adds the note on a refused
 // attempt and forbids new places and mechanisms in the voice note; v3 tells
 // the GM what is still needed after a refused or flavor attempt, maps
-// attempts at the goal to rescue, and rules no roll for checkless actions.
-const gmFixes = "gm-fixes-v3"
+// attempts at the goal to rescue, and rules no roll for checkless actions;
+// v4 maps every goal attempt to rescue and makes a roll in progress on any
+// input.
+const gmFixes = "gm-fixes-v4"
 
 // PromptVersion names what g's model is told, for comparing versions in
 // prompt analysis: the notes and roll_dice versions, plus the ending guard
@@ -348,7 +351,10 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	// An action that has rolled something must be finished with /roll first;
 	// there is nothing for the model to interpret until then.
 	if s.Locked() {
-		if strings.Contains(input, "/roll") {
+		// Under Fixes, any input makes the roll the action waits on: left
+		// waiting, games stalled for turns while the GM narrated outcomes
+		// the roll would have decided.
+		if strings.Contains(input, "/roll") || g.Fixes {
 			return g.RollPending(ctx, s, "", agentobservability.NewGenerationID()), nil
 		}
 		return s.Apply(game.Action{}, game.Ruling{}), nil
@@ -683,10 +689,9 @@ func gmRollDue(s *game.State) bool {
 func rollNote(input string, result game.Result) string {
 	text, typed := strings.CutPrefix(input, "/roll")
 	typed = typed && (text == "" || text[0] == ' ')
-	// A /roll inside an action ("I fire. /roll Dexterity") is rolled too.
-	if !typed && !strings.Contains(input, "/roll") {
-		return ""
-	}
+	// A /roll inside an action ("I fire. /roll Dexterity") is rolled too, and
+	// under Fixes so is a roll in progress whatever the input: whenever the
+	// player's roll was made, the GM hears how it came up.
 	var made []string
 	for _, r := range result.Rolls {
 		if r.By != game.ByPlayer || r.Skipped {

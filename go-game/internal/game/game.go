@@ -396,6 +396,12 @@ func (s *State) Apply(a Action, ruling Ruling) Result {
 	travel := ""
 	if !slices.ContainsFunc(v.Actions, func(o Option) bool { return o.Action == a }) {
 		i := slices.IndexFunc(v.Elsewhere, func(o Option) bool { return o.Action == a })
+		// The rescue isn't offered until the relay is isolated, but trying
+		// it early is a real attempt, not an attempt to dictate the story:
+		// answered with the refusal for those, the GM invented why it failed.
+		if i < 0 && a == (Action{"rescue", "crew"}) {
+			return finish(s.Scenario().Rescue.NotReady)
+		}
 		if i < 0 {
 			return finish("Nothing changes from that: the dice and the ship's facts decide outcomes.")
 		}

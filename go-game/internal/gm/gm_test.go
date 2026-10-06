@@ -493,11 +493,11 @@ func TestEndingGuardTagsTheGMsCalls(t *testing.T) {
 
 func TestPromptVersionNamesTheEndingGuard(t *testing.T) {
 	g := newGM(&fakeModel{})
-	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1" {
+	if v := g.PromptVersion(); v != "narrator-notes-v6+forced-gm-rolls-v1" {
 		t.Fatal(v)
 	}
 	g.EndingGuard = true
-	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1+ending-guard-v2" {
+	if v := g.PromptVersion(); v != "narrator-notes-v6+forced-gm-rolls-v1+ending-guard-v2" {
 		t.Fatal(v)
 	}
 	ctx := context.WithValue(context.WithValue(context.Background(), componentKey{}, "narration"), promptVersionKey{}, g.PromptVersion())
@@ -600,6 +600,26 @@ func TestFixesTellTheGMWhatARefusedAttemptStillNeeds(t *testing.T) {
 	}
 }
 
+func TestFixesMakeARollInProgressOnAnyInput(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"relay"}`}}
+	g := newGM(m)
+	g.Fixes = true
+	g.Roll = func(sides int) int { return min(15, sides) }
+	s := game.New("test")
+	s.Location, s.Combat = "engineering", true
+	s.Roll("Dexterity", g.Roll)
+	if !s.Locked() {
+		t.Fatal("the hit should wait on its damage roll")
+	}
+	r, err := g.Resolve(context.Background(), &s, nil, "I check the relay display")
+	if err != nil || len(r.Rolls) == 0 || r.Rolls[0].Label != "Phaser damage" || s.Pending == nil || s.Pending.By != game.ByGM {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if note := rollNote("I check the relay display", r); !strings.HasPrefix(note, "\n\n(Rolled: Phaser damage") {
+		t.Fatalf("the GM should hear how the roll came up: %q", note)
+	}
+}
+
 func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
 	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"logs"}`}}
 	g := newGM(m)
@@ -614,7 +634,7 @@ func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
 	if !strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNoteFor(game.Classic())[2:]) {
 		t.Fatal("the resolver should hear the note")
 	}
-	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1+gm-fixes-v3" {
+	if v := g.PromptVersion(); v != "narrator-notes-v6+forced-gm-rolls-v1+gm-fixes-v4" {
 		t.Fatal(v)
 	}
 }

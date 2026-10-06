@@ -596,3 +596,11 @@ func TestRemainingListsWhatTheRescueStillNeeds(t *testing.T) {
 		t.Fatalf("a won game needs nothing: %q", got)
 	}
 }
+
+func TestAnEarlyRescueIsNotReadyRatherThanRefused(t *testing.T) {
+	s := New("test")
+	r := s.Apply(Action{"rescue", "crew"}, Ruling{})
+	if r.Allowed || r.Message != s.Scenario().Rescue.NotReady || s.Turn != 0 {
+		t.Fatalf("%+v", r)
+	}
+}
