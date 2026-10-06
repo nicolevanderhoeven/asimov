@@ -156,6 +156,7 @@ evaluators can catch.
 - [Dutch Cloud Native Days 2025](https://nicolevanderhoeven.com/blog/20250703-asimovs-zeroth-law-dutch-cloud-native-day/) in Utrecht, the Netherlands
 - [Newcrafts 2025](https://nicolevanderhoeven.com/blog/20251106-asimovs-zeroth-law-newcrafts/) in Paris, France ([slides](https://nicole.to/asimovslides))
 - ExpoQA 2026 in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
+- HUSTEF 2026 in Budapest, Hungary ([slides](https://nicole.to/hustef))
 
 The earlier talks used a Python and Flask version of the app, which has since
 been rewritten in Go. Its
