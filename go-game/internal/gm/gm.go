@@ -107,14 +107,30 @@ type GM struct {
 	Fixes bool
 }
 
-// engineRollsNote, voiceNote, refusedNote and resolveNote are Fixes' notes
-// on the input.
+// engineRollsNote, voiceNote and refusedNote are Fixes' notes on the input;
+// see also stillNeeded and resolveNoteFor.
 const (
 	engineRollsNote = "\n\n(The game has made the GM's rolls this turn; they are in the result's rolls. Narrate them as they came up, without rolling.)"
-	voiceNote       = "\n\n(Stay in the story as the GM: don't mention HP, armor class, the system, the engine, the rules, or leads, and add no places, people, equipment, or mechanisms the result doesn't have. When an attempt doesn't work, show what happens without saying you can't, that something is locked, or that it isn't ready, and offer one way forward.)"
+	voiceNote       = "\n\n(Stay in the story as the GM: don't mention HP, armor class, the system, the engine, or the rules, never say \"lead\" or \"leads\", and add no places, people, equipment, or mechanisms the result doesn't have. When an attempt doesn't work, show what happens without saying you can't, that something is locked, or that it isn't ready, and offer one way forward.)"
 	refusedNote     = "\n\n(This attempt doesn't get the player what they wanted. As the reason, give only the result's message or something in the leads, details, or discovered evidence: no new locks, requirements, or failsafes.)"
-	resolveNote     = "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move.)"
 )
+
+// stillNeeded is what the adventure still needs, from the actions in the
+// view, for the GM to steer by instead of inventing what blocks the way.
+func stillNeeded(s *game.State) string {
+	left := s.Remaining()
+	if len(left) == 0 {
+		return ""
+	}
+	return "\n\n(What the adventure still needs, in order: " + strings.Join(left, "; ") + ")"
+}
+
+// resolveNoteFor is the resolver's note under Fixes, with sc's goal: rescue
+// attempts phrased as the story had them ("fire the counter-pulse") went to
+// unrelated actions, and the engine's refusal left the GM to invent why.
+func resolveNoteFor(sc *game.Scenario) string {
+	return "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move. An attempt at the adventure's goal (" + strings.TrimSuffix(sc.Rescue.Option, ".") + "), however the player phrases it, is resolve_action rescue crew when that is listed, and a flavor improvisation until then. Rule roll only for an action whose description names a check, or an improvisation that could fail.)"
+}
 
 // narratorNotes versions what the narrator hears beyond its system prompt,
 // which TestClassicPromptsAreUnchanged pins: the notes on each player input.
@@ -132,8 +148,10 @@ const gmRolls = "forced-gm-rolls-v1"
 const endingGuard = "ending-guard-v2"
 
 // gmFixes versions what Fixes changes: v2 adds the note on a refused
-// attempt and forbids new places and mechanisms in the voice note.
-const gmFixes = "gm-fixes-v2"
+// attempt and forbids new places and mechanisms in the voice note; v3 tells
+// the GM what is still needed after a refused or flavor attempt, maps
+// attempts at the goal to rescue, and rules no roll for checkless actions.
+const gmFixes = "gm-fixes-v3"
 
 // PromptVersion names what g's model is told, for comparing versions in
 // prompt analysis: the notes and roll_dice versions, plus the ending guard
@@ -391,7 +409,7 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	}
 	resolverInput := input
 	if g.Fixes {
-		resolverInput += resolveNote
+		resolverInput += resolveNoteFor(s.Scenario())
 	}
 	generation, err := aisdk.GenerateText(ctx, g.Model,
 		aisdk.WithSystem(resolvePromptFor(s.Scenario())+"\nCurrent authoritative view:\n"+s.View().JSON()),
@@ -579,8 +597,9 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 		note += endingNote(s)
 	}
 	if g.Fixes {
-		if !result.Allowed && !result.Question {
-			note += refusedNote
+		flavor := result.Improvisation != nil && result.Improvisation.Effect == "flavor"
+		if (!result.Allowed && !result.Question) || flavor {
+			note += refusedNote + stillNeeded(s)
 		}
 		note += voiceNote
 	}

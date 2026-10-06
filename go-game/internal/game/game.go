@@ -412,6 +412,30 @@ func (s *State) Apply(a Action, ruling Ruling) Result {
 }
 
 // ready reports whether every clue the rescue needs is discovered.
+// Remaining is what the adventure still needs, in order: each required clue
+// not yet found, the encounter if not cleared, the fix if not made, and the
+// rescue, each as the option that achieves it and where. The descriptions
+// are the view's own, so naming them reveals nothing the view doesn't.
+func (s State) Remaining() []string {
+	if s.Won || s.HP <= 0 {
+		return nil
+	}
+	sc := s.Scenario()
+	var out []string
+	for _, c := range sc.Clues {
+		if c.Required && !s.Clues[c.Key] {
+			out = append(out, fmt.Sprintf("%s (%s)", c.Option, c.Location))
+		}
+	}
+	if e := sc.Encounter; !s.cleared() {
+		out = append(out, fmt.Sprintf("get past the %s (%s)", e.Short, e.Location))
+	}
+	if !s.Isolated {
+		out = append(out, fmt.Sprintf("%s (%s)", sc.Fix.Option, sc.Fix.Location))
+	}
+	return append(out, fmt.Sprintf("%s (%s)", sc.Rescue.Option, sc.Rescue.Location))
+}
+
 func (s State) ready() bool {
 	for _, c := range s.Scenario().Clues {
 		if c.Required && !s.Clues[c.Key] {

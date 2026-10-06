@@ -584,21 +584,37 @@ func TestFixesHaveTheEngineMakeTheGMsRolls(t *testing.T) {
 	}
 }
 
+func TestFixesTellTheGMWhatARefusedAttemptStillNeeds(t *testing.T) {
+	m := &fakeModel{}
+	g := newGM(m)
+	g.Fixes = true
+	s := game.New("test")
+	r := s.Apply(game.Action{Kind: "rescue", Target: "crew"}, game.Ruling{})
+	var out strings.Builder
+	if _, err := g.Narrate(context.Background(), &s, nil, "I beam the crew home", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	last := m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text
+	if !strings.Contains(last, refusedNote[2:]) || !strings.Contains(last, "(What the adventure still needs, in order: Recover the pulse frequency") {
+		t.Fatalf("%q", last)
+	}
+}
+
 func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
 	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"logs"}`}}
 	g := newGM(m)
 	s := game.New("test")
 	g.Resolve(context.Background(), &s, nil, "I read the logs. What do they say?")
-	if strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNote[2:]) {
+	if strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNoteFor(game.Classic())[2:]) {
 		t.Fatal("the note is off by default")
 	}
 	g.Fixes = true
 	s = game.New("test")
 	g.Resolve(context.Background(), &s, nil, "I read the logs. What do they say?")
-	if !strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNote[2:]) {
+	if !strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNoteFor(game.Classic())[2:]) {
 		t.Fatal("the resolver should hear the note")
 	}
-	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1+gm-fixes-v2" {
+	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1+gm-fixes-v3" {
 		t.Fatal(v)
 	}
 }

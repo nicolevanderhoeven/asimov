@@ -580,3 +580,19 @@ func TestNotation(t *testing.T) {
 		}
 	}
 }
+
+func TestRemainingListsWhatTheRescueStillNeeds(t *testing.T) {
+	s := New("test")
+	if got := s.Remaining(); len(got) != 6 || !strings.HasPrefix(got[0], "Recover the pulse frequency") || !strings.HasPrefix(got[5], "Use the recovered pulse frequency") {
+		t.Fatalf("%q", got)
+	}
+	s.Clues = map[string]bool{"frequency": true, "biopattern": true, "source": true}
+	s.FoeHP, s.Isolated = 0, true
+	if got := s.Remaining(); len(got) != 1 || !strings.HasSuffix(got[0], "(engineering)") {
+		t.Fatalf("only the rescue is left: %q", got)
+	}
+	s.Won = true
+	if got := s.Remaining(); got != nil {
+		t.Fatalf("a won game needs nothing: %q", got)
+	}
+}
