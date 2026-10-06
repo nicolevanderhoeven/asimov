@@ -155,8 +155,8 @@ evaluators can catch.
 - [KubeCon Europe 2025](https://nicolevanderhoeven.com/blog/20250402-asmiovs-zeroth-law-of-robotics/) in London, England ([video](https://www.youtube.com/watch?v=x6EKTCAWtn8))
 - [Dutch Cloud Native Days 2025](https://nicolevanderhoeven.com/blog/20250703-asimovs-zeroth-law-dutch-cloud-native-day/) in Utrecht, the Netherlands
 - [Newcrafts 2025](https://nicolevanderhoeven.com/blog/20251106-asimovs-zeroth-law-newcrafts/) in Paris, France ([slides](https://nicole.to/asimovslides))
-- ExpoQA 2026 in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
-- HUSTEF 2026 in Budapest, Hungary ([slides](https://nicole.to/hustef))
+- [ExpoQA 2026](https://nicolevanderhoeven.com/blog/20260526-asimovs-zeroth-law-expoqa-madrid/) in Madrid, Spain ([slides](https://nicole.to/expoqa2026))
+- [HUSTEF 2026](https://hustef.com/nicole_van_der_hoeven_2026/) in Budapest, Hungary ([slides](https://nicole.to/hustef))
 
 The earlier talks used a Python and Flask version of the app, which has since
 been rewritten in Go. Its
