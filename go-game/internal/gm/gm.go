@@ -129,7 +129,7 @@ func stillNeeded(s *game.State) string {
 // attempts phrased as the story had them ("fire the counter-pulse") went to
 // unrelated actions, and the engine's refusal left the GM to invent why.
 func resolveNoteFor(sc *game.Scenario) string {
-	return "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move. An attempt at the adventure's goal (" + strings.TrimSuffix(sc.Rescue.Option, ".") + "), however the player phrases it, is resolve_action rescue crew, whether or not it is listed yet: the engine says what it still needs. Rule roll only for an action whose description names a check, or an improvisation that could fail.)"
+	return "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move. If the input asks for several steps, resolve the first one the adventure still needs. An attempt to isolate the " + sc.Fix.Target + " is resolve_action isolate " + sc.Fix.Target + ", and an attempt at the adventure's goal (" + strings.TrimSuffix(sc.Rescue.Option, ".") + "), however the player phrases it, is resolve_action rescue crew; either one whether or not it is listed yet, since the engine says what it still needs. Rule roll only for an action whose description names a check, or an improvisation that could fail.)"
 }
 
 // narratorNotes versions what the narrator hears beyond its system prompt,
@@ -154,8 +154,10 @@ const endingGuard = "ending-guard-v2"
 // attempts at the goal to rescue, and rules no roll for checkless actions;
 // v4 maps every goal attempt to rescue and makes a roll in progress on any
 // input; v5 says to name what is still needed without explaining it, and
-// to describe damage in the story's terms rather than points.
-const gmFixes = "gm-fixes-v5"
+// to describe damage in the story's terms rather than points; v6 maps
+// isolation attempts to isolate relay, resolves a multi-step input's first
+// needed step, and treats an unforced reply with no call as a question.
+const gmFixes = "gm-fixes-v6"
 
 // PromptVersion names what g's model is told, for comparing versions in
 // prompt analysis: the notes and roll_dice versions, plus the ending guard
@@ -440,8 +442,14 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	if err != nil {
 		return game.Result{}, fmt.Errorf("interpret action: %w", err)
 	}
-	if len(generation.ToolCalls) != 1 {
+	switch {
+	case choice != provider.ToolChoiceAuto && len(generation.ToolCalls) != 1:
 		return game.Result{}, errors.New("model must request exactly one action; game unchanged")
+	case len(generation.ToolCalls) == 0:
+		// Unforced and twice without a call: nothing happens, as for a
+		// question, rather than refusing the input. (With several calls,
+		// once has already run only the first.)
+		called, result = true, g.Answer(ctx, &candidate, "", agentobservability.NewGenerationID())
 	}
 	if !called {
 		return game.Result{}, errors.New("model did not resolve an action; game unchanged")

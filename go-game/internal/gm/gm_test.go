@@ -620,6 +620,19 @@ func TestFixesMakeARollInProgressOnAnyInput(t *testing.T) {
 	}
 }
 
+func TestFixesTreatAReplyWithNoCallAsAQuestion(t *testing.T) {
+	g := newGM(&fakeModel{})
+	s := game.New("test")
+	if _, err := g.Resolve(context.Background(), &s, nil, "Hmm."); err == nil {
+		t.Fatal("forced, a reply with no call is an error")
+	}
+	g.Fixes = true
+	r, err := g.Resolve(context.Background(), &s, nil, "Hmm.")
+	if err != nil || !r.Question || s.Turn != 0 {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
 func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
 	m := &fakeModel{calls: []string{`{"kind":"inspect","target":"logs"}`}}
 	g := newGM(m)
@@ -634,7 +647,7 @@ func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
 	if !strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNoteFor(game.Classic())[2:]) {
 		t.Fatal("the resolver should hear the note")
 	}
-	if v := g.PromptVersion(); v != "narrator-notes-v6+forced-gm-rolls-v1+gm-fixes-v5" {
+	if v := g.PromptVersion(); v != "narrator-notes-v6+forced-gm-rolls-v1+gm-fixes-v6" {
 		t.Fatal(v)
 	}
 }

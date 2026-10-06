@@ -402,6 +402,10 @@ func (s *State) Apply(a Action, ruling Ruling) Result {
 		if i < 0 && a == (Action{"rescue", "crew"}) {
 			return finish(s.Scenario().Rescue.NotReady)
 		}
+		// So is isolating the relay before the encounter is cleared.
+		if fix := s.Scenario().Fix; i < 0 && a == (Action{"isolate", fix.Target}) && !s.Isolated {
+			return finish(fix.Lead)
+		}
 		if i < 0 {
 			return finish("Nothing changes from that: the dice and the ship's facts decide outcomes.")
 		}

@@ -604,3 +604,11 @@ func TestAnEarlyRescueIsNotReadyRatherThanRefused(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestAnEarlyIsolationSaysWhatItNeeds(t *testing.T) {
+	s := New("test")
+	r := s.Apply(Action{"isolate", "relay"}, Ruling{})
+	if r.Allowed || r.Message != s.Scenario().Fix.Lead || s.Turn != 0 {
+		t.Fatalf("%+v", r)
+	}
+}
