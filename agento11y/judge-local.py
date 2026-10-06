@@ -204,6 +204,7 @@ def main():
     ap.add_argument("--model", default=None, help="judge model (default: each evaluator's own)")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--exclude", action="append", default=[], help="conversation ID to leave out, such as one a network failure cut short (repeatable)")
+    ap.add_argument("--evaluator", action="append", default=[], help="judge only this evaluator (repeatable)")
     ap.add_argument("--out", default="judge-local.jsonl")
     ap.add_argument("--export", action="store_true", help="send verdicts to Agent Observability as local.<evaluator> scores")
     args = ap.parse_args()
@@ -239,6 +240,8 @@ def main():
                 if not matches(gen, rule.get("match")):
                     continue
                 for ev_id in rule["evaluator_ids"]:
+                    if args.evaluator and ev_id not in args.evaluator:
+                        continue
                     online = None
                     if args.calibrate:
                         # latest_scores is keyed by score key.
