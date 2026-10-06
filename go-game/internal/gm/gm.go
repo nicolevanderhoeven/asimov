@@ -111,8 +111,8 @@ type GM struct {
 // see also stillNeeded and resolveNoteFor.
 const (
 	engineRollsNote = "\n\n(The game has made the GM's rolls this turn; they are in the result's rolls. Narrate them as they came up, without rolling.)"
-	voiceNote       = "\n\n(Stay in the story as the GM: don't mention HP, armor class, the system, the engine, or the rules, never say \"lead\" or \"leads\", and add no places, people, equipment, or mechanisms the result doesn't have. When an attempt doesn't work, show what happens without saying you can't, that something is locked, or that it isn't ready, and offer one way forward.)"
-	refusedNote     = "\n\n(This attempt doesn't get the player what they wanted. As the reason, give only the result's message or something in the leads, details, or discovered evidence: no new locks, requirements, or failsafes.)"
+	voiceNote       = "\n\n(Stay in the story as the GM: don't mention HP, armor class, damage as points, the system, the engine, or the rules, never say \"lead\" or \"leads\", and add no places, people, equipment, or mechanisms the result doesn't have. When an attempt doesn't work, show what happens without saying you can't, that something is locked, or that it isn't ready, and offer one way forward.)"
+	refusedNote     = "\n\n(This attempt doesn't get the player what they wanted. As the reason, give only the result's message or something in the leads, details, or discovered evidence: no new locks, requirements, or failsafes. Name what is still needed plainly, in the story's terms, without explaining why it is needed or how it works.)"
 )
 
 // stillNeeded is what the adventure still needs, from the actions in the
@@ -153,8 +153,9 @@ const endingGuard = "ending-guard-v2"
 // the GM what is still needed after a refused or flavor attempt, maps
 // attempts at the goal to rescue, and rules no roll for checkless actions;
 // v4 maps every goal attempt to rescue and makes a roll in progress on any
-// input.
-const gmFixes = "gm-fixes-v4"
+// input; v5 says to name what is still needed without explaining it, and
+// to describe damage in the story's terms rather than points.
+const gmFixes = "gm-fixes-v5"
 
 // PromptVersion names what g's model is told, for comparing versions in
 // prompt analysis: the notes and roll_dice versions, plus the ending guard
@@ -417,13 +418,25 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	if g.Fixes {
 		resolverInput += resolveNoteFor(s.Scenario())
 	}
-	generation, err := aisdk.GenerateText(ctx, g.Model,
-		aisdk.WithSystem(resolvePromptFor(s.Scenario())+"\nCurrent authoritative view:\n"+s.View().JSON()),
-		aisdk.WithModelMessages(withHistory(history, resolverInput)...),
-		aisdk.WithTools(aisdk.ToolSet{"resolve_action": action, "propose_improvisation": improvise, "answer_question": answer}),
-		aisdk.WithToolChoice(provider.ToolChoice{Type: provider.ToolChoiceRequired}),
-		aisdk.WithStopWhen(aisdk.StepCountIs(1)), aisdk.WithMaxRetries(0), aisdk.WithMaxOutputTokens(512),
-	)
+	// The fixed version's newer model can't be forced to call a tool, so it
+	// is asked to, and asked once more if it answers in text instead.
+	choice := provider.ToolChoiceRequired
+	if g.Fixes {
+		choice = provider.ToolChoiceAuto
+	}
+	generate := func() (*aisdk.GenerateTextResult, error) {
+		return aisdk.GenerateText(ctx, g.Model,
+			aisdk.WithSystem(resolvePromptFor(s.Scenario())+"\nCurrent authoritative view:\n"+s.View().JSON()),
+			aisdk.WithModelMessages(withHistory(history, resolverInput)...),
+			aisdk.WithTools(aisdk.ToolSet{"resolve_action": action, "propose_improvisation": improvise, "answer_question": answer}),
+			aisdk.WithToolChoice(provider.ToolChoice{Type: choice}),
+			aisdk.WithStopWhen(aisdk.StepCountIs(1)), aisdk.WithMaxRetries(0), aisdk.WithMaxOutputTokens(512),
+		)
+	}
+	generation, err := generate()
+	if err == nil && choice == provider.ToolChoiceAuto && len(generation.ToolCalls) == 0 {
+		generation, err = generate()
+	}
 	if err != nil {
 		return game.Result{}, fmt.Errorf("interpret action: %w", err)
 	}

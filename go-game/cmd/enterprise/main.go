@@ -89,7 +89,13 @@ func run() error {
 	}
 	if !*offline {
 		model := os.Getenv("ANTHROPIC_MODEL")
-		if model == "" {
+		switch {
+		case model != "":
+		case g.Fixes:
+			// The fixed version follows its notes more closely on a newer
+			// model; the default keeps the one its defects were found on.
+			model = "claude-sonnet-5-5"
+		default:
 			model = "claude-sonnet-4-6"
 		}
 		g.Model = gm.Wrap(anthropic.New(os.Getenv("ANTHROPIC_API_KEY"), model), client, cfg.Version, diag)

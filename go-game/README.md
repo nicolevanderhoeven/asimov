@@ -50,8 +50,10 @@ where each value comes from, and `go run ./cmd/doctor` checks them.
   call touches dice and the narrator only narrates them; the resolver hears
   that an input that both acts and asks is the attempt, that a `/roll` in it
   means the player acts now, and that travel alone is a move; and the
-  narrator hears a reminder of the GM's voice. The default keeps `roll_dice`
-  for the demo.
+  narrator hears a reminder of the GM's voice. Unless `ANTHROPIC_MODEL` is
+  set, it also runs on `claude-sonnet-5-5`, whose resolver calls use tool
+  choice `auto` (that model can't be forced to call a tool). The default
+  keeps `roll_dice` and `claude-sonnet-4-6` for the demo.
 
 Grafana configuration is required by default. To deliberately play without
 exporting telemetry, use `--no-telemetry`. To play without an API key, LLM, or any

@@ -634,7 +634,7 @@ func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
 	if !strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNoteFor(game.Classic())[2:]) {
 		t.Fatal("the resolver should hear the note")
 	}
-	if v := g.PromptVersion(); v != "narrator-notes-v6+forced-gm-rolls-v1+gm-fixes-v4" {
+	if v := g.PromptVersion(); v != "narrator-notes-v6+forced-gm-rolls-v1+gm-fixes-v5" {
 		t.Fatal(v)
 	}
 }
