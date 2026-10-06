@@ -203,6 +203,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="judge at most this many generations per evaluator")
     ap.add_argument("--model", default=None, help="judge model (default: each evaluator's own)")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--exclude", action="append", default=[], help="conversation ID to leave out, such as one a network failure cut short (repeatable)")
     ap.add_argument("--out", default="judge-local.jsonl")
     ap.add_argument("--export", action="store_true", help="send verdicts to Agent Observability as local.<evaluator> scores")
     args = ap.parse_args()
@@ -213,13 +214,20 @@ def main():
     evaluators = {e["evaluator_id"]: e for e in (yaml(p) for p in sorted((ROOT / "evaluators").glob("*.yaml")))}
     rules = [yaml(p) for p in sorted((ROOT / "rules").glob("*.yaml"))]
     report = gcx("experiments", "get-report", exp)
-    convs = [t["trial"]["conversation_id"] for row in report["rows"] for t in row["trials"] if t["trial"].get("conversation_id")]
+    convs = [t["trial"]["conversation_id"] for row in report["rows"] for t in row["trials"] if t["trial"].get("conversation_id") and t["trial"]["conversation_id"] not in args.exclude]
     print(f"{exp}: {len(convs)} conversations", file=sys.stderr)
 
     jobs = []  # (evaluator, generation, conversation, online verdict or None)
     results_by_call = {}
     for conv in convs:
-        c = gcx("conversations", "get", conv)
+        try:
+            c = gcx("conversations", "get", conv)
+        except RuntimeError:
+            try:
+                c = gcx("conversations", "get", conv)
+            except RuntimeError as e:
+                print(f"skipping {conv}: {e}", file=sys.stderr)
+                continue
         results_by_call.update(call_results(c))
         for rule in rules:
             if not rule.get("enabled", True):

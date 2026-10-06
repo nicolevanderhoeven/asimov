@@ -425,7 +425,7 @@ func TestNarrateTellsTheGMNothingWasRolledForATypedNumber(t *testing.T) {
 		if _, err := g.Narrate(context.Background(), &s, nil, input, r, &out); err != nil {
 			t.Fatal(err)
 		}
-		want := input + "\n\n(Nothing has been rolled for Intelligence (Investigation). The player makes it by typing /roll Intelligence; a number in their text is not a roll.)"
+		want := input + "\n\n(Nothing has been rolled for Intelligence (Investigation). The player makes it by typing /roll Intelligence; a number in their text is not a roll. Until it is rolled, don't describe what it does.)"
 		if last := m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text; last != want {
 			t.Fatalf("the GM should hear the player's roll is still due: %q", last)
 		}
@@ -493,16 +493,27 @@ func TestEndingGuardTagsTheGMsCalls(t *testing.T) {
 
 func TestPromptVersionNamesTheEndingGuard(t *testing.T) {
 	g := newGM(&fakeModel{})
-	if v := g.PromptVersion(); v != "narrator-notes-v4+forced-gm-rolls-v1" {
+	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1" {
 		t.Fatal(v)
 	}
 	g.EndingGuard = true
-	if v := g.PromptVersion(); v != "narrator-notes-v4+forced-gm-rolls-v1+ending-guard-v2" {
+	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1+ending-guard-v2" {
 		t.Fatal(v)
 	}
 	ctx := context.WithValue(context.WithValue(context.Background(), componentKey{}, "narration"), promptVersionKey{}, g.PromptVersion())
 	if got := contextInfo(ctx, "v").Tags["prompt_version"]; got != g.PromptVersion() {
 		t.Fatalf("game calls should be tagged with the prompt version: %q", got)
+	}
+}
+
+func TestResolveDoesntRollForAnUnsupportedInput(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"unsupported","target":"none"}`}}
+	g := newGM(m)
+	s := game.New("test")
+	s.Apply(game.Action{Kind: "scan", Target: "sensors"}, game.Ruling{})
+	r, err := g.Resolve(context.Background(), &s, nil, "This should give me an edge. /roll Intelligence")
+	if err != nil || r.Allowed || len(r.Rolls) != 0 || s.Turn != 0 || s.Clues["frequency"] {
+		t.Fatalf("an unsupported input must not make the roll due: %+v %v", r, err)
 	}
 }
 
@@ -587,7 +598,7 @@ func TestFixesTellTheResolverHowToReadAnInput(t *testing.T) {
 	if !strings.Contains(m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text, resolveNote[2:]) {
 		t.Fatal("the resolver should hear the note")
 	}
-	if v := g.PromptVersion(); v != "narrator-notes-v4+forced-gm-rolls-v1+gm-fixes-v1" {
+	if v := g.PromptVersion(); v != "narrator-notes-v5+forced-gm-rolls-v1+gm-fixes-v2" {
 		t.Fatal(v)
 	}
 }

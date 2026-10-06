@@ -107,10 +107,12 @@ type GM struct {
 	Fixes bool
 }
 
-// engineRollsNote, voiceNote and resolveNote are Fixes' notes on the input.
+// engineRollsNote, voiceNote, refusedNote and resolveNote are Fixes' notes
+// on the input.
 const (
 	engineRollsNote = "\n\n(The game has made the GM's rolls this turn; they are in the result's rolls. Narrate them as they came up, without rolling.)"
-	voiceNote       = "\n\n(Stay in the story as the GM: don't mention HP, armor class, the system, the engine, the rules, or leads. When an attempt doesn't work, show what happens without saying you can't, that something is locked, or that it isn't ready, and offer one way forward.)"
+	voiceNote       = "\n\n(Stay in the story as the GM: don't mention HP, armor class, the system, the engine, the rules, or leads, and add no places, people, equipment, or mechanisms the result doesn't have. When an attempt doesn't work, show what happens without saying you can't, that something is locked, or that it isn't ready, and offer one way forward.)"
+	refusedNote     = "\n\n(This attempt doesn't get the player what they wanted. As the reason, give only the result's message or something in the leads, details, or discovered evidence: no new locks, requirements, or failsafes.)"
 	resolveNote     = "\n\n(If this input attempts anything, resolve that attempt, even if it also asks a question; answer_question only when the player only asks. A /roll in the input means the player acts now. An input that only goes somewhere is move.)"
 )
 
@@ -118,8 +120,9 @@ const (
 // which TestClassicPromptsAreUnchanged pins: the notes on each player input.
 // Raise it with any change to them. v1 is rollNote alone; v2 adds dueNote;
 // v3 notes a /roll inside an action and says a refused one rolled nothing;
-// v4 has the no-roll note say to name the check rather than a command.
-const narratorNotes = "narrator-notes-v4"
+// v4 has the no-roll note say to name the check rather than a command; v5
+// has the due-roll note say not to describe a roll's outcome before it.
+const narratorNotes = "narrator-notes-v5"
 
 // gmRolls versions how the narrator's roll_dice is offered: v1 let the GM
 // call it at will; forced-gm-rolls-v1 makes it roll exactly the roll due.
@@ -128,8 +131,9 @@ const gmRolls = "forced-gm-rolls-v1"
 // endingGuard versions the ending guard's notes: v2 adds the closing note.
 const endingGuard = "ending-guard-v2"
 
-// gmFixes versions what Fixes changes.
-const gmFixes = "gm-fixes-v1"
+// gmFixes versions what Fixes changes: v2 adds the note on a refused
+// attempt and forbids new places and mechanisms in the voice note.
+const gmFixes = "gm-fixes-v2"
 
 // PromptVersion names what g's model is told, for comparing versions in
 // prompt analysis: the notes and roll_dice versions, plus the ending guard
@@ -407,8 +411,10 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	}
 	*s = candidate
 	// "I fire my phaser. /roll Dexterity" is an action and its roll in one
-	// input: once the action waits on the player's roll, make it.
-	if strings.Contains(input, "/roll") && s.Pending != nil && s.Pending.By == game.ByPlayer {
+	// input: once the action waits on the player's roll, make it. Only for an
+	// action the resolver accepted: ruled unsupported, the input changes
+	// nothing, so an earlier action's roll still due isn't made either.
+	if result.Allowed && strings.Contains(input, "/roll") && s.Pending != nil && s.Pending.By == game.ByPlayer {
 		result = merge(result, g.RollPending(ctx, s, "", agentobservability.NewGenerationID()))
 	}
 	return result, nil
@@ -573,6 +579,9 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 		note += endingNote(s)
 	}
 	if g.Fixes {
+		if !result.Allowed && !result.Question {
+			note += refusedNote
+		}
 		note += voiceNote
 	}
 	n := Narration{Result: result, Rolls: []RollCall{}}
@@ -714,7 +723,7 @@ func dueNote(input string, s *game.State) string {
 	case p == nil:
 		return "\n\n(No roll is due: don't ask the player to roll or name a /roll command, and a number in their text is not a roll. If they ask what something takes, name the check and let them try it.)"
 	case p.By == game.ByPlayer:
-		return fmt.Sprintf("\n\n(Nothing has been rolled for %s. The player makes it by typing %s; a number in their text is not a roll.)", p.Check, p.Command)
+		return fmt.Sprintf("\n\n(Nothing has been rolled for %s. The player makes it by typing %s; a number in their text is not a roll. Until it is rolled, don't describe what it does.)", p.Check, p.Command)
 	}
 	return ""
 }

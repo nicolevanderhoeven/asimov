@@ -114,7 +114,7 @@ func TestCreateSessionReturnsInitialView(t *testing.T) {
 }
 
 func TestCreateSessionReportsThePromptVersion(t *testing.T) {
-	for model, want := range map[provider.LanguageModel]string{&fakeModel{}: "narrator-notes-v4+forced-gm-rolls-v1", nil: ""} {
+	for model, want := range map[provider.LanguageModel]string{&fakeModel{}: "narrator-notes-v5+forced-gm-rolls-v1", nil: ""} {
 		ts := newTestServer(t, model)
 		res, err := http.Post(ts.URL+"/session", "application/json", nil)
 		if err != nil {
