@@ -113,6 +113,25 @@ func TestCreateSessionReturnsInitialView(t *testing.T) {
 	}
 }
 
+func TestCreateSessionReportsThePromptVersion(t *testing.T) {
+	for model, want := range map[provider.LanguageModel]string{&fakeModel{}: "narrator-notes-v2", nil: ""} {
+		ts := newTestServer(t, model)
+		res, err := http.Post(ts.URL+"/session", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body sessionResponse
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		ts.Close()
+		if body.PromptVersion != want {
+			t.Fatalf("prompt_version = %q, want %q (offline: %v)", body.PromptVersion, want, model == nil)
+		}
+	}
+}
+
 func TestGetUnknownSessionIs404(t *testing.T) {
 	ts := newTestServer(t, &fakeModel{})
 	defer ts.Close()

@@ -38,6 +38,13 @@ where each value comes from, and `go run ./cmd/doctor` checks them.
 - `ASIMOV_AGENT_VERSION`: optional, defaults to `go-experiment-v1`.
 - `ASIMOV_SCENARIO`: optional, `classic` (the default) or `generated`; see
   [Scenarios](#scenarios). The `--scenario` flag overrides it.
+- `ASIMOV_ENDING_GUARD`: optional, off by default. `1` turns on the fix for
+  the false ending: after every input, while the game is still playing, the
+  narrator hears that the adventure isn't over, so it mustn't narrate a
+  rescue or an ending, and that an ending it narrated earlier didn't happen.
+  Its generations are tagged `ending_guard=on`. The default keeps the defect
+  for the demo, so run the guard under its own `ASIMOV_AGENT_VERSION` to
+  compare the two.
 
 Grafana configuration is required by default. To deliberately play without
 exporting telemetry, use `--no-telemetry`. To play without an API key, LLM, or any

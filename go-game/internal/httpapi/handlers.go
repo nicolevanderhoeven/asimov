@@ -61,7 +61,11 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, v := s.store.CreateScenario(sc)
-	writeJSON(w, http.StatusCreated, sessionResponse{SessionID: id, Scenario: infoOf(sc), State: v})
+	resp := sessionResponse{SessionID: id, Scenario: infoOf(sc), State: v}
+	if !s.offline {
+		resp.PromptVersion = s.gm.PromptVersion()
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // handleGetScenario returns the whole scenario, solution included, for

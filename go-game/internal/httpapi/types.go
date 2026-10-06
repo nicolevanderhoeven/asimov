@@ -8,7 +8,10 @@ import (
 type sessionResponse struct {
 	SessionID string        `json:"session_id"`
 	Scenario  *scenarioInfo `json:"scenario,omitempty"`
-	State     game.View     `json:"state"`
+	// PromptVersion is the GM's prompt version (gm.GM.PromptVersion), for
+	// tests to record; empty offline, where no model narrates.
+	PromptVersion string    `json:"prompt_version,omitempty"`
+	State         game.View `json:"state"`
 }
 
 // createSessionRequest optionally names the scenario: "classic" or

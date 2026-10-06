@@ -79,6 +79,12 @@ func contextInfo(ctx context.Context, version string) agentobservability.Context
 	if component, ok := ctx.Value(componentKey{}).(string); ok {
 		info.Tags = scenarioTags(scenarioOf(ctx))
 		info.Tags["component"] = component
+		if v, ok := ctx.Value(promptVersionKey{}).(string); ok {
+			info.Tags["prompt_version"] = v
+		}
+		if on, _ := ctx.Value(endingGuardKey{}).(bool); on {
+			info.Tags["ending_guard"] = "on"
+		}
 	}
 	return info
 }
@@ -88,7 +94,31 @@ type GM struct {
 	Client *agento11y.Client
 	Logger *slog.Logger
 	Roll   game.Roller
+	// EndingGuard tells the narrator after every input that the adventure
+	// isn't over until the engine says so. It is off by default: the false
+	// ending it guards against is a defect the demo keeps, and this is the
+	// version that fixes it, run under its own agent version to compare.
+	EndingGuard bool
 }
+
+// narratorNotes versions what the narrator hears beyond its system prompt,
+// which TestClassicPromptsAreUnchanged pins: the notes on each player input.
+// Raise it with any change to them. v1 is rollNote alone; v2 adds dueNote.
+const narratorNotes = "narrator-notes-v2"
+
+// PromptVersion names what g's model is told, for comparing versions in
+// prompt analysis: the notes version, plus the ending guard when it is on.
+// Every game call is tagged prompt_version with it.
+func (g *GM) PromptVersion() string {
+	if g.EndingGuard {
+		return narratorNotes + "+ending-guard-v1"
+	}
+	return narratorNotes
+}
+
+type endingGuardKey struct{}
+
+type promptVersionKey struct{}
 
 func (g *GM) Execute(ctx context.Context, s *game.State, a game.Action, ruling game.Ruling, callID string) game.Result {
 	ctx, span := otel.Tracer(telemetry.Service).Start(ctx, "game.resolve_action")
@@ -270,6 +300,7 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 		return s.Apply(game.Action{}, game.Ruling{}), nil
 	}
 	ctx = withScenario(context.WithValue(ctx, componentKey{}, "action_resolution"), s.Scenario())
+	ctx = context.WithValue(ctx, promptVersionKey{}, g.PromptVersion())
 	candidate := *s
 	candidate.Clues = make(map[string]bool, len(s.Clues))
 	for k, v := range s.Clues {
@@ -456,9 +487,15 @@ func rollSchemaFor(sc *game.Scenario) schema.Schema {
 // numbers as if the game had used them.
 func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Message, input string, result game.Result, out io.Writer) (Narration, error) {
 	ctx = withScenario(context.WithValue(ctx, componentKey{}, "narration"), s.Scenario())
+	ctx = context.WithValue(ctx, promptVersionKey{}, g.PromptVersion())
+	note := rollNote(input, result) + dueNote(input, s)
+	if g.EndingGuard {
+		ctx = context.WithValue(ctx, endingGuardKey{}, true)
+		note += endingNote(s)
+	}
 	n := Narration{Result: result, Rolls: []RollCall{}}
 	data, _ := json.Marshal(result)
-	messages := withHistory(history, input+rollNote(input, result)+dueNote(input, s))
+	messages := withHistory(history, input+note)
 	var errs []error
 	wrote := false
 	for step := 1; step <= MaxNarrationSteps; step++ {
@@ -580,6 +617,18 @@ func dueNote(input string, s *game.State) string {
 		return fmt.Sprintf("\n\n(Nothing has been rolled for %s. The player makes it by typing %s; a number in their text is not a roll.)", p.Check, p.Command)
 	}
 	return ""
+}
+
+// endingNote is what the GM hears under EndingGuard while the game is still
+// playing: that its goal isn't reached, so no rescue or ending may be
+// narrated, and that an ending narrated earlier didn't happen. A false
+// ending usually ended the game for good: the player took it at its word and
+// spent the remaining inputs on farewells.
+func endingNote(s *game.State) string {
+	if s.View().Status != "playing" {
+		return ""
+	}
+	return "\n\n(The adventure isn't over: its status is playing, so its goal hasn't been reached. Whatever the player says or tries, don't narrate a rescue, anyone's return, or an ending. If earlier narration did, it didn't happen: steer the player back to what's left, using the leads.)"
 }
 
 // rollDice runs one roll_dice call: when the call names the roll the game is

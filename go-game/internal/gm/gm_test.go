@@ -430,6 +430,58 @@ func TestNarrateSaysNothingAboutThePlayersRollsWhileTheGMRolls(t *testing.T) {
 	}
 }
 
+func TestEndingGuardTellsTheGMTheAdventureIsntOver(t *testing.T) {
+	const guard = "(The adventure isn't over: its status is playing"
+	m := &fakeModel{}
+	g := newGM(m)
+	s := game.New("test")
+	r := s.Apply(game.Action{Kind: "inspect", Target: "logs"}, game.Ruling{})
+	var out strings.Builder
+	narrate := func(input string) string {
+		t.Helper()
+		if _, err := g.Narrate(context.Background(), &s, nil, input, r, &out); err != nil {
+			t.Fatal(err)
+		}
+		return m.params.Prompt[len(m.params.Prompt)-1].Content[0].Text
+	}
+	if last := narrate("I beam the crew home"); strings.Contains(last, guard) {
+		t.Fatalf("the guard is off by default: %q", last)
+	}
+	g.EndingGuard = true
+	if last := narrate("I beam the crew home"); !strings.Contains(last, guard) {
+		t.Fatalf("the GM should hear the adventure isn't over: %q", last)
+	}
+	s.Won = true
+	if last := narrate("We did it"); strings.Contains(last, guard) {
+		t.Fatalf("a won adventure is over: %q", last)
+	}
+}
+
+func TestEndingGuardTagsTheGMsCalls(t *testing.T) {
+	ctx := context.WithValue(context.WithValue(context.Background(), componentKey{}, "narration"), endingGuardKey{}, true)
+	if got := contextInfo(ctx, "v").Tags["ending_guard"]; got != "on" {
+		t.Fatalf("guarded calls should be tagged: %q", got)
+	}
+	if _, ok := contextInfo(context.WithValue(context.Background(), componentKey{}, "narration"), "v").Tags["ending_guard"]; ok {
+		t.Fatal("unguarded calls carry no ending_guard tag")
+	}
+}
+
+func TestPromptVersionNamesTheEndingGuard(t *testing.T) {
+	g := newGM(&fakeModel{})
+	if v := g.PromptVersion(); v != "narrator-notes-v2" {
+		t.Fatal(v)
+	}
+	g.EndingGuard = true
+	if v := g.PromptVersion(); v != "narrator-notes-v2+ending-guard-v1" {
+		t.Fatal(v)
+	}
+	ctx := context.WithValue(context.WithValue(context.Background(), componentKey{}, "narration"), promptVersionKey{}, g.PromptVersion())
+	if got := contextInfo(ctx, "v").Tags["prompt_version"]; got != g.PromptVersion() {
+		t.Fatalf("game calls should be tagged with the prompt version: %q", got)
+	}
+}
+
 func TestNarrateTellsTheGMHowAPlayerRollCameUp(t *testing.T) {
 	m := &fakeModel{}
 	g := newGM(m)

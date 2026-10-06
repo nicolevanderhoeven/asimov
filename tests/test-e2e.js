@@ -241,6 +241,7 @@ export function setup() {
         scenario: SCENARIO_MODE,
         agent_name: 'asimov-enterprise-go',
         agent_version: __ENV.ASIMOV_AGENT_VERSION || 'go-experiment-v1',
+        prompt_version: serverPromptVersion(),
         model_provider: 'anthropic',
         model_name: __ENV.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
         player_model: PLAYER_MODEL,
@@ -336,7 +337,7 @@ function play(base) {
   }
   const spec = localize(base, session.scenario);
   const who = spec.persona ? persona() : null;
-  const run = { spec, label, id: session.id, view: session.state, scenario: session.scenario, clues: cluesOf(session.scenario), transcript: [], narrated: 0, failures: [], budget, pendingCheck: null, persona: who, started: Date.now() };
+  const run = { spec, label, id: session.id, view: session.state, scenario: session.scenario, promptVersion: session.promptVersion, clues: cluesOf(session.scenario), transcript: [], narrated: 0, failures: [], budget, pendingCheck: null, persona: who, started: Date.now() };
   const system = playerSystem(spec, who);
   const schema = moveSchema(spec);
   const messages = [{ role: 'user', content: session.scenario.opening + testerView(run) }];
@@ -669,11 +670,12 @@ function outcome(run, verdict) {
   return { good, lines };
 }
 
-// scenarioMeta says which adventure a playthrough played, so trials and
-// ratings can be split by scenario.
+// scenarioMeta says which adventure a playthrough played, and the GM's prompt
+// version as the server reported it, so trials and ratings can be split by
+// either.
 function scenarioMeta(run) {
   const sc = run.scenario;
-  return { scenario: SCENARIO_MODE, scenario_id: sc.id, scenario_variant: sc.variant, scenario_seed: sc.seed || undefined };
+  return { scenario: SCENARIO_MODE, scenario_id: sc.id, scenario_variant: sc.variant, scenario_seed: sc.seed || undefined, prompt_version: run.promptVersion };
 }
 
 function intentResult(i) {
@@ -959,7 +961,14 @@ function createSession(label) {
     return null;
   }
   console.log(`${label}: playing ${body.scenario.variant}${body.scenario.seed ? ` (seed ${body.scenario.seed})` : ''}`);
-  return { id: body.session_id, state: body.state, scenario: { ...scenario, variant: body.scenario.variant } };
+  return { id: body.session_id, state: body.state, scenario: { ...scenario, variant: body.scenario.variant }, promptVersion: body.prompt_version || undefined };
+}
+
+// serverPromptVersion is the GM prompt version of the server under test,
+// read from a throwaway session (creating one calls no model).
+function serverPromptVersion() {
+  const body = parseJSON(http.post(`${BASE_URL}/session`, JSON.stringify({ scenario: SCENARIO_MODE }), { headers: JSON_HEADERS, tags: { name: 'game_session' } }));
+  return body?.prompt_version || undefined;
 }
 
 function callClaude(model, system, messages, schema, maxTokens, name) {

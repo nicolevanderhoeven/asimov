@@ -272,7 +272,10 @@ those are unset or `E2E_RATE=0`. A failed rating is logged and counted in
 The run is also recorded as an Agent Observability experiment. `setup()`
 creates it, with the game's agent version and model as the candidate (set
 `GIT_SHA=$(git rev-parse --short HEAD)` to record the commit too), and
-`teardown()` completes it. Each playthrough is a trial of its test case
+`teardown()` completes it. The candidate's `prompt_version` is the one the
+server reports (`gm.GM.PromptVersion`, such as `narrator-notes-v2`, with
+`+ending-guard-v1` when `ASIMOV_ENDING_GUARD` is on); each trial and rating
+records it too, and every generation is tagged with it. Each playthrough is a trial of its test case
 (`guided`, `adversarial`, or `cooperative`, numbered by attempt), linked to
 its conversation. Each trial gets these scores:
 

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/grafana/agento11y/go/agento11y"
@@ -76,6 +77,11 @@ func run() error {
 		telemetryNote = "Grafana telemetry is off for this run."
 	}
 	g := gm.GM{Client: client, Logger: logger, Roll: game.RandomRoll}
+	// The fix for the false ending is opt-in; see gm.GM.EndingGuard.
+	if on, _ := strconv.ParseBool(os.Getenv("ASIMOV_ENDING_GUARD")); on && !*offline {
+		g.EndingGuard = true
+		telemetryNote += " Ending guard on."
+	}
 	if !*offline {
 		model := os.Getenv("ANTHROPIC_MODEL")
 		if model == "" {
