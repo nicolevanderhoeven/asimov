@@ -506,26 +506,67 @@ func (s *State) resume(x supplied) Result {
 }
 
 // Roll makes the player's roll the action in progress waits on. text is what
-// the player typed after /roll, and must name the roll. The dice are drawn
-// with roll; the player decides only when.
+// the player typed after /roll; whatever it names, the roll due is the one
+// made, since its dice are fixed and the player decides only when. Strict
+// naming left games stuck: the GM would invent commands such as /roll 1d20
+// or /roll Arcana that the engine refused, turn after turn. With nothing due,
+// a /roll that names an action's check starts that action (see rollToAct).
 func (s *State) Roll(text string, roll Roller) Result {
 	finish := func(msg string) Result { return Result{Message: msg, State: s.View()} }
 	p := s.Pending
 	switch {
 	case s.Won || s.HP <= 0:
 		return finish("This adventure has ended; there is nothing left to roll for.")
-	case p == nil || p.By != ByPlayer:
+	case p == nil:
+		if r, ok := s.rollToAct(text, roll); ok {
+			return r
+		}
 		return finish("No roll is needed right now. Choose an action first; the GM will ask for a roll if it calls for one.")
-	case strings.TrimSpace(text) == "":
-		return finish(fmt.Sprintf("Name what you are rolling: type %s.", p.Command))
-	case !p.accepts(text):
-		return finish(fmt.Sprintf("The GM asked for %s, not %s. Type %s.", p.Check, strings.TrimSpace(text), p.Command))
+	case p.By != ByPlayer:
+		return finish("No roll is needed from you right now: the GM rolls next.")
 	}
 	d, err := ParseNotation(p.Notation)
 	if err != nil {
 		panic(err)
 	}
 	return s.resume(supplied{purpose: p.Purpose, dice: d.Roll(roll)})
+}
+
+// rollToAct starts the action that a /roll with nothing due names, and makes
+// its first roll: players type /roll Dexterity to fire, often because the GM
+// asked for it before the attack was chosen. It applies when text matches
+// the check of exactly one action available here, or when only one action
+// here has a check at all; otherwise it reports false and changes nothing.
+func (s *State) rollToAct(text string, roll Roller) (Result, bool) {
+	var matched, checked []Action
+	for _, o := range s.View().Actions {
+		c, ok := s.checkFor(o.Action)
+		// A scan stays listed after its clue is found; rolling it again
+		// would only spend a turn.
+		if cl := s.Scenario().clueFor(o.Action); !ok || (cl != nil && s.Clues[cl.Key]) {
+			continue
+		}
+		checked = append(checked, o.Action)
+		if (&RollSpec{Ability: c.ability, aliases: c.aliases}).accepts(text) {
+			matched = append(matched, o.Action)
+		}
+	}
+	var a Action
+	switch {
+	case len(matched) == 1:
+		a = matched[0]
+	case len(matched) == 0 && len(checked) == 1:
+		a = checked[0]
+	default:
+		return Result{}, false
+	}
+	started := s.Apply(a, Ruling{})
+	if s.Pending == nil || s.Pending.By != ByPlayer {
+		return started, true
+	}
+	r := s.Roll(text, roll)
+	r.Rolls = append(started.Rolls, r.Rolls...)
+	return r, true
 }
 
 // GMRoll makes the GM's roll the action in progress waits on, from dice the

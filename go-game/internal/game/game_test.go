@@ -214,20 +214,46 @@ func TestRollRequiresPlayerCommand(t *testing.T) {
 	if r.State.Pending == nil {
 		t.Fatal("view does not show the pending roll")
 	}
-	for _, wrong := range []string{"", "Strength", "intelligence strength"} {
-		if r := s.Roll(wrong, sequence(t)); r.Allowed || s.Pending == nil {
-			t.Fatalf("/roll %q should be rejected without rolling: %+v", wrong, r)
-		}
-	}
-	if r := s.Roll("1d20+7", sequence(t)); r.Allowed {
-		t.Fatal("/roll accepted notation that isn't the roll due")
-	}
-	r = s.Roll("int (Investigation)", sequence(t, 10))
+	// Whatever the /roll names, the roll due is made: its dice are fixed.
+	r = s.Roll("1d20+7", sequence(t, 10))
 	if !r.Allowed || !s.Clues["frequency"] || s.Pending != nil || s.Turn != 1 || len(r.Rolls) != 1 || r.Rolls[0].By != ByPlayer || r.Rolls[0].Total != 16 {
 		t.Fatalf("roll did not resolve the scan: %+v", r)
 	}
 	if r := s.Roll("Intelligence", sequence(t)); r.Allowed {
-		t.Fatal("rolled with nothing pending")
+		t.Fatal("rolled with nothing pending and no check left here")
+	}
+}
+
+func TestRollAcceptsAnyNameForTheRollDue(t *testing.T) {
+	for _, text := range []string{"", "Strength", "intelligence strength", "1d20", "d20+6"} {
+		s := New("test")
+		s.Apply(Action{"scan", "sensors"}, Ruling{})
+		if r := s.Roll(text, sequence(t, 10)); !r.Allowed || !s.Clues["frequency"] || s.Pending != nil {
+			t.Fatalf("/roll %q should make the roll due: %+v", text, r)
+		}
+	}
+}
+
+func TestRollWithNothingDueStartsTheActionItNames(t *testing.T) {
+	// On the bridge, the sensor scan is the only action with a check.
+	s := New("test")
+	r := s.Roll("Intelligence", sequence(t, 10))
+	if !r.Allowed || !s.Clues["frequency"] || s.Turn != 1 || len(r.Rolls) != 1 {
+		t.Fatalf("/roll Intelligence should scan the sensors: %+v", r)
+	}
+	// In combat, /roll Dexterity is the phaser attack; a hit then waits on
+	// the damage roll.
+	s = New("test")
+	s.Location, s.Combat = "engineering", true
+	r = s.Roll("Dexterity", sequence(t, 10))
+	if len(r.Rolls) != 1 || r.Rolls[0].Label != "Phaser attack" || s.Pending == nil || s.Pending.Purpose != "data_damage" {
+		t.Fatalf("/roll Dexterity should start the attack: %+v pending %+v", r, s.Pending)
+	}
+	// In sickbay nothing has a check, so nothing starts.
+	s = New("test")
+	s.Location = "sickbay"
+	if r := s.Roll("Intelligence", sequence(t)); r.Allowed || s.Pending != nil {
+		t.Fatalf("nothing here has a check: %+v", r)
 	}
 }
 

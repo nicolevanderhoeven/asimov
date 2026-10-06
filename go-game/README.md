@@ -260,8 +260,16 @@ Rules references:
    what happens next. Any other call rolls nothing and returns only why, so
    the GM has no numbers it could narrate as a roll the game never used. The
    GM can call `roll_dice` only in a step that starts with a GM roll due;
-   otherwise the tool stays declared with tool choice `none`. A GM roll still
-   due when the narration ends is skipped. After the player's input, the GM
+   otherwise the tool stays declared with tool choice `none`. With one due,
+   the step forces `roll_dice` and its schema allows only that roll's
+   `purpose` and `notation`, so the GM makes exactly the roll due, before
+   writing anything; after three refused calls it is no longer forced. A GM
+   roll still due when the narration ends is skipped. A player's `/roll`
+   makes the roll due whatever it names, since the dice are fixed; with
+   nothing due, `/roll Dexterity` in combat (or any `/roll` naming the check
+   of the one action here that has it) starts that action and rolls it, and
+   a `/roll` inside an action ("I fire. /roll Dexterity") is rolled once the
+   action waits on it. After the player's input, the GM
    reads how a `/roll` came up (or why it wasn't made); after any other
    input, that nothing has been rolled for the player's roll due and the
    command that makes it, or, with nothing due, that no roll is. A number

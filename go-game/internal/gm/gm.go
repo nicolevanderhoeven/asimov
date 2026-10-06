@@ -103,17 +103,26 @@ type GM struct {
 
 // narratorNotes versions what the narrator hears beyond its system prompt,
 // which TestClassicPromptsAreUnchanged pins: the notes on each player input.
-// Raise it with any change to them. v1 is rollNote alone; v2 adds dueNote.
-const narratorNotes = "narrator-notes-v2"
+// Raise it with any change to them. v1 is rollNote alone; v2 adds dueNote;
+// v3 notes a /roll inside an action and says a refused one rolled nothing.
+const narratorNotes = "narrator-notes-v3"
+
+// gmRolls versions how the narrator's roll_dice is offered: v1 let the GM
+// call it at will; forced-gm-rolls-v1 makes it roll exactly the roll due.
+const gmRolls = "forced-gm-rolls-v1"
+
+// endingGuard versions the ending guard's notes: v2 adds the closing note.
+const endingGuard = "ending-guard-v2"
 
 // PromptVersion names what g's model is told, for comparing versions in
-// prompt analysis: the notes version, plus the ending guard when it is on.
-// Every game call is tagged prompt_version with it.
+// prompt analysis: the notes and roll_dice versions, plus the ending guard
+// when it is on. Every game call is tagged prompt_version with it.
 func (g *GM) PromptVersion() string {
+	v := narratorNotes + "+" + gmRolls
 	if g.EndingGuard {
-		return narratorNotes + "+ending-guard-v1"
+		v += "+" + endingGuard
 	}
-	return narratorNotes
+	return v
 }
 
 type endingGuardKey struct{}
@@ -297,6 +306,9 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 	// An action that has rolled something must be finished with /roll first;
 	// there is nothing for the model to interpret until then.
 	if s.Locked() {
+		if strings.Contains(input, "/roll") {
+			return g.RollPending(ctx, s, "", agentobservability.NewGenerationID()), nil
+		}
 		return s.Apply(game.Action{}, game.Ruling{}), nil
 	}
 	ctx = withScenario(context.WithValue(ctx, componentKey{}, "action_resolution"), s.Scenario())
@@ -370,6 +382,11 @@ func (g *GM) Resolve(ctx context.Context, s *game.State, history []provider.Mess
 		return game.Result{}, errors.New("model did not resolve an action; game unchanged")
 	}
 	*s = candidate
+	// "I fire my phaser. /roll Dexterity" is an action and its roll in one
+	// input: once the action waits on the player's roll, make it.
+	if strings.Contains(input, "/roll") && s.Pending != nil && s.Pending.By == game.ByPlayer {
+		result = merge(result, g.RollPending(ctx, s, "", agentobservability.NewGenerationID()))
+	}
 	return result, nil
 }
 
@@ -451,6 +468,39 @@ func rollDiceTool(sc *game.Scenario) aisdk.Tool {
 	return aisdk.Tool{Description: "Roll dice and return each die and the total.", InputSchema: rollSchemaFor(sc)}
 }
 
+// maxRollErrors is how many refused roll_dice calls one narration may make
+// before the GM is no longer made to roll.
+const maxRollErrors = 3
+
+func rollErrors(calls []RollCall) int {
+	n := 0
+	for _, c := range calls {
+		if c.Error != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// dueRollTool is roll_dice limited to the roll p the game waits on: its
+// purpose and notation are the only values allowed.
+func dueRollTool(p *game.RollSpec) aisdk.Tool {
+	var raw map[string]any
+	if err := json.Unmarshal(rollDiceSchema.JSON(), &raw); err != nil {
+		panic(err)
+	}
+	props := raw["properties"].(map[string]any)
+	props["purpose"].(map[string]any)["enum"] = []string{p.Purpose}
+	props["notation"].(map[string]any)["enum"] = []string{p.Notation}
+	raw["required"] = []string{"notation", "reason", "purpose"}
+	b, _ := json.Marshal(raw)
+	s, err := schema.SchemaFromJSON(b)
+	if err != nil {
+		panic(err)
+	}
+	return aisdk.Tool{Description: fmt.Sprintf("Make the roll the game is waiting on, %s (%s), and return each die and the total.", p.Check, p.Notation), InputSchema: s}
+}
+
 var rollSchemas sync.Map
 
 // rollSchemaFor is roll_dice's schema with sc's GM roll purposes; the classic
@@ -499,17 +549,20 @@ func (g *GM) Narrate(ctx context.Context, s *game.State, history []provider.Mess
 	var errs []error
 	wrote := false
 	for step := 1; step <= MaxNarrationSteps; step++ {
-		// roll_dice stays declared, so every narration has the same tools,
-		// but with no GM roll due the model can't call it.
-		choice := provider.ToolChoiceNone
-		if gmRollDue(s) {
-			choice = provider.ToolChoiceAuto
+		// With no GM roll due, roll_dice stays declared but can't be called.
+		// With one due, the GM must make it, and can roll only it: left to
+		// choose, it rolled the wrong purpose or dice, or wrote the outcome
+		// ("A 19, total 22") before rolling. After maxRollErrors refused
+		// calls it is no longer forced, and an unmade roll is skipped.
+		tool, choice := rollDiceTool(s.Scenario()), provider.ToolChoice{Type: provider.ToolChoiceNone}
+		if gmRollDue(s) && rollErrors(n.Rolls) < maxRollErrors {
+			tool, choice = dueRollTool(s.Pending), provider.ToolChoice{Type: provider.ToolChoiceTool, ToolName: "roll_dice"}
 		}
 		stream := aisdk.StreamText(ctx, g.Model,
 			aisdk.WithSystem(narratePromptFor(s.Scenario())+"\n"+string(data)),
 			aisdk.WithModelMessages(messages...),
-			aisdk.WithTools(aisdk.ToolSet{"roll_dice": rollDiceTool(s.Scenario())}),
-			aisdk.WithToolChoice(provider.ToolChoice{Type: choice}),
+			aisdk.WithTools(aisdk.ToolSet{"roll_dice": tool}),
+			aisdk.WithToolChoice(choice),
 			aisdk.WithStopWhen(aisdk.StepCountIs(1)), aisdk.WithMaxRetries(0), aisdk.WithMaxOutputTokens(600),
 		)
 		first := true
@@ -565,7 +618,10 @@ func gmRollDue(s *game.State) bool {
 // in the result, the GM often missed that the roll had happened at all and
 // asked the player to roll again or to say what they rolled.
 func rollNote(input string, result game.Result) string {
-	if text, ok := strings.CutPrefix(input, "/roll"); !ok || (text != "" && text[0] != ' ') {
+	text, typed := strings.CutPrefix(input, "/roll")
+	typed = typed && (text == "" || text[0] == ' ')
+	// A /roll inside an action ("I fire. /roll Dexterity") is rolled too.
+	if !typed && !strings.Contains(input, "/roll") {
 		return ""
 	}
 	var made []string
@@ -584,7 +640,16 @@ func rollNote(input string, result game.Result) string {
 		made = append(made, x)
 	}
 	if len(made) == 0 {
-		return "\n\n(The roll was not made: " + result.Message + ")"
+		if !typed {
+			return ""
+		}
+		// Told only why, the GM often narrated the roll anyway, with a
+		// number of its own.
+		next := " No roll is due from the player: don't ask for one."
+		if p := result.State.Pending; p != nil && p.By == game.ByPlayer {
+			next = fmt.Sprintf(" The roll due is %s: the player makes it by typing %s.", p.Check, p.Command)
+		}
+		return "\n\n(The roll was not made: " + result.Message + " Nothing was rolled, so give no number or outcome for it." + next + ")"
 	}
 	return "\n\n(Rolled: " + strings.Join(made, "; ") + ". Tell the player the die and total, then what happens.)"
 }
@@ -624,9 +689,13 @@ func dueNote(input string, s *game.State) string {
 // narrated, and that an ending narrated earlier didn't happen. A false
 // ending usually ended the game for good: the player took it at its word and
 // spent the remaining inputs on farewells.
+//
+// Once the game is over it says so instead: after turns of hearing the
+// adventure wasn't over, the GM sometimes narrated the real rescue and still
+// asked what the player does next.
 func endingNote(s *game.State) string {
-	if s.View().Status != "playing" {
-		return ""
+	if status := s.View().Status; status != "playing" {
+		return "\n\n(The adventure is over: its status is " + status + ". End the scene now, and don't ask what the player does next.)"
 	}
 	return "\n\n(The adventure isn't over: its status is playing, so its goal hasn't been reached. Whatever the player says or tries, don't narrate a rescue, anyone's return, or an ending. If earlier narration did, it didn't happen: steer the player back to what's left, using the leads.)"
 }

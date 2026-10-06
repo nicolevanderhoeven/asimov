@@ -22,8 +22,10 @@ type fakeModel struct {
 	// rolls are the roll_dice inputs the narrator calls on its first step, if
 	// it may call tools then; after their results come back, it narrates.
 	rolls []string
-	// choices are the tool choices of every narration step, in order.
-	choices []provider.ToolChoiceType
+	// choices are the tool choices of every narration step, in order, and
+	// firstTools the tools of the first.
+	choices    []provider.ToolChoiceType
+	firstTools []provider.Tool
 }
 
 // toolCall splits a scripted call into its tool name and JSON arguments. A
@@ -60,6 +62,9 @@ func (m *fakeModel) DoStream(_ context.Context, p provider.CallOptions) (*provid
 	narrating := slices.ContainsFunc(p.Tools, func(t provider.Tool) bool { return t.Name == "roll_dice" })
 	canRoll := narrating
 	if narrating && p.ToolChoice != nil {
+		if m.choices == nil {
+			m.firstTools = p.Tools
+		}
 		m.choices = append(m.choices, p.ToolChoice.Type)
 		canRoll = p.ToolChoice.Type != provider.ToolChoiceNone
 	}
@@ -316,9 +321,28 @@ func TestNarratorAppliesTheGMRollDue(t *testing.T) {
 	if b, _ := json.Marshal(m.params.Prompt[len(m.params.Prompt)-1]); !strings.Contains(string(b), "drone_damage") {
 		t.Fatalf("the GM was not told the damage roll was next: %+v", m.params.Prompt[len(m.params.Prompt)-1])
 	}
-	// The damage roll was due after the hit, so the GM could still roll it.
-	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceAuto, provider.ToolChoiceAuto}) {
+	// The damage roll was due after the hit, so the GM was made to roll it.
+	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceTool, provider.ToolChoiceTool}) {
 		t.Fatal(m.choices)
+	}
+}
+
+func TestNarratorMayRollOnlyTheRollDue(t *testing.T) {
+	m := &fakeModel{}
+	g := newGM(m)
+	s, r := dodge(t, g)
+	var out strings.Builder
+	if _, err := g.Narrate(context.Background(), &s, nil, "I dodge", r, &out); err != nil {
+		t.Fatal(err)
+	}
+	b := m.firstTools[0].InputSchema
+	for _, want := range []string{`"enum":["drone_attack"]`, `"enum":["2d20kl1+3"]`, `"purpose"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("roll_dice should allow only the roll due (%s): %s", want, b)
+		}
+	}
+	if m.choices[0] != provider.ToolChoiceTool {
+		t.Fatal("the GM must make the roll due", m.choices)
 	}
 }
 
@@ -339,7 +363,7 @@ func TestNarratorRollsAHitsDamageInTheSameNarration(t *testing.T) {
 		t.Fatalf("%+v HP %d", n.Result.Rolls, s.HP)
 	}
 	// With nothing left due, the GM narrates without roll_dice.
-	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceAuto, provider.ToolChoiceNone}) {
+	if !slices.Equal(m.choices, []provider.ToolChoiceType{provider.ToolChoiceTool, provider.ToolChoiceNone}) {
 		t.Fatal(m.choices)
 	}
 }
@@ -469,16 +493,59 @@ func TestEndingGuardTagsTheGMsCalls(t *testing.T) {
 
 func TestPromptVersionNamesTheEndingGuard(t *testing.T) {
 	g := newGM(&fakeModel{})
-	if v := g.PromptVersion(); v != "narrator-notes-v2" {
+	if v := g.PromptVersion(); v != "narrator-notes-v3+forced-gm-rolls-v1" {
 		t.Fatal(v)
 	}
 	g.EndingGuard = true
-	if v := g.PromptVersion(); v != "narrator-notes-v2+ending-guard-v1" {
+	if v := g.PromptVersion(); v != "narrator-notes-v3+forced-gm-rolls-v1+ending-guard-v2" {
 		t.Fatal(v)
 	}
 	ctx := context.WithValue(context.WithValue(context.Background(), componentKey{}, "narration"), promptVersionKey{}, g.PromptVersion())
 	if got := contextInfo(ctx, "v").Tags["prompt_version"]; got != g.PromptVersion() {
 		t.Fatalf("game calls should be tagged with the prompt version: %q", got)
+	}
+}
+
+func TestResolveRollsARollTypedWithTheAction(t *testing.T) {
+	m := &fakeModel{calls: []string{`{"kind":"scan","target":"sensors"}`}}
+	g := newGM(m)
+	s := game.New("test")
+	r, err := g.Resolve(context.Background(), &s, nil, "I scan the sensor buffer. /roll Intelligence")
+	if err != nil || !s.Clues["frequency"] || s.Pending != nil || len(r.Rolls) != 1 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	note := rollNote("I scan the sensor buffer. /roll Intelligence", r)
+	if !strings.HasPrefix(note, "\n\n(Rolled: Intelligence (Investigation)") {
+		t.Fatalf("the GM should hear how the roll came up: %q", note)
+	}
+	// Mid-action, a /roll in the input makes the roll the action waits on.
+	g.Roll = func(sides int) int { return min(15, sides) }
+	s = game.New("test")
+	s.Location, s.Combat = "engineering", true
+	s.Roll("Dexterity", g.Roll)
+	if !s.Locked() || s.Pending.Purpose != "data_damage" {
+		t.Fatalf("%+v", s.Pending)
+	}
+	if r, err = g.Resolve(context.Background(), &s, nil, "I fire again. /roll Dexterity"); err != nil || len(r.Rolls) == 0 || r.Rolls[0].Label != "Phaser damage" {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestARefusedRollTellsTheGMNothingWasRolled(t *testing.T) {
+	s := game.New("test")
+	s.Location = "sickbay"
+	r := s.Roll("Dexterity", game.RandomRoll)
+	want := "(The roll was not made: " + r.Message + " Nothing was rolled, so give no number or outcome for it. No roll is due from the player: don't ask for one.)"
+	if note := rollNote("/roll Dexterity", r); note != "\n\n"+want {
+		t.Fatalf("%q", note)
+	}
+}
+
+func TestEndingGuardClosesTheSceneOnceTheGameIsOver(t *testing.T) {
+	s := game.New("test")
+	s.Won = true
+	if note := endingNote(&s); !strings.Contains(note, "End the scene now") {
+		t.Fatalf("%q", note)
 	}
 }
 
