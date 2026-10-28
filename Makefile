@@ -13,15 +13,24 @@ E2E_DURATION ?= 30m
 # K6_CLOUD=1 streams k6's results to Grafana Cloud k6 (after k6 cloud login).
 K6_CLOUD ?=
 
+# The address make serve listens on. The API is unauthenticated and spends your
+# Anthropic key, so it stays on this machine unless you pass SERVE_ADDR=:8080.
+SERVE_ADDR ?= localhost:8080
+
 .DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+# What to tell someone whose .env was just created. Only the Grafana-backed
+# targets need the Grafana settings; everything else needs one Anthropic key.
+ENV_NEXT = Put your ANTHROPIC_API_KEY in it (from https://console.anthropic.com/settings/keys), then run the same make command again.
+play doctor: ENV_NEXT = Fill it in (see docs/grafana-cloud-setup.md), then run make doctor.
+
 .env:
 	@cp env.example .env
-	@echo "Created .env from env.example. Fill it in (see docs/grafana-cloud-setup.md), then run make doctor."
+	@echo "Created .env from env.example. $(ENV_NEXT)"
 	@exit 1
 
 ## Play
@@ -39,8 +48,8 @@ play: .env ## Play with the AI GM, sending telemetry to Grafana Cloud
 	$(GAME)
 
 .PHONY: serve
-serve: .env ## Run the HTTP API on :8080 for the k6 tests
-	$(GAME) --serve --addr :8080
+serve: .env ## Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)
+	$(GAME) --serve --telemetry-if-configured --addr $(SERVE_ADDR)
 
 ## Check
 

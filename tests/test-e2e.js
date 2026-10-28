@@ -4,6 +4,7 @@ import exec from 'k6/execution';
 import { check, group, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 import * as o11y from './lib/agento11y.js';
+import { gmModel } from './lib/gm-model.js';
 import { describeFindings, gradeResponse } from './lib/trajectory-grader.js';
 import { finding, pendingCheck, rulingContext, rulingOf, rulingPrompt, rulingSchema, rulingThresholds, RULING_SYSTEM } from './lib/ruling-judge.js';
 
@@ -243,7 +244,7 @@ export function setup() {
         agent_version: __ENV.ASIMOV_AGENT_VERSION || 'go-experiment-v1',
         prompt_version: serverPromptVersion(),
         model_provider: 'anthropic',
-        model_name: __ENV.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+        model_name: gmModel(),
         player_model: PLAYER_MODEL,
         judge_model: JUDGE_MODEL,
         ruling_judge_model: RULING_JUDGE_MODEL,

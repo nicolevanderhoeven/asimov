@@ -11,14 +11,19 @@ the conversations they create.
   or newer.
 - Fill in `.env` (see [the setup guide](../docs/grafana-cloud-setup.md)).
   Every test except the grader check needs `ANTHROPIC_API_KEY`. The
-  Grafana Cloud settings are optional, but without them the tests can't
-  post ratings or experiments.
+  Grafana Cloud settings are optional: when they're absent, `scripts/k6.sh`
+  starts the game server with telemetry off, and the tests just don't post
+  ratings or experiments. If you fill in some of the settings but not all, the
+  server refuses to start and lists what's missing.
 - Run the tests from the repository root with `make`. Each `make k6-*`
   target runs [`scripts/k6.sh`](../scripts/k6.sh), which passes your `.env`
   to k6 and starts the game server if one isn't already running on
   `localhost:8080` (its output goes to `logs/server.log`). To use a server
   you started yourself (`make serve`) or one somewhere else, set
-  `BASE_URL=http://host:8080`.
+  `BASE_URL=http://host:8080`. The server listens on `localhost` only: its
+  API is unauthenticated and spends your Anthropic key, so a server on another
+  machine is yours to expose and protect (see
+  [Serve](../go-game/README.md#serve)).
 
 Extra k6 options go straight through the script, for example
 `scripts/k6.sh -e RUNS=50 -e VUS=4 tests/test-trajectory.js`.
@@ -63,6 +68,12 @@ judge every conversation, and the others a sample of them (see
 All the scripts fail the run when a check fails. For the trajectory test, a
 failure means the model misbehaved, which is the point; the `traj_*` rates
 and per-turn checks show how often.
+
+By default the tests that call Anthropic directly (the AI test's generator and
+judge, and the judges in the trajectory and end-to-end tests) send requests to
+`https://api.anthropic.com/v1/messages`. Set `ANTHROPIC_API_URL` to send them
+somewhere else, such as a proxy or a stand-in server. It applies only to the
+k6 scripts' own calls, not to the game server's.
 
 The AI test uses `GENERATOR_MODEL=claude-sonnet-4-6` and
 `JUDGE_MODEL=claude-opus-5-5` by default; set those k6 environment variables

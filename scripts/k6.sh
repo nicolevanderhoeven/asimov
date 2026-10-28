@@ -46,7 +46,7 @@ if ! up; then
   echo "Starting the game server for this run (output in logs/server.log)..."
   mkdir -p logs
   (cd go-game && go build -o enterprise ./cmd/enterprise)
-  (cd go-game && exec ./enterprise --serve --addr :8080) >logs/server.log 2>&1 &
+  (cd go-game && exec ./enterprise --serve --telemetry-if-configured) >logs/server.log 2>&1 &
   server=$!
   trap 'kill "$server" 2>/dev/null; wait "$server" 2>/dev/null || true' EXIT
   for _ in $(seq 1 30); do

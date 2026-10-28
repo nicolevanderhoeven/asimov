@@ -74,9 +74,17 @@ concurrent clients never interleave turns into the same game state the way a
 single shared session would.
 
 ```sh
-go run ./cmd/enterprise --serve --addr :8080
-go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve returns 503
+go run ./cmd/enterprise --serve
+go run ./cmd/enterprise --offline --serve  # no LLM; /resolve returns 503
+go run ./cmd/enterprise --serve --telemetry-if-configured  # telemetry only if .env has Grafana credentials
 ```
+
+The API is unauthenticated, spends your Anthropic key, and
+`GET /session/{id}/scenario` reveals the solution, so `--serve` listens on
+`localhost:8080` only. To reach it from another machine, say so with `--addr`
+(`--addr :8080` listens on every interface, so put it behind something that
+authenticates). `make serve` takes `SERVE_ADDR=:8080`, and in Docker Compose
+`ASIMOV_BIND_ADDR=0.0.0.0` publishes the port beyond this machine.
 
 | Method & path | Purpose |
 | --- | --- |

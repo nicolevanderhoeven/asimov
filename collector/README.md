@@ -38,6 +38,7 @@ If none of those apply, stay with the default direct path.
    ```bash
    docker compose up -d
    ```
+   The Collector's ports are published on `127.0.0.1` only, because its receivers are unauthenticated and forward with your credentials. To receive OTLP from other machines, change the `ports` in `docker-compose.yml` deliberately.
 5. Run the game as usual (`make play`), and check the path with `make doctor`. Traces, metrics, and logs now flow game → Collector → Grafana Cloud. The game accepts a plain-HTTP `OTLP_ENDPOINT` only on localhost, so run it on the same machine as the Collector.
 
 To switch back to the direct path, restore your original `OTLP_ENDPOINT` / `OTLP_HEADERS` and `docker compose down`.
