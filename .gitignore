@@ -16,3 +16,5 @@ go-game/mockjudge
 go-game/mockjudge.exe
 go-game/.enterprise-save*
 
+/task
+/task.exe
