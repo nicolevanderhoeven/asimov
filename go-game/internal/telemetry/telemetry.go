@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,6 +55,15 @@ func FromEnv() Config {
 	}
 }
 
+// Configured reports whether c holds any Grafana Cloud credential, which
+// means the user meant to send telemetry. The endpoints don't count: a fresh
+// copy of env.example already fills them with placeholders.
+func (c Config) Configured() bool {
+	return first(c.Instance, c.Token, c.Authorization) != ""
+}
+
+// Validate reports every missing or placeholder setting at once, in sorted
+// order, so one run shows the whole fix.
 func (c Config) Validate() error {
 	required := map[string]string{"OTLP_ENDPOINT": c.Endpoint, "AGENTO11Y_ENDPOINT (or GRAFANA_CLOUD_SIGIL_ENDPOINT)": c.GenerationEndpoint, "GRAFANA_CLOUD_INSTANCE_ID": c.Instance, "GRAFANA_CLOUD_API_KEY": c.Token}
 	// A local Collector (see collector/) holds the Grafana Cloud credentials
@@ -61,10 +71,30 @@ func (c Config) Validate() error {
 	if !c.LocalCollector() {
 		required["OTLP_HEADERS"] = c.Authorization
 	}
+	var missing []string
 	for name, v := range required {
 		if strings.TrimSpace(v) == "" {
-			return fmt.Errorf("missing %s; configure Grafana telemetry or explicitly use --no-telemetry", name)
+			missing = append(missing, name)
 		}
+	}
+	sort.Strings(missing)
+	// env.example's REGION placeholder means the URL was never filled in.
+	var placeholders []string
+	for name, v := range map[string]string{"AGENTO11Y_API_ENDPOINT": c.APIEndpoint, "AGENTO11Y_ENDPOINT": c.GenerationEndpoint, "OTLP_ENDPOINT": c.Endpoint} {
+		if strings.Contains(v, "REGION") {
+			placeholders = append(placeholders, name)
+		}
+	}
+	sort.Strings(placeholders)
+	var problems []string
+	if len(missing) > 0 {
+		problems = append(problems, "missing "+strings.Join(missing, ", "))
+	}
+	if len(placeholders) > 0 {
+		problems = append(problems, "env.example's REGION placeholder is still in "+strings.Join(placeholders, ", "))
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("%s; configure Grafana telemetry or explicitly use --no-telemetry", strings.Join(problems, "; "))
 	}
 	endpoints := []string{c.Endpoint, c.GenerationEndpoint}
 	if c.APIEndpoint != "" {

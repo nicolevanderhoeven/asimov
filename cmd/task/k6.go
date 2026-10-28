@@ -40,9 +40,14 @@ func chdirRoot() error {
 	}
 }
 
+// grafanaBacked reports whether a target needs the Grafana Cloud settings in
+// .env. Every other target that reads .env needs only ANTHROPIC_API_KEY.
+func grafanaBacked(target string) bool { return target == "play" || target == "doctor" }
+
 // ensureEnv creates .env from env.example the first time, then stops so it
-// can be filled in.
-func ensureEnv(stdout io.Writer) error {
+// can be filled in. grafana says whether the target needs the Grafana Cloud
+// settings or only an Anthropic key.
+func ensureEnv(stdout io.Writer, grafana bool) error {
 	if _, err := os.Stat(".env"); err == nil {
 		return nil
 	}
@@ -53,7 +58,11 @@ func ensureEnv(stdout io.Writer) error {
 	if err := os.WriteFile(".env", b, 0o600); err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, "Created .env from env.example. Fill it in (see docs/grafana-cloud-setup.md), then run the doctor target.")
+	if grafana {
+		fmt.Fprintln(stdout, "Created .env from env.example. Fill it in (see docs/grafana-cloud-setup.md), then run the doctor target.")
+	} else {
+		fmt.Fprintln(stdout, "Created .env from env.example. Put your ANTHROPIC_API_KEY in it (from https://console.anthropic.com/settings/keys), then run the same command again.")
+	}
 	return exitError{1}
 }
 
@@ -236,7 +245,7 @@ func (a *app) startServer(env environ, baseURL string, sig <-chan os.Signal) (*s
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(path, "--serve", "--addr", ":8080")
+	cmd := exec.Command(path, "--serve", "--telemetry-if-configured")
 	cmd.Dir = "go-game"
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = logFile, logFile

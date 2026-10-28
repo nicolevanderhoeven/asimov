@@ -19,6 +19,12 @@ export E2E_DURATION K6_CLOUD
 # make k6 ARGS="-e RUNS=50 tests/test-trajectory.js"
 ARGS ?=
 
+# The address make serve listens on, localhost:8080 by default. The API is
+# unauthenticated and spends your Anthropic key, so it stays on this machine
+# unless you pass SERVE_ADDR=:8080.
+SERVE_ADDR ?=
+export SERVE_ADDR
+
 .DEFAULT_GOAL := help
 
 # The targets and their descriptions are listed by the runner: make help.

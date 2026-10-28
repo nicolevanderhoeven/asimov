@@ -136,14 +136,44 @@ func TestEnsureEnvCreatesFromExampleThenStops(t *testing.T) {
 	}
 	os.WriteFile("env.example", []byte("KEY=\n"), 0o644)
 	var out bytes.Buffer
-	if err := ensureEnv(&out); err != (exitError{1}) {
+	if err := ensureEnv(&out, false); err != (exitError{1}) {
 		t.Errorf("first call = %v, want exit 1", err)
+	}
+	if got := out.String(); !strings.Contains(got, "ANTHROPIC_API_KEY") || strings.Contains(got, "grafana-cloud-setup") {
+		t.Errorf("message for a target that needs only a key = %q", got)
 	}
 	if b, _ := os.ReadFile(".env"); string(b) != "KEY=\n" {
 		t.Errorf(".env = %q", b)
 	}
-	if err := ensureEnv(&out); err != nil {
+	if err := ensureEnv(&out, false); err != nil {
 		t.Errorf("second call = %v, want nil", err)
+	}
+}
+
+func TestEnsureEnvPointsGrafanaTargetsAtTheGuide(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	defer os.Chdir(wd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile("env.example", []byte("KEY=\n"), 0o644)
+	var out bytes.Buffer
+	if err := ensureEnv(&out, true); err != (exitError{1}) {
+		t.Fatalf("call = %v, want exit 1", err)
+	}
+	if !strings.Contains(out.String(), "grafana-cloud-setup.md") {
+		t.Errorf("message = %q, want it to name the Grafana guide", out.String())
+	}
+	for _, name := range []string{"play", "doctor"} {
+		if !grafanaBacked(name) {
+			t.Errorf("%s should need the Grafana settings", name)
+		}
+	}
+	for _, name := range []string{"play-local", "serve", "k6-code", "k6-e2e", "test"} {
+		if grafanaBacked(name) {
+			t.Errorf("%s should need only an Anthropic key", name)
+		}
 	}
 }
 

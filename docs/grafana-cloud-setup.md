@@ -130,7 +130,7 @@ can take a minute or two to appear.
 | `OTLP_HEADERS isn't base64` | Paste only the output of the `printf ... \| base64` command, not the raw `id:token`. |
 | `no such host` | A typo in the endpoint, or the `REGION` placeholder from `env.example` is still there. |
 | Conversations appear, but Agent Observability's analytics panels stay empty | The analytics come from your stack's Prometheus and Tempo. Check that metrics and traces are arriving (step 5), and that Agent Observability's Configuration page uses your stack's `grafanacloud-<stack>-prom` and `grafanacloud-<stack>-traces` data sources. |
-| The game exits with `missing OTLP_ENDPOINT ...` | Telemetry is on by default. Fill in `.env`, or play with `make play-local` (`--no-telemetry`). |
+| The game exits with `missing ...` or `env.example's REGION placeholder is still in ...` | `make play` sends telemetry, so every Grafana setting must be filled in; the error lists all that aren't. Fill them in, or play with `make play-local` (`--no-telemetry`). `make serve` and the k6 tests skip telemetry when none of the Grafana credentials are set. |
 
 ## Keep your keys safe
 
