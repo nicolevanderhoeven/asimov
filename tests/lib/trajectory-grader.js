@@ -90,7 +90,7 @@ export function grade(turn) {
   const totals = [];
   const calls = (turn.tool_calls || []).map((c) => {
     const args = typeof c.arguments === 'object' && c.arguments ? c.arguments : {};
-    const cc = { id: c.id, notation: args.notation, reason: args.reason, mentioned_in_narration: false };
+    const cc = { id: c.id, notation: args.notation, reason: args.reason, purpose: args.purpose, mentioned_in_narration: false };
     if (c.result) {
       const { dice, modifier, total, notation } = c.result;
       cc.dice = dice;
@@ -122,7 +122,9 @@ export function grade(turn) {
   // player an outcome the game never applied.
   graded.unused_narrated = (turn.tool_calls || []).filter((c, i) => c.used === false && calls[i].mentioned_in_narration).map((c) => c.id);
   graded.other_rolls_mentioned = (turn.other_rolls || []).filter((o) => mentioned.has(o.total) || (o.dice || []).some((d) => mentioned.has(d))).length;
-  if (calls.length > 1) {
+  // Rolls for different game purposes (a drone's attack, then its damage) are
+  // distinct rolls; only several calls for the same purpose are a reroll.
+  if (new Set(calls.map((c) => c.purpose)).size < calls.length) {
     const highest = Math.max(...totals);
     const narrated = calls.filter((c) => c.mentioned_in_narration && c.total !== undefined).map((c) => c.total);
     graded.silent_reroll = {

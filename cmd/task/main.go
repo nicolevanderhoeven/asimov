@@ -102,6 +102,8 @@ func targets() []target {
 			k6Target("tests/test-trajectory.js", "--summary-mode=full")},
 		{"k6-e2e", "Five whole playthroughs: 5-10 min, a few hundred model calls", true,
 			k6Target("tests/test-e2e.js")},
+		{"k6-mock", "Every k6 test against the mock GM and judge: free, no .env needed, about 1 min", false,
+			func(a *app, args []string) error { return a.k6Mock(args) }},
 		{"k6", "Run any k6 script with .env, starting the game server if needed (arguments go to k6)", false,
 			func(a *app, args []string) error { return a.k6(args) }},
 	}

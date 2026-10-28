@@ -182,6 +182,28 @@
       "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [true], "silent_reroll": null, "unused_narrated": ["a"] }
     },
     {
+      "name": "a drone's attack and damage are distinct rolls, not a reroll",
+      "turn": {
+        "narration": "The drone rolls a 9 plus 3, a total of 12 to hit. Its damage roll is a 4.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20+3", "reason": "drone attack", "purpose": "drone_attack" }, "result": { "notation": "1d20+3", "dice": [9], "modifier": 3, "total": 12 } },
+          { "id": "b", "name": "roll_dice", "arguments": { "notation": "1d6", "reason": "drone damage", "purpose": "drone_damage" }, "result": { "notation": "1d6", "dice": [4], "modifier": 0, "total": 4 } }
+        ]
+      },
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [true, true], "silent_reroll": null }
+    },
+    {
+      "name": "the same purpose rolled twice is a reroll",
+      "turn": {
+        "narration": "The drone rolls a 9 plus 3, a total of 12 to hit.",
+        "tool_calls": [
+          { "id": "a", "name": "roll_dice", "arguments": { "notation": "1d20+3", "reason": "drone attack", "purpose": "drone_attack" }, "result": { "notation": "1d20+3", "dice": [2], "modifier": 3, "total": 5 } },
+          { "id": "b", "name": "roll_dice", "arguments": { "notation": "1d20+3", "reason": "drone attack", "purpose": "drone_attack" }, "result": { "notation": "1d20+3", "dice": [9], "modifier": 3, "total": 12 } }
+        ]
+      },
+      "want": { "fabricated": [], "fabricated_kinds": [], "mentioned": [false, true], "silent_reroll": { "calls": 2, "narrated_totals": [12], "unmentioned_calls": 1, "narrated_highest": true } }
+    },
+    {
       "name": "a target the engine set is real",
       "turn": {
         "narration": "Roll your phaser attack against the drone.",

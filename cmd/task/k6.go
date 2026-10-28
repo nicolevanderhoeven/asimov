@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -156,7 +157,12 @@ func needK6() error {
 // there, it builds and starts a server for the run and stops it afterwards;
 // the server's output goes to logs/server.log. With K6_CLOUD=1, the test
 // still runs here but streams its results to Grafana Cloud k6.
-func (a *app) k6(args []string) error {
+func (a *app) k6(args []string) error { return a.k6With(args, false) }
+
+// k6With is k6, and with mock set it runs the test free: the game server
+// plays its mock game master (--llm mock) and a local mock judge answers the
+// script's Claude calls. See mock.go.
+func (a *app) k6With(args []string, mock bool) error {
 	if err := needK6(); err != nil {
 		return err
 	}
@@ -166,21 +172,34 @@ func (a *app) k6(args []string) error {
 		return err
 	}
 	env = append(env, a.override...)
+	defaultURL := defaultBaseURL
+	var serverFlags []string
+	sig, stop := interrupts()
+	defer stop()
+	if mock {
+		var judgeAddr string
+		env, defaultURL, serverFlags, judgeAddr = mockSettings(env)
+		judge, err := a.startMockJudge(env, judgeAddr, sig)
+		if err != nil {
+			return err
+		}
+		if judge != nil {
+			defer judge.stop()
+		}
+	}
 	baseURL, _ := env.Get("BASE_URL")
 	if baseURL == "" {
-		baseURL = defaultBaseURL
+		baseURL = defaultURL
 	}
 	env = env.Set("BASE_URL", baseURL)
 
-	sig, stop := interrupts()
-	defer stop()
 	var srv *server
 	if !up(baseURL) {
-		if baseURL != defaultBaseURL && baseURL != "http://127.0.0.1:8080" {
+		if !startable(baseURL) {
 			return fmt.Errorf("No game server is answering at %s.", baseURL)
 		}
 		fmt.Fprintf(a.stdout, "Starting the game server for this run (output in %s)...\n", serverLog)
-		if srv, err = a.startServer(env, baseURL, sig); err != nil {
+		if srv, err = a.startServer(env, baseURL, serverFlags, sig); err != nil {
 			return err
 		}
 		defer srv.stop()
@@ -197,10 +216,20 @@ func (a *app) k6(args []string) error {
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, a.stdout, a.stderr
 	err = exitCode(cmd.Run())
-	if err != nil && srv != nil && len(sig) == 0 {
+	if err != nil && srv != nil && len(sig) == 0 && !mock {
 		srv.explain(a)
 	}
 	return err
+}
+
+// startable reports whether a run may start its own game server for baseURL:
+// only on this machine, on the port the runner uses.
+func startable(baseURL string) bool {
+	switch strings.TrimRight(baseURL, "/") {
+	case defaultBaseURL, "http://127.0.0.1:8080", mockBaseURL, "http://127.0.0.1:8081":
+		return true
+	}
+	return false
 }
 
 // up reports whether anything answers at baseURL. Any HTTP answer, even a
@@ -222,30 +251,30 @@ type server struct {
 	done chan struct{} // closed when the process exits
 }
 
-func (a *app) startServer(env environ, baseURL string, sig <-chan os.Signal) (*server, error) {
-	if err := os.MkdirAll("logs", 0o755); err != nil {
-		return nil, err
-	}
-	exe := "enterprise"
+// build compiles one of the game's commands into go-game and returns the
+// path of the program.
+func (a *app) build(env environ, name, what string) (string, error) {
+	exe := name
 	if isWindows {
 		exe += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", exe, "./cmd/enterprise")
+	build := exec.Command("go", "build", "-o", exe, "./cmd/"+name)
 	build.Dir = "go-game"
 	build.Env = env
 	build.Stdout, build.Stderr = a.stdout, a.stderr
 	if err := build.Run(); err != nil {
-		return nil, fmt.Errorf("building the game server failed: %w", err)
+		return "", fmt.Errorf("building %s failed: %w", what, err)
 	}
-	path, err := filepath.Abs(filepath.Join("go-game", exe))
+	return filepath.Abs(filepath.Join("go-game", exe))
+}
+
+// spawn starts a built program in go-game, with its output in logPath.
+func spawn(env environ, path, logPath string, args ...string) (*server, error) {
+	logFile, err := os.Create(logPath)
 	if err != nil {
 		return nil, err
 	}
-	logFile, err := os.Create(serverLog)
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command(path, "--serve", "--telemetry-if-configured")
+	cmd := exec.Command(path, args...)
 	cmd.Dir = "go-game"
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = logFile, logFile
@@ -258,6 +287,27 @@ func (a *app) startServer(env environ, baseURL string, sig <-chan os.Signal) (*s
 		cmd.Wait()
 		close(s.done)
 	}()
+	return s, nil
+}
+
+// startServer starts the game server for baseURL. flags are added to the ones
+// that serve it there.
+func (a *app) startServer(env environ, baseURL string, flags []string, sig <-chan os.Signal) (*server, error) {
+	if err := os.MkdirAll("logs", 0o755); err != nil {
+		return nil, err
+	}
+	path, err := a.build(env, "enterprise", "the game server")
+	if err != nil {
+		return nil, err
+	}
+	addr := ":8080"
+	if u, err := url.Parse(baseURL); err == nil && u.Port() != "" {
+		addr = ":" + u.Port()
+	}
+	s, err := spawn(env, path, serverLog, append([]string{"--serve", "--telemetry-if-configured", "--addr", addr}, flags...)...)
+	if err != nil {
+		return nil, err
+	}
 
 	for i := 0; i < 30; i++ {
 		if up(baseURL) {

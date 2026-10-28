@@ -30,6 +30,70 @@ Extra k6 options go straight through the runner, for example
 `go run ./cmd/task k6 -e RUNS=50 -e VUS=4 tests/test-trajectory.js`
 (with make: `make k6 ARGS="-e RUNS=50 -e VUS=4 tests/test-trajectory.js"`).
 
+## Run everything free with the mock game master and judge
+
+No Anthropic key, no cost, no network beyond localhost, and no `.env`:
+
+```sh
+make k6-mock
+```
+
+It runs every test below in turn, with the game server on its mock game
+master (`--llm mock`) and a local mock judge standing in for Claude behind
+`ANTHROPIC_API_URL`: the probe generator, every judge, the e2e player and its
+persona, and the story critic. It takes about 30 seconds, and needs only Go
+and k6, so it suits CI.
+[`go-game/README.md`](../go-game/README.md#the-mock-game-master) explains
+both mocks.
+
+With a real model the planted flaws (the false ending, the false kill, made-up
+dice, a GM that rerolls or skips its rolls, breaks voice, or refuses) appear
+only sometimes. The mock plants each one on demand, so the tests have
+something to catch. Read the summary at the end:
+
+```text
+=== Mock run (flaws: default) ===
+  clean    tests/test-trajectory-graders.js
+  clean    tests/test-code.js
+  clean    tests/test-ai.js
+  caught   tests/test-trajectory.js
+  caught   tests/test-e2e.js
+
+OK: the tests caught the planted flaws ...
+```
+
+`caught` means k6 exited with 99, which means thresholds were crossed. With
+flaws planted that is the point: look at which checks failed
+(`traj_fabrication`, `traj_gm_roll_skipped`, `e2e: judge: consistency`, ...)
+to see each flaw caught. `clean` tests found nothing, which for the short
+ones is luck of the seed: `test-code.js` plays only three prompts. The script
+itself fails only when a test can't run, or when flaws were planted and
+nothing caught any.
+
+Choose the flaws with settings, given as arguments
+(`make k6-mock ARGS="MOCK_SEED=7"`, or `go run ./cmd/task k6-mock MOCK_SEED=7`)
+or as environment variables; an argument wins:
+
+| Setting | Meaning |
+| --- | --- |
+| `MOCK_SEED` | Which flaws appear. The same seed and conversation plant the same ones. Default 1. |
+| `MOCK_FLAWS` | The chance of each flaw: `default`, `off`, or a list such as `all=0.3,voice_break=0`. |
+| `MOCK_TELEMETRY=1` | Also send the mock's traces, metrics, and generations (labelled `model=mock`) to Grafana, using your `.env`. |
+
+`MOCK_FLAWS=off make k6-mock` runs a clean game master and expects every test
+to pass.
+
+To run one test free, name its script:
+`go run ./cmd/task k6-mock tests/test-trajectory.js MOCK_SEED=3`. The
+task runner ([`cmd/task`](../cmd/task/mock.go)) starts the mock judge on
+`127.0.0.1:8099` (`MOCK_JUDGE_ADDR`) and a mock-backed game server on
+`localhost:8081`, with their output in `logs/`, and stops both afterwards. It
+works the same on Windows, macOS, and Linux. The mock player and judges know
+the classic adventure, so the run always plays `classic`, whatever `.env`
+says.
+A real `ANTHROPIC_API_KEY` stays the way to see the full experience: Claude's
+narration, rulings, and judgment are not scripted.
+
 ## The tests
 
 Every model call costs Anthropic credits. Each game turn makes about two

@@ -97,6 +97,31 @@ positronic net into the sensor buffer"), and the GM interprets it, rules on
 it, and narrates. When a check needs a roll, make it with `/roll`. Each turn
 makes about two Claude calls.
 
+## Try the tests with no API key
+
+Don't have an Anthropic key, or don't want to spend one? A mock game master
+and a mock judge run the whole pipeline for free, with no network beyond
+localhost. You need [Go](https://go.dev/dl/) and
+[k6](https://grafana.com/docs/k6/latest/set-up/install-k6/); no `.env`.
+
+```sh
+make k6-mock               # about 30 seconds
+```
+
+With a real model the planted flaws appear only sometimes, so you may run the
+tests and see nothing caught. The mock plants each one on demand (a rescue
+that didn't happen, a drone "destroyed" while it still stands, dice nobody
+rolled, a GM that breaks voice) and the k6 graders and judges catch them. The
+run ends with a summary of which tests caught something; a test marked
+`caught` crossed its thresholds, which is the point. The flaws are
+deterministic, so the same `MOCK_SEED` plants the same ones, and
+`MOCK_FLAWS=off make k6-mock` (on Windows without make, `go run ./cmd/task k6-mock MOCK_FLAWS=off`)
+runs a clean game master. You can also play the
+mock yourself: `cd go-game && go run ./cmd/enterprise --llm mock --no-telemetry`.
+[`go-game/README.md`](go-game/README.md#the-mock-game-master) lists the flaws
+and how to set them. Mock turns are scripted, not creative: a real
+`ANTHROPIC_API_KEY` stays the full experience.
+
 ## Send telemetry to Grafana Cloud
 
 This is the point of the demo. It takes about 15 minutes, and the
@@ -117,7 +142,7 @@ This is the point of the demo. It takes about 15 minutes, and the
 
 | Next step | Guide |
 | --- | --- |
-| Test the AI with k6: code checks, LLM judges, dice-trajectory evals, and whole playthroughs. Results can be recorded as Agent Observability experiments. | [`tests/README.md`](tests/README.md) |
+| Test the AI with k6: code checks, LLM judges, dice-trajectory evals, and whole playthroughs. Results can be recorded as Agent Observability experiments. Run them free against a mock GM and judge with `make k6-mock`. | [`tests/README.md`](tests/README.md) |
 | Score live traffic all the time with Agent Observability online evaluators (LLM judges for each known flaw) | [`agento11y/README.md`](agento11y/README.md) |
 | Route telemetry through a local OpenTelemetry Collector | [`collector/README.md`](collector/README.md) |
 | How the game, its rules, its HTTP API, and its instrumentation work | [`go-game/README.md`](go-game/README.md) |
@@ -141,6 +166,7 @@ Run `make` (or `go run ./cmd/task`) on its own to list every shortcut:
   k6-trajectory    Dice trajectory evals: a few min, ~200 model calls
   k6-e2e           Five whole playthroughs: 5-10 min, a few hundred model calls
   k6               Run any k6 script with .env, starting the game server if needed (arguments go to k6)
+  k6-mock          Every k6 test against the mock GM and judge: free, no .env needed, about 1 min
 ```
 
 Every k6 target stops once its run has spent `K6_MAX_SPEND_USD` on Anthropic
