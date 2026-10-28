@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/grafana/ai-sdk/provider"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/game"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/gm"
+	"github.com/nicolevanderhoeven/asimov/go-game/internal/spend"
 )
 
 // fakeModel is a minimal provider.LanguageModel, just enough to drive
@@ -439,4 +441,41 @@ func st(id string, ts *httptest.Server) (game.View, bool) {
 		return game.View{}, false
 	}
 	return body.State, true
+}
+
+func TestSpendEndpointsCountExternalUsage(t *testing.T) {
+	ts := newTestServer(t, nil)
+	defer ts.Close()
+	post := func(body string) (int, spend.Snapshot) {
+		res, err := http.Post(ts.URL+"/spend", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var s spend.Snapshot
+		_ = json.NewDecoder(res.Body).Decode(&s)
+		return res.StatusCode, s
+	}
+	if code, _ := post(`{"source":"judge"}`); code != http.StatusBadRequest {
+		t.Errorf("a record with no model = %d, want 400", code)
+	}
+	code, s := post(`{"source":"judge","model":"claude-opus-5-5","usage":{"input_tokens":1000000,"output_tokens":100000,"cache_read_input_tokens":1000000}}`)
+	if code != http.StatusOK {
+		t.Fatalf("POST /spend = %d", code)
+	}
+	if want := 4 + 2 + 0.2; math.Abs(s.TotalUSD-want) > 1e-9 {
+		t.Errorf("total %v, want %v", s.TotalUSD, want)
+	}
+	res, err := http.Get(ts.URL + "/spend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var got spend.Snapshot
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Entries) != 1 || got.Entries[0].Source != "judge" || got.Calls != 1 {
+		t.Errorf("GET /spend = %+v", got)
+	}
 }

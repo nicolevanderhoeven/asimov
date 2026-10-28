@@ -131,16 +131,24 @@ Run `make` (or `go run ./cmd/task`) on its own to list every shortcut:
   play             Play with the AI GM, sending telemetry to Grafana Cloud
   serve            Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)
   doctor           Check .env and send one test span, metric, log, and generation to Grafana Cloud
-  test             The full e2e eval for E2E_DURATION (default 30m): costs about 40-60 USD per 30 min
+  test             The full e2e eval for E2E_DURATION (default 30m), about 40-60 USD per 30 min: needs K6_MAX_SPEND_USD
   unit             Run the Go unit tests (no credentials needed)
   smoke            Play a scripted offline game to check the install works (no credentials needed)
   k6-graders       Trajectory graders against fixed cases: about 1s, no server or API calls
+  k6-spend         The spend limit's logic: about 1s, no server or API calls
   k6-code          Fixed prompts with code checks: under 1 min, ~10 model calls
   k6-ai            Varied probes judged by Claude: 1-2 min, ~20 model calls
   k6-trajectory    Dice trajectory evals: a few min, ~200 model calls
   k6-e2e           Five whole playthroughs: 5-10 min, a few hundred model calls
   k6               Run any k6 script with .env, starting the game server if needed (arguments go to k6)
 ```
+
+Every k6 target stops once its run has spent `K6_MAX_SPEND_USD` on Anthropic
+calls (5 US dollars by default) and prints where the money went. `make test`
+has no default and refuses to start without its own limit. Because that limit
+is only a guard inside the scripts, also set a monthly spend limit on your
+Anthropic workspace as the hard stop; see
+[Spending limit](tests/README.md#spending-limit).
 
 ## How it fits together
 

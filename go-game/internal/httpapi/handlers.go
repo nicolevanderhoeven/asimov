@@ -13,6 +13,7 @@ import (
 	"github.com/grafana/ai-sdk/middleware/agentobservability"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/game"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/gm"
+	"github.com/nicolevanderhoeven/asimov/go-game/internal/spend"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -294,4 +295,28 @@ func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+// handleGetSpend reports what the model calls have cost so far, by source
+// and model, since the server started.
+func (s *Server) handleGetSpend(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.Spend.Snapshot())
+}
+
+// handleAddSpend adds the usage of a model call the caller made itself (a
+// k6 script playing or judging) and answers with the new total, so one
+// ledger covers every call of a run. usage is the usage object of
+// Anthropic's response, as it came.
+func (s *Server) handleAddSpend(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source string      `json:"source"`
+		Model  string      `json:"model"`
+		Usage  spend.Usage `json:"usage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Source == "" || req.Model == "" {
+		writeError(w, http.StatusBadRequest, "body must be JSON with source, model, and usage")
+		return
+	}
+	s.Spend.Record(req.Source, req.Model, req.Usage)
+	writeJSON(w, http.StatusOK, s.Spend.Snapshot())
 }
