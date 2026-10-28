@@ -80,10 +80,8 @@ or as environment variables; an argument wins:
 | `MOCK_FLAWS` | The chance of each flaw: `default`, `off`, or a list such as `all=0.3,voice_break=0`. |
 | `MOCK_TELEMETRY=1` | Also send the mock's traces, metrics, and generations (labelled `model=mock`) to Grafana, using your `.env`. |
 
-`MOCK_FLAWS=off make k6-mock` runs a clean game master and expects
-`test-trajectory-graders.js`, `test-code.js`, `test-ai.js`, and `test-e2e.js` to
-pass. `test-trajectory.js` still reports `silent reroll` there: a combat round
-makes several `roll_dice` calls, and the test counts that whoever narrates.
+`MOCK_FLAWS=off make k6-mock` runs a clean game master and expects every test
+to pass.
 
 To run one test free, name its script:
 `go run ./cmd/task k6-mock tests/test-trajectory.js MOCK_SEED=3`. The
