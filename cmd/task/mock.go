@@ -103,12 +103,11 @@ var mockSuite = []string{
 }
 
 // cleanMustPass are the tests a game master with no planted flaws must pass.
-// tests/test-trajectory.js is not one: it counts a combat round's several
-// dice rolls as a silent reroll, whoever narrates.
 var cleanMustPass = map[string]bool{
 	"tests/test-trajectory-graders.js": true,
 	"tests/test-code.js":               true,
 	"tests/test-ai.js":                 true,
+	"tests/test-trajectory.js":         true,
 	"tests/test-e2e.js":                true,
 }
 

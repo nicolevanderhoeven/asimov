@@ -8,8 +8,10 @@ services:
     command:
       - '--config=/etc/otel/config.yml'
     ports:
-      - "4317:4317" # OTLP/gRPC
-      - "4318:4318" # OTLP/HTTP
+      # Localhost only: the OTLP receivers are unauthenticated and forward
+      # to your Grafana Cloud stack with your credentials.
+      - "127.0.0.1:4317:4317" # OTLP/gRPC
+      - "127.0.0.1:4318:4318" # OTLP/HTTP
     networks:
       - otel-collector
 networks:

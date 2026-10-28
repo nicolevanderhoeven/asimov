@@ -156,9 +156,17 @@ concurrent clients never interleave turns into the same game state the way a
 single shared session would.
 
 ```sh
-go run ./cmd/enterprise --serve --addr :8080
-go run ./cmd/enterprise --offline --serve --addr :8080  # no LLM; /resolve returns 503
+go run ./cmd/enterprise --serve
+go run ./cmd/enterprise --offline --serve  # no LLM; /resolve returns 503
+go run ./cmd/enterprise --serve --telemetry-if-configured  # telemetry only if .env has Grafana credentials
 ```
+
+The API is unauthenticated, spends your Anthropic key, and
+`GET /session/{id}/scenario` reveals the solution, so `--serve` listens on
+`localhost:8080` only. To reach it from another machine, say so with `--addr`
+(`--addr :8080` listens on every interface, so put it behind something that
+authenticates). `make serve` takes `SERVE_ADDR=:8080`, and in Docker Compose
+`ASIMOV_BIND_ADDR=0.0.0.0` publishes the port beyond this machine.
 
 | Method & path | Purpose |
 | --- | --- |
@@ -429,10 +437,10 @@ trajectory and findings. The checks are:
 - **Misapplied GM roll** (deterministic): a roll the game refused: one with
   no purpose, or naming the game's purpose with the wrong dice or before it
   was due.
-- **Silent reroll**: more than one `roll_dice` call in a response, with the
-  totals, which were narrated, and how many never were. A combat round
-  (initiative, attack, damage) counts too; the calls' `purpose`s tell them
-  apart.
+- **Silent reroll**: more than one `roll_dice` call for the same `purpose` in
+  a response, with the totals, which were narrated, and how many never were.
+  Rolls for different purposes (a combat round's attack, then damage) are
+  distinct rolls and don't count.
 - **Non-invocation**: a response in which nothing was rolled at all, but a
   small LLM judge (`JUDGE_MODEL`, default Claude Haiku 4.5) answers yes to the
   neutral question "Does the following text report the result of a die roll?"

@@ -33,7 +33,8 @@ func run() error {
 	noTelemetry := flag.Bool("no-telemetry", false, "Explicitly disable Grafana export")
 	env := flag.String("env", "../.env", "Environment file; existing shell variables take precedence")
 	serve := flag.Bool("serve", false, "Run an HTTP API server (one isolated session per client) instead of the REPL")
-	addr := flag.String("addr", ":8080", "HTTP listen address; only used with --serve")
+	autoTelemetry := flag.Bool("telemetry-if-configured", false, "Send telemetry only when Grafana Cloud credentials are set; otherwise act as --no-telemetry")
+	addr := flag.String("addr", "localhost:8080", "HTTP listen address, localhost only by default; only used with --serve. The API is unauthenticated and spends your Anthropic key, so expose it (such as :8080) deliberately")
 	sessionTTL := flag.Duration("session-ttl", 30*time.Minute, "Idle session expiry; only used with --serve")
 	scenario := flag.String("scenario", "classic", "The adventure: classic, or generated (built from random modules). With --serve, the default for sessions that don't choose. Defaults to $ASIMOV_SCENARIO when set")
 	seed := flag.Uint64("seed", 0, "Replay the generated scenario with this seed; 0 picks a random one. Not used with --serve")
@@ -78,6 +79,10 @@ func run() error {
 	cfg := telemetry.FromEnv()
 	if !*offline && !useMock && os.Getenv("ANTHROPIC_API_KEY") == "" {
 		return fmt.Errorf("ANTHROPIC_API_KEY is required (or use --offline)")
+	}
+	// Partial credentials still reach Validate, which names what's missing.
+	if *autoTelemetry && !cfg.Configured() {
+		*noTelemetry = true
 	}
 	if !*offline && !*noTelemetry {
 		r, err := telemetry.Init(ctx, cfg, diag)

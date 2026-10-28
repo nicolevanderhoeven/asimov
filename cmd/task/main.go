@@ -25,6 +25,10 @@ import (
 // playthroughs. Each 30 minutes costs roughly $40-60 in Anthropic calls.
 const defaultE2EDuration = "30m"
 
+// defaultServeAddr is where the serve target listens unless SERVE_ADDR says
+// otherwise.
+const defaultServeAddr = "localhost:8080"
+
 // target is one shortcut. Extra command-line arguments are passed on to what
 // the target runs (the game, or k6), except for test, which takes NAME=value
 // settings, and unit, smoke, and doctor, which take none.
@@ -58,8 +62,16 @@ func targets() []target {
 			func(a *app, args []string) error { return a.game(args, "--no-telemetry") }},
 		{"play", "Play with the AI GM, sending telemetry to Grafana Cloud", true,
 			func(a *app, args []string) error { return a.game(args) }},
-		{"serve", "Run the HTTP API on :8080 for the k6 tests", true,
-			func(a *app, args []string) error { return a.game(args, "--serve", "--addr", ":8080") }},
+		{"serve", "Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)", true,
+			func(a *app, args []string) error {
+				// The API is unauthenticated and spends your Anthropic key,
+				// so it stays on this machine unless SERVE_ADDR says otherwise.
+				addr, _ := a.env.Get("SERVE_ADDR")
+				if addr == "" {
+					addr = defaultServeAddr
+				}
+				return a.game(args, "--serve", "--telemetry-if-configured", "--addr", addr)
+			}},
 		{"doctor", "Check .env and send one test span, metric, log, and generation to Grafana Cloud", true,
 			func(a *app, _ []string) error { return a.child("go-game", a.env, "go", "run", "./cmd/doctor") }},
 		{"test", "The full e2e eval for E2E_DURATION (default 30m): costs about 40-60 USD per 30 min", true,
@@ -122,7 +134,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	a := &app{env: environ(os.Environ()), stdout: stdout, stderr: stderr}
 	if t.needsEnv {
-		if err := ensureEnv(stdout); err != nil {
+		if err := ensureEnv(stdout, grafanaBacked(t.name)); err != nil {
 			return report(stderr, err)
 		}
 	}

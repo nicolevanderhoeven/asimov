@@ -2,6 +2,7 @@
 .env
 local.mk
 logs/
+traj.jsonl
 otel-config.yml
 .DS_Store
 

@@ -154,7 +154,7 @@ Run `make` (or `go run ./cmd/task`) on its own to list every shortcut:
   play-offline     Play with no API key, LLM, or telemetry (exact /do commands only)
   play-local       Play with the AI GM but without sending telemetry (needs ANTHROPIC_API_KEY)
   play             Play with the AI GM, sending telemetry to Grafana Cloud
-  serve            Run the HTTP API on :8080 for the k6 tests
+  serve            Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)
   doctor           Check .env and send one test span, metric, log, and generation to Grafana Cloud
   test             The full e2e eval for E2E_DURATION (default 30m): costs about 40-60 USD per 30 min
   unit             Run the Go unit tests (no credentials needed)

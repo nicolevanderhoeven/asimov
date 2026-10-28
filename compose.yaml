@@ -1,7 +1,7 @@
 # Run the game without installing Go. Settings come from .env, which stays on
 # your machine; it is never copied into the image.
 #
-#   docker compose up --build                       # HTTP API on :8080, for the k6 tests
+#   docker compose up --build                       # HTTP API on localhost:8080, for the k6 tests
 #   docker compose run --rm play --offline          # play in the terminal, no keys needed
 #   docker compose run --rm play                    # play with the AI GM and telemetry
 #   docker compose run --rm --entrypoint doctor play  # check your .env
@@ -15,9 +15,13 @@ x-game: &game
 services:
   game:
     <<: *game
-    command: ["--serve", "--addr", ":8080"]
+    # The server listens on every interface inside the container; the port
+    # mapping decides who can reach it. The API is unauthenticated and spends
+    # your Anthropic key, so it is published to this machine only. To expose
+    # it deliberately, set ASIMOV_BIND_ADDR=0.0.0.0 (shell or .env).
+    command: ["--serve", "--telemetry-if-configured", "--addr", ":8080"]
     ports:
-      - "8080:8080"
+      - "${ASIMOV_BIND_ADDR:-127.0.0.1}:8080:8080"
   play:
     <<: *game
     profiles: [play]

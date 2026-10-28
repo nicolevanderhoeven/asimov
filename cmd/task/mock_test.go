@@ -85,11 +85,6 @@ func TestMockOutcomeWithFlawsPlanted(t *testing.T) {
 }
 
 func TestMockOutcomeWithNoFlawsPlanted(t *testing.T) {
-	// The trajectory test may still cross its thresholds: a combat round is
-	// several rolls.
-	if _, err := mockOutcome(results(0, 0, 0, 99, 0), true, true); err != nil {
-		t.Error(err)
-	}
 	if _, err := mockOutcome(results(0, 0, 0, 0, 0), true, true); err != nil {
 		t.Error("a clean run catching nothing is fine:", err)
 	}

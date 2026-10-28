@@ -5,6 +5,7 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 import { gradeResponse } from './lib/trajectory-grader.js';
 import { finding, pendingCheck, rulingContext, rulingOf, rulingPrompt, rulingSchema, rulingThresholds, RULING_SYSTEM } from './lib/ruling-judge.js';
 import * as o11y from './lib/agento11y.js';
+import { gmModel } from './lib/gm-model.js';
 
 // Trajectory tests for the GM's dice, graded by the path each response took
 // rather than its prose. The GM decides when Data's checks need a roll
@@ -147,7 +148,7 @@ export function setup() {
         agent_name: 'asimov-enterprise-go',
         agent_version: __ENV.ASIMOV_AGENT_VERSION || 'go-experiment-v1',
         model_provider: 'anthropic',
-        model_name: __ENV.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+        model_name: gmModel(),
         judge_model: JUDGE_MODEL,
         output_judge_model: OUTPUT_JUDGE_MODEL,
         ruling_judge_model: RULING_JUDGE_MODEL,
