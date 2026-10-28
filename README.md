@@ -29,6 +29,35 @@ Robotics: Observability for AI" by Nicole van der Hoeven
 ([site](https://nicole.to/site), [Mastodon](https://pkm.social/@nicole),
 [email](mailto:nicole@grafana.com)). See [Talks](#talks).
 
+## What you need
+
+Pick the paths you want; each row lists only what that path adds.
+
+| Path | Tools | Accounts and keys | Disk |
+| --- | --- | --- | --- |
+| Offline play (`make play-offline`) | Go 1.21 or newer (it downloads the 1.26.3 toolchain), or Docker | None | See the Go caches below |
+| Unit tests (`make unit`) | Go, as above | None | See the Go caches below |
+| Mock tests (`make k6-mock`) | Go, plus [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) (CI uses the latest release) | None | See the Go caches below |
+| AI game master (`make play-local`, the paid k6 tests) | Go | An [Anthropic API key](https://console.anthropic.com/settings/keys) with access to the models below | See the Go caches below |
+| Local monitoring (`make local-stack`) | [Docker](https://docs.docker.com/get-docker/) with Compose (the stack is the `grafana/otel-lgtm:0.38.1` image) | None; add an Anthropic key for the model-call panels | The image and its `lgtm-data` volume (not measured) |
+| Grafana Cloud (`make play`) | Go | A Grafana Cloud stack with Agent Observability, and an Anthropic key | None locally |
+| Online evaluators ([`agento11y/`](agento11y/README.md)) | [`gcx`](https://github.com/grafana/gcx#installing-gcx) and [`yq`](https://github.com/mikefarah/yq#install) (install with the commands in their official documentation; the judge-local script also needs Python 3) | A Grafana Cloud stack, or an Anthropic key for local judging | None |
+
+- **Go caches:** after `make unit`, expect about 1.9 GB under your home
+  directory: roughly 915 MB for the module cache (including a 231 MB
+  toolchain) and roughly 1.0 GB for the build cache. `go clean -modcache` and
+  `go clean -cache` reclaim them.
+- **Model access:** the Anthropic key must have access to
+  `claude-sonnet-4-6` (the game master and simulated player),
+  `claude-opus-5-5` (the judges), and `claude-haiku-4-5-20251001` (the
+  trajectory test's small judge). With `ASIMOV_GM_FIXES=1`, the game master
+  also uses `claude-sonnet-5-5`. A model your key can't use makes the calls
+  that need it fail.
+- **Cost:** a key spends real money; see the spending limit under
+  [Go further](#go-further).
+- **Windows:** the game, the task runner, and the k6 tests run without WSL or
+  bash; the scripts in `agento11y/` need a bash shell.
+
 ## Quickstart: play in 2 minutes, no accounts
 
 You need [Git](https://git-scm.com/downloads) and either
@@ -137,7 +166,13 @@ open <http://localhost:3000/d/asimov-local> (no login). You should see the
 actions you took, counts of rejected actions and improvisations, ratings per
 agent version, and a `game.turn` trace for each turn that opens in Tempo.
 
-![The asimov dashboard in local Grafana after four offline games](assets/local-grafana-dashboard.png)
+![The asimov dashboard in local Grafana after a live game with the AI game master, with data in the model-call panels](assets/local-grafana-dashboard-live.png)
+
+This screenshot is from a short game with the AI game master, so the
+model-call panels (latency, tokens) have data. The `live-test-v1` series come
+from an earlier test run in the same stack. Offline play makes no model calls,
+so those panels stay empty until you play with an Anthropic key, as described
+next.
 
 With an Anthropic key in `.env`, `make play-local-observed` plays with the AI
 game master instead, and the model-call panels (latency, tokens) fill in:
@@ -151,11 +186,13 @@ explains the dashboard and the stack.
 Grafana Cloud adds [Agent Observability](https://grafana.com/docs/grafana-cloud/machine-learning/agent-observability/)
 (conversations, per-agent-version performance, online evaluators, experiments),
 which is available only there. The local stack above covers traces, metrics,
-and logs without it. The Cloud setup takes about 15 minutes, and the
-[setup guide](docs/grafana-cloud-setup.md) walks you through every value:
+and logs without it. The [setup guide](docs/grafana-cloud-setup.md) walks you
+through every value; it has several steps and copies values from three places,
+so plan on more than a few minutes:
 
-1. Create a free [Grafana Cloud](https://nicole.to/kceu2025grafana) stack and
-   enable **Agent Observability**.
+1. Create a [Grafana Cloud](https://nicole.to/kceu2025grafana) stack (a free
+   one works to start; check the [current free-tier limits](https://grafana.com/pricing/))
+   and enable **Agent Observability**.
 2. Create one Cloud Access Policy token, then copy it and four connection
    values into `.env`.
 3. Run `make doctor`. It checks every setting without printing any secrets,
