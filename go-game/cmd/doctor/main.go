@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/grafana/agento11y/go/agento11y"
-	"github.com/joho/godotenv"
+	"github.com/nicolevanderhoeven/asimov/go-game/internal/dotenv"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/telemetry"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
@@ -55,7 +55,7 @@ func main() {
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {}))
 
 	fmt.Println("Configuration")
-	switch err := godotenv.Load(*env); {
+	switch err := dotenv.Load(*env); {
 	case err == nil:
 		r.ok("read %s", *env)
 	case os.IsNotExist(err):

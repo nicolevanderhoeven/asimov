@@ -1,0 +1,10 @@
+# Keep line endings as LF everywhere, including on Windows: the scripts, the
+# Makefile, and .env (copied from env.example) are read by tools that choke
+# on CRLF, and the Go tests compare text output.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary

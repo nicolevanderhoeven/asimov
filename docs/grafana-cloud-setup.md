@@ -32,7 +32,7 @@ mistake.
 ## 2. Copy the Agent Observability values
 
 Go to **Agent Observability → Configuration** and copy two values into
-`.env` (create it first with `cp env.example .env`):
+`.env` (create it first with `cp env.example .env`, or `copy env.example .env` on Windows):
 
 | On the Configuration page | In `.env` |
 | --- | --- |
@@ -73,6 +73,12 @@ Go to **Agent Observability → Configuration** and copy two values into
    (the game adds it). On Linux, if the output wraps onto a second line, use
    `base64 -w0`.
 
+   In Windows PowerShell, which has no `base64`:
+
+   ```powershell
+   [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('OTLP_INSTANCE_ID:glc_YOUR_TOKEN'))
+   ```
+
    To keep the token out of your shell history, run the command with a
    space in front of it (in most shells), or type it into `.env` by hand.
 
@@ -81,6 +87,8 @@ Go to **Agent Observability → Configuration** and copy two values into
 ```sh
 make doctor
 ```
+
+(Without make, on Windows: `go run ./cmd/task doctor`.)
 
 This runs [`go-game/cmd/doctor`](../go-game/cmd/doctor/main.go). It checks
 every setting without printing any secrets, confirms that your Anthropic key

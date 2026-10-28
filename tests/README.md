@@ -11,22 +11,24 @@ the conversations they create.
   or newer.
 - Fill in `.env` (see [the setup guide](../docs/grafana-cloud-setup.md)).
   Every test except the grader check needs `ANTHROPIC_API_KEY`. The
-  Grafana Cloud settings are optional: when they're absent, `scripts/k6.sh`
+  Grafana Cloud settings are optional: when they're absent, the task runner
   starts the game server with telemetry off, and the tests just don't post
   ratings or experiments. If you fill in some of the settings but not all, the
   server refuses to start and lists what's missing.
-- Run the tests from the repository root with `make`. Each `make k6-*`
-  target runs [`scripts/k6.sh`](../scripts/k6.sh), which passes your `.env`
-  to k6 and starts the game server if one isn't already running on
-  `localhost:8080` (its output goes to `logs/server.log`). To use a server
-  you started yourself (`make serve`) or one somewhere else, set
-  `BASE_URL=http://host:8080`. The server listens on `localhost` only: its
-  API is unauthenticated and spends your Anthropic key, so a server on another
-  machine is yours to expose and protect (see
-  [Serve](../go-game/README.md#serve)).
+- Run the tests from the repository root with `make`, or, where you don't
+  have it (on Windows), with `go run ./cmd/task`: `make k6-code` and
+  `go run ./cmd/task k6-code` do the same thing. Each `k6-*` target runs
+  [the task runner](../cmd/task), which passes your `.env` to k6 and starts
+  the game server if one isn't already running on `localhost:8080` (its
+  output goes to `logs/server.log`). To use a server you started yourself
+  (`serve`) or one somewhere else, set `BASE_URL=http://host:8080`. The server
+  listens on `localhost` only: its API is unauthenticated and spends your
+  Anthropic key, so a server on another machine is yours to expose and protect
+  (see [Serve](../go-game/README.md#serve)).
 
-Extra k6 options go straight through the script, for example
-`scripts/k6.sh -e RUNS=50 -e VUS=4 tests/test-trajectory.js`.
+Extra k6 options go straight through the runner, for example
+`go run ./cmd/task k6 -e RUNS=50 -e VUS=4 tests/test-trajectory.js`
+(with make: `make k6 ARGS="-e RUNS=50 -e VUS=4 tests/test-trajectory.js"`).
 
 ## The tests
 
@@ -49,7 +51,12 @@ To change the defaults for yourself only, copy `local.mk.example` to
 `local.mk` (git ignores it). For example, set `E2E_DURATION = 2h` and
 `K6_CLOUD = 1` to stream the results to
 [Grafana Cloud k6](#results-in-grafana-cloud-k6). A value on the command line
-(`make test E2E_DURATION=10m`) still wins.
+(`make test E2E_DURATION=10m`) still wins. Without make, give the same
+settings to the runner (`go run ./cmd/task test E2E_DURATION=10m`) or set them
+as environment variables.
+
+Each `make` command below also runs as `go run ./cmd/task <target>`, for
+example `go run ./cmd/task k6-code`.
 
 | Command | What it does | Time | Model calls |
 | --- | --- | --- | --- |
@@ -120,13 +127,20 @@ scenario's mode, variant, and seed.
 
 To compare how the GM does on the two, run the suite once each way, with an
 agent version per arm so the online evaluators' scores split cleanly in Agent
-Observability. Stop any server you started yourself first, so `k6.sh` starts
+Observability. Stop any server you started yourself first, so the runner starts
 one with these settings, and set them in the shell as below rather than in
-`.env`: `k6.sh` loads `.env` over the shell's values.
+`.env`: the runner loads `.env` over the shell's values.
 
 ```sh
 ASIMOV_AGENT_VERSION=scenarios-classic make k6-e2e
 ASIMOV_SCENARIO=generated ASIMOV_AGENT_VERSION=scenarios-generated make k6-e2e
+```
+
+In Windows PowerShell:
+
+```powershell
+$env:ASIMOV_AGENT_VERSION = "scenarios-classic"; go run ./cmd/task k6-e2e
+$env:ASIMOV_SCENARIO = "generated"; $env:ASIMOV_AGENT_VERSION = "scenarios-generated"; go run ./cmd/task k6-e2e
 ```
 
 ## End-to-end conversations
@@ -339,11 +353,11 @@ the test locally and stream its results to the cloud:
 
 ```sh
 k6 cloud login --stack <your-stack>   # once, with a Grafana Cloud k6 token
-K6_CLOUD=1 scripts/k6.sh tests/test-e2e.js
+K6_CLOUD=1 make k6-e2e
 ```
 
 `K6_CLOUD=1` (in the shell, `.env`, or `local.mk` for `make test`) makes
-`scripts/k6.sh` run
+the task runner run
 `k6 cloud run --local-execution --no-archive-upload --include-system-env-vars`
 in place of `k6 run`, with the game's settings from `.env`.
 

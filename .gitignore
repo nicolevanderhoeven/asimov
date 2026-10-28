@@ -11,4 +11,6 @@ otel-config.yml
 
 # Compiled CLI and local game state
 go-game/enterprise
+go-game/enterprise.exe
 go-game/.enterprise-save*
+

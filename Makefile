@@ -1,91 +1,35 @@
 # Shortcuts for the common tasks. Run `make` to list them.
+# This is a thin wrapper: every target runs the Go task runner in cmd/task,
+# which does the work the same way on macOS, Linux, and Windows. Without make
+# (on Windows, say), run it directly: go run ./cmd/task <target>
 # Every target reads settings from .env (copy env.example to start).
 
-GAME := cd go-game && go run ./cmd/enterprise
-K6 := scripts/k6.sh
+TASK := go run ./cmd/task
 
 # Personal overrides, not committed: copy local.mk.example to local.mk.
 -include local.mk
 # How long make test keeps starting e2e playthroughs. Each 30 minutes costs
 # roughly $40-60 in Anthropic calls; a command-line value wins over local.mk,
-# as in make test E2E_DURATION=10m.
-E2E_DURATION ?= 30m
+# as in make test E2E_DURATION=10m. The default is in the task runner.
+E2E_DURATION ?=
 # K6_CLOUD=1 streams k6's results to Grafana Cloud k6 (after k6 cloud login).
 K6_CLOUD ?=
+export E2E_DURATION K6_CLOUD
+# Extra arguments for the game or for k6, as in
+# make k6 ARGS="-e RUNS=50 tests/test-trajectory.js"
+ARGS ?=
 
-# The address make serve listens on. The API is unauthenticated and spends your
-# Anthropic key, so it stays on this machine unless you pass SERVE_ADDR=:8080.
-SERVE_ADDR ?= localhost:8080
+# The address make serve listens on, localhost:8080 by default. The API is
+# unauthenticated and spends your Anthropic key, so it stays on this machine
+# unless you pass SERVE_ADDR=:8080.
+SERVE_ADDR ?=
+export SERVE_ADDR
 
 .DEFAULT_GOAL := help
 
-.PHONY: help
-help: ## List the targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+# The targets and their descriptions are listed by the runner: make help.
+TARGETS := play-offline play-local play serve doctor test unit smoke k6-graders k6-code k6-ai k6-trajectory k6-e2e k6
 
-# What to tell someone whose .env was just created. Only the Grafana-backed
-# targets need the Grafana settings; everything else needs one Anthropic key.
-ENV_NEXT = Put your ANTHROPIC_API_KEY in it (from https://console.anthropic.com/settings/keys), then run the same make command again.
-play doctor: ENV_NEXT = Fill it in (see docs/grafana-cloud-setup.md), then run make doctor.
-
-.env:
-	@cp env.example .env
-	@echo "Created .env from env.example. $(ENV_NEXT)"
-	@exit 1
-
-## Play
-
-.PHONY: play-offline
-play-offline: ## Play with no API key, LLM, or telemetry (exact /do commands only)
-	$(GAME) --offline
-
-.PHONY: play-local
-play-local: .env ## Play with the AI GM but without sending telemetry (needs ANTHROPIC_API_KEY)
-	$(GAME) --no-telemetry
-
-.PHONY: play
-play: .env ## Play with the AI GM, sending telemetry to Grafana Cloud
-	$(GAME)
-
-.PHONY: serve
-serve: .env ## Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)
-	$(GAME) --serve --telemetry-if-configured --addr $(SERVE_ADDR)
-
-## Check
-
-.PHONY: doctor
-doctor: .env ## Check .env and send one test span, metric, log, and generation to Grafana Cloud
-	cd go-game && go run ./cmd/doctor
-
-.PHONY: test
-test: .env ## The full e2e eval for E2E_DURATION (default 30m): costs about 40-60 USD per 30 min
-	@echo "make test plays e2e playthroughs for $(E2E_DURATION), plus up to 15 min to finish."
-	@echo "It costs real Anthropic credits: roughly \$$40-60 per 30 minutes. Ctrl-C now to stop."
-	@sleep 5
-	K6_CLOUD=$(K6_CLOUD) $(K6) -e E2E_DURATION=$(E2E_DURATION) tests/test-e2e.js
-
-.PHONY: unit
-unit: ## Run the Go unit tests (no credentials needed)
-	cd go-game && go vet ./... && go test -race ./...
-
-## k6 tests (each starts the game server if it isn't running)
-
-.PHONY: k6-graders
-k6-graders: ## Trajectory graders against fixed cases: about 1s, no server or API calls
-	k6 run tests/test-trajectory-graders.js
-
-.PHONY: k6-code
-k6-code: .env ## Fixed prompts with code checks: under 1 min, ~10 model calls
-	$(K6) tests/test-code.js
-
-.PHONY: k6-ai
-k6-ai: .env ## Varied probes judged by Claude: 1-2 min, ~20 model calls
-	$(K6) tests/test-ai.js
-
-.PHONY: k6-trajectory
-k6-trajectory: .env ## Dice trajectory evals: a few min, ~200 model calls
-	$(K6) --summary-mode=full tests/test-trajectory.js
-
-.PHONY: k6-e2e
-k6-e2e: .env ## Five whole playthroughs: 5-10 min, a few hundred model calls
-	$(K6) tests/test-e2e.js
+.PHONY: help $(TARGETS)
+help $(TARGETS):
+	@$(TASK) $@ $(ARGS)

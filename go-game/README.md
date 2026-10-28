@@ -331,7 +331,7 @@ narration.
 From the repository root (this starts the server for the run):
 
 ```sh
-scripts/k6.sh --summary-mode=full -e RUNS=50 -e VUS=4 \
+go run ./cmd/task k6 --summary-mode=full -e RUNS=50 -e VUS=4 \
   --log-format=raw --console-output=traj.jsonl tests/test-trajectory.js
 ```
 
@@ -432,7 +432,7 @@ to the generation endpoint's; set `AGENTO11Y_API_ENDPOINT` to override it, and
 to log a link to the experiment.
 
 The deterministic graders live in `tests/lib/trajectory-grader.js`.
-`make k6-graders` (from the repository root) checks them against the cases in
+`make k6-graders` (from the repository root; `go run ./cmd/task k6-graders` without make) checks them against the cases in
 `tests/fixtures/trajectory-graders.json`, with no server or API key, along
 with how `rulingOf` finds rulings; add new cases there. `tests/test-e2e.js` runs the same deterministic checks on
 every response of its whole playthroughs. There they are `e2e_traj_*` rates
