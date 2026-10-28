@@ -49,21 +49,24 @@ type turn struct {
 		Check   string `json:"check"`
 		Reason  string `json:"reason"`
 	} `json:"ruling"`
-	Trajectory []string `json:"trajectory"`
-	Engine     *struct {
-		Allowed  bool   `json:"allowed"`
-		Question bool   `json:"question"`
-		Message  string `json:"message"`
-		State    struct {
-			Status    string `json:"status"`
-			Combat    bool   `json:"combat"`
-			Drone     string `json:"drone"`
-			Encounter *struct {
-				Name   string `json:"name"`
-				Status string `json:"status"`
-			} `json:"encounter"`
-		} `json:"state"`
-	} `json:"engine"`
+	Trajectory []string      `json:"trajectory"`
+	Engine     *engineResult `json:"engine"`
+}
+
+// engineResult is the engine's result for the turn, as the test records it.
+type engineResult struct {
+	Allowed  bool   `json:"allowed"`
+	Question bool   `json:"question"`
+	Message  string `json:"message"`
+	State    struct {
+		Status    string `json:"status"`
+		Combat    bool   `json:"combat"`
+		Drone     string `json:"drone"`
+		Encounter *struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"encounter"`
+	} `json:"state"`
 }
 
 // encounterActive reports whether the engine still has whatever guards the
