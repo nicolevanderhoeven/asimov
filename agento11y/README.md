@@ -1,10 +1,12 @@
 # Online evaluators
 
-This is an advanced, optional step. It needs a working
+This is an advanced, optional step. The online evaluators need a working
 [Grafana Cloud setup](../docs/grafana-cloud-setup.md), the gcx CLI, and
-[yq](https://github.com/mikefarah/yq) for the test script. The judges run in
-your Grafana Cloud stack, on a judge model the stack provides, not with your
-Anthropic key.
+[yq](https://github.com/mikefarah/yq) for the test script. They run in your
+Grafana Cloud stack, on a judge model the stack provides, not with your
+Anthropic key. Without Grafana Cloud, you can still run the same eight judges
+on games you played locally: see [Judging without Grafana
+Cloud](#judging-without-grafana-cloud).
 
 The k6 tests grade the game when you run them. The definitions in
 this directory grade it all the time: Agent Observability
@@ -76,8 +78,9 @@ status, turn, and scenario, and is also counted in the `game.ratings` metric
 and bad ratings per agent version through `service.version`.
 
 Ratings go to the host of `AGENTO11Y_ENDPOINT`, or to `AGENTO11Y_API_ENDPOINT`
-if set, with the same credentials as generation export; with telemetry off,
-`/rate` says so and sends nothing. `tests/test-e2e.js` rates its own
+if set, with the same credentials as generation export. Without Agent
+Observability, `/rate` only counts the rating in `game.ratings` (the local
+dashboard charts it), and with telemetry off it says so and sends nothing. `tests/test-e2e.js` rates its own
 playthroughs too, but with `source: k6-e2e`, so the two never mix. Its story
 judge scores the same quality from the whole transcript (see [Story
 quality](../tests/README.md#story-quality)); comparing its scores with real
@@ -146,6 +149,47 @@ It needs [yq](https://github.com/mikefarah/yq). Find generation IDs with
 not those from earlier steps of the same narration; `{{tool_results}}` holds
 them all.
 
+
+## Judging without Grafana Cloud
+
+Agent Observability, and with it the online evaluators, exists only on Grafana
+Cloud. The same evaluator definitions run on your machine with
+`judge-local.py`, using your Anthropic key as the judge, on generations that a
+local game kept in a file. You need [yq](https://github.com/mikefarah/yq),
+Python 3, and an `ANTHROPIC_API_KEY` in `.env`; no Grafana Cloud stack, gcx, or
+experiment.
+
+1. Play with the AI game master against the [local
+   stack](../local-stack/README.md): `make local-stack`, then
+   `make play-local-observed` (or `make serve-local-observed` and a k6 test).
+   These targets point `ASIMOV_GENERATIONS_FILE` at `logs/generations.jsonl`,
+   so every generation (its system prompt, messages, tool calls, and tags)
+   is also appended there, one JSON object per line. Set the same variable in
+   `.env` to keep generations when you start the game another way; it works
+   only while the Agent Observability settings are empty, since that is where
+   generations would otherwise go.
+2. Judge the file:
+
+   ```sh
+   agento11y/judge-local.py --local logs/generations.jsonl
+   agento11y/judge-local.py --local logs/generations.jsonl --sample 1 --limit 20
+   ```
+
+   It applies the four rules' `match` filters and sample rates to each
+   conversation in the file, as online (`--sample` overrides the rates,
+   `--limit` caps the judge calls per evaluator), and prints each evaluator's
+   pass rate. Each verdict, with the judge's explanation, goes to
+   `judge-local.jsonl` (`--out` changes that). Every judge call costs about 1.4
+   cents.
+
+If every call fails with `CERTIFICATE_VERIFY_FAILED`, Python can't find CA
+certificates: a python.org install on macOS needs its `Install Certificates.command`
+run once, or point `SSL_CERT_FILE` at a CA bundle (`/etc/ssl/cert.pem` on macOS).
+
+`--export` and `--calibrate` need Agent Observability and can't be combined
+with `--local`. A narration from a game played under one `ASIMOV_AGENT_VERSION`
+carries that version in each row, so you can compare versions by grouping the
+output file.
 
 ## Judging locally
 

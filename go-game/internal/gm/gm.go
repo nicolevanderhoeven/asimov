@@ -90,10 +90,13 @@ func contextInfo(ctx context.Context, version string) agentobservability.Context
 }
 
 type GM struct {
-	Model  provider.LanguageModel
-	Client *agento11y.Client
-	Logger *slog.Logger
-	Roll   game.Roller
+	Model provider.LanguageModel
+	// Client records model calls as spans and metrics. GenerationExport says
+	// whether it also sends them, and player ratings, to Agent Observability.
+	Client           *agento11y.Client
+	GenerationExport bool
+	Logger           *slog.Logger
+	Roll             game.Roller
 	// EndingGuard tells the narrator after every input that the adventure
 	// isn't over until the engine says so. It is off by default: the false
 	// ending it guards against is a defect the demo keeps, and this is the

@@ -2,10 +2,10 @@
 
 An AI app built to be observed and tested. **The Silent Enterprise** is a
 single-player Star Trek text adventure: you play Data, and Claude is the game
-master. It's instrumented with Grafana's Agent Observability and
-OpenTelemetry, so every conversation, model call, dice roll, and turn shows up
-in Grafana Cloud. A k6 test suite, some of it judged by Claude, checks whether
-the AI follows the rules.
+master. It's instrumented with OpenTelemetry (and, optionally, Grafana's Agent
+Observability), so every model call, dice roll, and turn shows up in a Grafana
+that you can run on your own machine, or in Grafana Cloud. A k6 test suite,
+some of it judged by Claude, checks whether the AI follows the rules.
 
 The game master has some known flaws, kept on purpose: it sometimes narrates
 a rescue that didn't happen, or "destroys" a drone that's still standing. The
@@ -122,9 +122,36 @@ mock yourself: `cd go-game && go run ./cmd/enterprise --llm mock --no-telemetry`
 and how to set them. Mock turns are scripted, not creative: a real
 `ANTHROPIC_API_KEY` stays the full experience.
 
-## Send telemetry to Grafana Cloud
+## See the monitoring locally (no account)
 
-This is the point of the demo. It takes about 15 minutes, and the
+With [Docker](https://docs.docker.com/get-docker/), one command starts a local
+Grafana, Tempo, Prometheus, and Loki with the game's dashboard already loaded:
+
+```sh
+make local-stack                # or: go run ./cmd/task local-stack
+make play-offline-observed      # no API key needed
+```
+
+Play a few turns (`/do inspect logs`, `/do move sickbay`, `/rate good`), then
+open <http://localhost:3000/d/asimov-local> (no login). You should see the
+actions you took, counts of rejected actions and improvisations, ratings per
+agent version, and a `game.turn` trace for each turn that opens in Tempo.
+
+![The asimov dashboard in local Grafana after four offline games](assets/local-grafana-dashboard.png)
+
+With an Anthropic key in `.env`, `make play-local-observed` plays with the AI
+game master instead, and the model-call panels (latency, tokens) fill in:
+every model call is a trace span with the standard `gen_ai.*` attributes.
+Agent Observability isn't needed for that, and neither is the Assistant;
+they're the optional upgrade below. [`local-stack/`](local-stack/README.md)
+explains the dashboard and the stack.
+
+## Optional: send telemetry to Grafana Cloud
+
+Grafana Cloud adds [Agent Observability](https://grafana.com/docs/grafana-cloud/machine-learning/agent-observability/)
+(conversations, per-agent-version performance, online evaluators, experiments),
+which is available only there. The local stack above covers traces, metrics,
+and logs without it. The Cloud setup takes about 15 minutes, and the
 [setup guide](docs/grafana-cloud-setup.md) walks you through every value:
 
 1. Create a free [Grafana Cloud](https://nicole.to/kceu2025grafana) stack and
@@ -143,7 +170,8 @@ This is the point of the demo. It takes about 15 minutes, and the
 | Next step | Guide |
 | --- | --- |
 | Test the AI with k6: code checks, LLM judges, dice-trajectory evals, and whole playthroughs. Results can be recorded as Agent Observability experiments. Run them free against a mock GM and judge with `make k6-mock`. | [`tests/README.md`](tests/README.md) |
-| Score live traffic all the time with Agent Observability online evaluators (LLM judges for each known flaw) | [`agento11y/README.md`](agento11y/README.md) |
+| Score live traffic all the time with Agent Observability online evaluators (LLM judges for each known flaw), or run the same judges on games played locally with just your Anthropic key | [`agento11y/README.md`](agento11y/README.md) |
+| Run the local Grafana stack, and read its dashboard | [`local-stack/README.md`](local-stack/README.md) |
 | Route telemetry through a local OpenTelemetry Collector | [`collector/README.md`](collector/README.md) |
 | How the game, its rules, its HTTP API, and its instrumentation work | [`go-game/README.md`](go-game/README.md) |
 | Play a new scenario every game, built from modules, and compare how the GM does against the classic one | [`go-game/README.md#scenarios`](go-game/README.md#scenarios) |
@@ -155,6 +183,10 @@ Run `make` (or `go run ./cmd/task`) on its own to list every shortcut:
   play-local       Play with the AI GM but without sending telemetry (needs ANTHROPIC_API_KEY)
   play             Play with the AI GM, sending telemetry to Grafana Cloud
   serve            Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)
+  local-stack      Start the local Grafana stack (needs Docker) and print where to look
+  play-offline-observed  Play with no API key or LLM, with telemetry to the local stack
+  play-local-observed    Play with the AI GM, with telemetry to the local stack
+  serve-local-observed   Run the HTTP API on localhost:8080 for the k6 tests, with telemetry to the local stack
   doctor           Check .env and send one test span, metric, log, and generation to Grafana Cloud
   test             The full e2e eval for E2E_DURATION (default 30m), about 40-60 USD per 30 min: needs K6_MAX_SPEND_USD
   unit             Run the Go unit tests (no credentials needed)
@@ -183,14 +215,17 @@ Anthropic workspace as the hard stop; see
 The game engine owns the rules and the state. Claude only interprets the
 player's input, decides whether a check needs a roll, makes the GM's own rolls
 through a tool, and narrates. Telemetry is set up in
-[`go-game/internal/telemetry`](go-game/internal/telemetry/telemetry.go). All
-signals go straight to Grafana Cloud; a Collector is optional.
+[`go-game/internal/telemetry`](go-game/internal/telemetry/telemetry.go).
+Traces, metrics, and logs go over OTLP straight to the [local
+stack](local-stack/README.md) or Grafana Cloud, and generations go to Agent
+Observability when it's set up; a Collector is optional.
 
 | Path | What's there |
 | --- | --- |
 | [`go-game/`](go-game/) | The game: CLI and HTTP API ([`cmd/enterprise`](go-game/cmd/enterprise)), the setup checker ([`cmd/doctor`](go-game/cmd/doctor)), rules engine, GM, and telemetry |
 | [`tests/`](tests/) | The k6 test suite |
 | [`agento11y/`](agento11y/) | Online evaluator and rule definitions |
+| [`local-stack/`](local-stack/) | The local Grafana, Tempo, Prometheus, and Loki, with the game's dashboard |
 | [`collector/`](collector/) | Optional OpenTelemetry Collector setup |
 | [`docs/`](docs/) | The Grafana Cloud setup guide |
 | [`cmd/task/`](cmd/task/) | The task runner behind every `make` target and the k6 runs; it works on Windows, macOS, and Linux |

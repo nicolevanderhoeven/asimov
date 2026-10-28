@@ -94,11 +94,15 @@ func runREPL(ctx context.Context, g *gm.GM, sc *game.Scenario, offline bool, log
 			continue
 		}
 		if input == "/rate" || strings.HasPrefix(input, "/rate ") {
-			if err := rate(ctx, g.Client, s, sc, strings.TrimPrefix(input, "/rate"), ratings+1); err != nil {
+			if err := rate(ctx, g.Client, g.GenerationExport, s, sc, strings.TrimPrefix(input, "/rate"), ratings+1); err != nil {
 				fmt.Println("Rating not sent:", err)
 			} else {
 				ratings++
-				fmt.Println("Thanks! Your rating is on this game's conversation in Agent Observability.")
+				if g.GenerationExport {
+					fmt.Println("Thanks! Your rating is on this game's conversation in Agent Observability.")
+				} else {
+					fmt.Println("Thanks! Your rating is counted in the game_ratings metric (Agent Observability is off, so there's no conversation to attach it to).")
+				}
 			}
 			continue
 		}
