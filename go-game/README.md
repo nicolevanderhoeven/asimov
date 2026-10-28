@@ -96,6 +96,9 @@ authenticates). `make serve` takes `SERVE_ADDR=:8080`, and in Docker Compose
 | `POST /session/{id}/improvise` | Submit an exact improvisation, as `/try` does: `{"approach","ability","skill","difficulty","effect"}`, optionally `"no_roll": true`. The engine makes the GM's rolls |
 | `POST /session/{id}/roll` | Make the player's pending roll: `{"ability"}`, plus `"narrate": true` for GM narration (needs an LLM), in which the GM makes its own rolls; without it, the engine does |
 
+| `GET /spend` | What the model calls have cost since the server started, by source (`gm`, `player`, `judge`) and model, from the usage Anthropic returns. The k6 tests' spending limit reads it |
+| `POST /spend` | Add a model call the caller made itself: `{"source","model","usage"}`, where `usage` is the usage object of Anthropic's response. Answers with the new total. The k6 scripts report their player and judge calls this way. Prices live in [`internal/spend/prices.go`](internal/spend/prices.go) |
+
 Sessions are created per-request and held only in memory. `--session-ttl`
 (default `30m`) controls how long an idle session is kept before it's reclaimed.
 

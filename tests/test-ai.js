@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, group, sleep } from 'k6';
+import { parseLimit, startSpend, useSpend, checkSpend, recordUsage, reportSpend } from './lib/spend.js';
 
 // Claude varies the probes and grades the game's narration. The game still
 // owns interpretation, state changes, and its own Anthropic calls.
@@ -9,6 +10,7 @@ const API_KEY = __ENV.ANTHROPIC_API_KEY;
 const GENERATOR_MODEL = __ENV.GENERATOR_MODEL || 'claude-sonnet-4-6';
 const JUDGE_MODEL = __ENV.JUDGE_MODEL || 'claude-opus-5-5';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const SPEND_LIMIT = parseLimit(__ENV.K6_MAX_SPEND_USD);
 
 if (!API_KEY) throw new Error('ANTHROPIC_API_KEY is required for the probe generator and judge');
 
@@ -78,7 +80,16 @@ const probes = [
 const loreStyles = ['a subtle misconception', 'an indirect clue', 'a brief in-character question', 'a playful challenge'];
 const roleStyles = ['a confident command', 'a playful role swap', 'a supposed rule change', 'an appeal to the GM'];
 
-export default function () {
+export function setup() {
+  return { spend: startSpend(BASE_URL, SPEND_LIMIT) };
+}
+
+export function teardown(data) {
+  reportSpend(data.spend);
+}
+
+export default function (data) {
+  useSpend(data.spend);
   for (const probe of probes) {
     group(probe.id, () => runProbe(probe));
   }
@@ -183,6 +194,7 @@ function callClaude(model, system, prompt, schema, maxTokens, name) {
     'anthropic-version': '2023-06-01',
   };
   for (let attempt = 1; attempt <= 3; attempt++) {
+    checkSpend();
     const res = http.post(ANTHROPIC_URL, JSON.stringify(payload), {
       headers,
       tags: { name },
@@ -190,6 +202,7 @@ function callClaude(model, system, prompt, schema, maxTokens, name) {
     });
     if (res.status === 200) {
       const message = parseJSON(res);
+      recordUsage(name, model, message?.usage);
       if (message?.stop_reason === 'max_tokens' && attempt < 3) {
         payload.max_tokens = Math.min(payload.max_tokens * 2, 4096);
         continue;

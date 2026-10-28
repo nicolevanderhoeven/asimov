@@ -1,10 +1,12 @@
 import http from 'k6/http';
 import { check, group } from 'k6';
+import { parseLimit, startSpend, useSpend, checkSpend, reportSpend } from './lib/spend.js';
 
 // Fixed, code-judged version of the Python game's H01-H09 prompts. k6 makes
 // requests only to the game; the running game performs its own model calls.
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const SPEND_LIMIT = parseLimit(__ENV.K6_MAX_SPEND_USD);
 
 http.setResponseCallback(http.expectedStatuses(200, 201, 400, 404));
 
@@ -17,10 +19,20 @@ export const options = {
   },
 };
 
-export default function () {
+export function setup() {
+  return { spend: startSpend(BASE_URL, SPEND_LIMIT) };
+}
+
+export function teardown(data) {
+  reportSpend(data.spend);
+}
+
+export default function (data) {
+  useSpend(data.spend);
   // A fresh session per prompt prevents an earlier answer from supplying a
   // keyword that the model did not know in the current answer.
   for (const testCase of legacyCases) {
+    checkSpend();
     group(testCase.name, () => {
       const session = createSession();
       if (!session) return;

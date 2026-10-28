@@ -17,6 +17,7 @@ import (
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/dotenv"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/game"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/gm"
+	"github.com/nicolevanderhoeven/asimov/go-game/internal/spend"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/telemetry"
 )
 
@@ -92,6 +93,8 @@ func run() error {
 		g.EndingGuard, g.Fixes = true, true
 		telemetryNote += " GM fixes on."
 	}
+	// The ledger the GM's model calls are counted in; --serve shows it at /spend.
+	ledger := spend.NewLedger()
 	if !*offline {
 		model := os.Getenv("ANTHROPIC_MODEL")
 		switch {
@@ -103,14 +106,14 @@ func run() error {
 		default:
 			model = "claude-sonnet-4-6"
 		}
-		g.Model = gm.Wrap(anthropic.New(os.Getenv("ANTHROPIC_API_KEY"), model), client, cfg.Version, diag)
+		g.Model = gm.Wrap(spend.Meter(anthropic.New(os.Getenv("ANTHROPIC_API_KEY"), model), ledger, "gm"), client, cfg.Version, diag)
 	}
 	if *serve {
 		if _, err := game.Choose(*scenario, 0); err != nil {
 			return err
 		}
 		fmt.Println(telemetryNote)
-		return runServe(ctx, &g, *addr, *sessionTTL, *scenario, logger)
+		return runServe(ctx, &g, ledger, *addr, *sessionTTL, *scenario, logger)
 	}
 	sc, err := game.Choose(*scenario, *seed)
 	if err != nil {

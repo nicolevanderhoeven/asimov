@@ -201,3 +201,19 @@ func TestTail(t *testing.T) {
 		t.Errorf("tail of a missing file = %q", got)
 	}
 }
+
+func TestTestTargetNeedsASpendLimit(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	err = a.test(nil)
+	if err == nil || !strings.Contains(err.Error(), "spend limit") {
+		t.Errorf("test without K6_MAX_SPEND_USD returned %v, want the spend limit error", err)
+	}
+}

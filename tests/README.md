@@ -47,6 +47,10 @@ are rough.
 > 2026-09-30 (3,389 turns, 139 playthroughs). Check the Anthropic Console
 > for your actual spend.
 
+Every run has a spending limit, so none of them can run away with your
+credits; see [Spending limit](#spending-limit). `make test` is the one
+that needs you to set it yourself: `make test K6_MAX_SPEND_USD=60`.
+
 To change the defaults for yourself only, copy `local.mk.example` to
 `local.mk` (git ignores it). For example, set `E2E_DURATION = 2h` and
 `K6_CLOUD = 1` to stream the results to
@@ -61,6 +65,7 @@ example `go run ./cmd/task k6-code`.
 | Command | What it does | Time | Model calls |
 | --- | --- | --- | --- |
 | `make k6-graders` | Runs [the trajectory graders](lib/trajectory-grader.js) against [fixed cases](fixtures/trajectory-graders.json). Needs no server and no API key. | ~1 s | none |
+| `make k6-spend` | [`test-spend.js`](test-spend.js): the [spending limit's](#spending-limit) logic, against fixed cases. Needs no server and no API key. | ~1 s | none |
 | `make k6-code` | [`test-code.js`](test-code.js): fixed prompts with code assertions, plus basic game and HTTP behavior. Only the game calls Anthropic. | < 1 min | ~10 |
 | `make k6-ai` | [`test-ai.js`](test-ai.js): Claude varies the lore and role probes, and another Claude model grades the narration against facts fixed in the script. | 1–2 min | ~20 |
 | `make k6-trajectory` | [`test-trajectory.js`](test-trajectory.js): ten runs of a five-turn script, with every response graded on the path it took. See [Trajectory evals](../go-game/README.md#trajectory-evals). | a few min | ~200 |
@@ -101,6 +106,53 @@ steady stream of realistic traffic, run the end-to-end test with
 [End-to-end conversations](#end-to-end-conversations)).
 k6's own metrics need a separate k6 output to appear in Grafana; see
 [Results in Grafana Cloud k6](#results-in-grafana-cloud-k6).
+
+## Spending limit
+
+Every k6 run stops itself once it has spent `K6_MAX_SPEND_USD` US dollars on
+Anthropic calls: **5 by default**, which comfortably covers `make k6-code`,
+`make k6-ai`, and `make k6-trajectory`. `make k6-e2e` plays whole games
+with Opus judges and may need more, in which case it stops at the limit and
+says so; raise it. To change it, set it in the shell, in `.env`, or on the
+command line:
+
+```sh
+K6_MAX_SPEND_USD=10 make k6-trajectory
+```
+
+`make test` costs about $40–60 per 30 minutes, so it has no default and
+won't start without a limit of its own, which you pick when you run it:
+
+```sh
+make test K6_MAX_SPEND_USD=60
+```
+
+The run adds up the token counts in the `usage` of every Anthropic response,
+cache reads and writes included, and prices them per model. It counts both
+places that spend: the game master's calls in the game server, and the
+player and judge calls the scripts make themselves. The server keeps the one
+ledger (`GET /spend`, see [the HTTP API](../go-game/README.md#serve)); the
+scripts add their own calls to it and read it before each model call and
+turn. A run against a server that was already running counts only what it
+spent itself.
+
+When the total reaches the limit, the run stops cleanly (k6 exits with code
+108) and prints the spend by source (game master, player, judge) and by
+model. A run under its limit prints the same breakdown at the end, headed
+"Estimated spend". Prices are in one table,
+[`go-game/internal/spend/prices.go`](../go-game/internal/spend/prices.go),
+with a dated note on where they came from; update it when Anthropic's
+prices change or you point a test at another model. A model missing from
+the table is priced at the dearest known rate and flagged in the summary, so
+a model nobody added can make the run stop early but never late.
+
+> [!IMPORTANT]
+> The limit is a guard, not a billing control. A call already in flight
+> finishes, VUs running at once can overshoot it by a few calls, the figure
+> is an estimate, and it only covers runs of these scripts. For a hard stop,
+> set a **monthly spend limit on the Anthropic workspace** whose API key you
+> use (Anthropic Console, Settings, Limits), set a little above what you are
+> willing to spend.
 
 ## Original code-based AI checks
 

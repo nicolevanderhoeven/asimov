@@ -9,15 +9,17 @@ import (
 
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/gm"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/httpapi"
+	"github.com/nicolevanderhoeven/asimov/go-game/internal/spend"
 )
 
-func runServe(ctx context.Context, g *gm.GM, addr string, ttl time.Duration, scenario string, logger *slog.Logger) error {
+func runServe(ctx context.Context, g *gm.GM, ledger *spend.Ledger, addr string, ttl time.Duration, scenario string, logger *slog.Logger) error {
 	store := httpapi.NewStore(ttl)
 	sweepCtx, cancelSweep := context.WithCancel(ctx)
 	defer cancelSweep()
 	go store.Sweep(sweepCtx, ttl/6)
 	api := httpapi.NewServer(g, store, logger, g.Model == nil)
 	api.DefaultScenario = scenario
+	api.Spend = ledger
 	srv := &http.Server{Addr: addr, Handler: api.Handler()}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
