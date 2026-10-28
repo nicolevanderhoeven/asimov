@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/grafana/agento11y/go/agento11y"
@@ -36,6 +37,9 @@ func run() error {
 	sessionTTL := flag.Duration("session-ttl", 30*time.Minute, "Idle session expiry; only used with --serve")
 	scenario := flag.String("scenario", "classic", "The adventure: classic, or generated (built from random modules). With --serve, the default for sessions that don't choose. Defaults to $ASIMOV_SCENARIO when set")
 	seed := flag.Uint64("seed", 0, "Replay the generated scenario with this seed; 0 picks a random one. Not used with --serve")
+	llm := flag.String("llm", "anthropic", "The game master's model: anthropic (needs ANTHROPIC_API_KEY), or mock (no key, no network: scripted GM that plants the demo's flaws). Defaults to $ASIMOV_LLM when set")
+	mockSeed := flag.Uint64("mock-seed", 1, "With --llm mock, the seed that decides which flaws appear: the same seed and conversation plant the same flaws. Defaults to $ASIMOV_MOCK_SEED when set")
+	mockFlaws := flag.String("mock-flaws", "", "With --llm mock, the chance of each planted flaw: default, off, or a list such as all=0.3,voice_break=0 (flaws: "+mockFlawNames()+"). Defaults to $ASIMOV_MOCK_FLAWS when set")
 	flag.Parse()
 	if err := godotenv.Load(*env); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read environment file: %w", err)
@@ -44,6 +48,23 @@ func run() error {
 	if v := os.Getenv("ASIMOV_SCENARIO"); v != "" && !flagSet("scenario") {
 		*scenario = v
 	}
+	if v := os.Getenv("ASIMOV_LLM"); v != "" && !flagSet("llm") {
+		*llm = v
+	}
+	if v := os.Getenv("ASIMOV_MOCK_SEED"); v != "" && !flagSet("mock-seed") {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("ASIMOV_MOCK_SEED must be a whole number: %w", err)
+		}
+		*mockSeed = n
+	}
+	if v := os.Getenv("ASIMOV_MOCK_FLAWS"); v != "" && !flagSet("mock-flaws") {
+		*mockFlaws = v
+	}
+	if *llm != "anthropic" && *llm != "mock" {
+		return fmt.Errorf("--llm must be anthropic or mock, not %q", *llm)
+	}
+	useMock := *llm == "mock" && !*offline
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -54,7 +75,7 @@ func run() error {
 	log.SetOutput(diag)
 	var client *agento11y.Client
 	cfg := telemetry.FromEnv()
-	if !*offline && os.Getenv("ANTHROPIC_API_KEY") == "" {
+	if !*offline && !useMock && os.Getenv("ANTHROPIC_API_KEY") == "" {
 		return fmt.Errorf("ANTHROPIC_API_KEY is required (or use --offline)")
 	}
 	if !*offline && !*noTelemetry {
@@ -87,7 +108,15 @@ func run() error {
 		g.EndingGuard, g.Fixes = true, true
 		telemetryNote += " GM fixes on."
 	}
-	if !*offline {
+	if useMock {
+		rates, err := gm.ParseMockFlaws(*mockFlaws)
+		if err != nil {
+			return err
+		}
+		mock := gm.NewMock(gm.MockConfig{Seed: *mockSeed, Rates: rates})
+		telemetryNote += " " + mock.Describe()
+		g.Model = gm.Wrap(mock, client, cfg.Version, diag)
+	} else if !*offline {
 		model := os.Getenv("ANTHROPIC_MODEL")
 		switch {
 		case model != "":
@@ -112,6 +141,14 @@ func run() error {
 		return err
 	}
 	return runREPL(ctx, &g, sc, *offline, logger, diag, telemetryNote)
+}
+
+func mockFlawNames() string {
+	names := make([]string, len(gm.MockFlaws))
+	for i, f := range gm.MockFlaws {
+		names[i] = string(f)
+	}
+	return strings.Join(names, ", ")
 }
 
 // flagSet reports whether the named flag was given on the command line.

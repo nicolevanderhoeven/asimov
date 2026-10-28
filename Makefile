@@ -80,3 +80,9 @@ k6-trajectory: .env ## Dice trajectory evals: a few min, ~200 model calls
 .PHONY: k6-e2e
 k6-e2e: .env ## Five whole playthroughs: 5-10 min, a few hundred model calls
 	$(K6) tests/test-e2e.js
+
+## The free run: a mock game master and judge, no API key or cost
+
+.PHONY: k6-mock
+k6-mock: ## Every k6 test against the mock GM and judge: free, no .env needed, about 1 min
+	scripts/k6-mock.sh

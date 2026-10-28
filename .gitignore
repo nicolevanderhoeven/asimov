@@ -10,4 +10,5 @@ otel-config.yml
 
 # Compiled CLI and local game state
 go-game/enterprise
+go-game/mockjudge
 go-game/.enterprise-save*
