@@ -32,28 +32,31 @@ func parseRating(text string) (agento11y.ConversationRatingValue, string, error)
 
 // rate sends the player's rating of this game to Agent Observability as a
 // conversation rating, on the same conversation as the game's generations,
-// and counts it in game.ratings. n numbers the player's ratings in this game,
-// since each rating needs its own ID.
-func rate(ctx context.Context, client *agento11y.Client, s game.State, sc *game.Scenario, text string, n int) error {
+// and counts it in game.ratings. Without Agent Observability (export off),
+// only the count is kept. n numbers the player's ratings in this game, since
+// each rating needs its own ID.
+func rate(ctx context.Context, client *agento11y.Client, export bool, s game.State, sc *game.Scenario, text string, n int) error {
 	value, comment, err := parseRating(text)
 	if err != nil {
 		return err
 	}
 	if client == nil {
-		return errors.New("ratings go to Agent Observability, and Grafana telemetry is off for this run")
+		return errors.New("telemetry is off for this run")
 	}
 	status := s.View().Status
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_, err = client.SubmitConversationRating(ctx, s.ConversationID, agento11y.ConversationRatingInput{
-		RatingID: fmt.Sprintf("player-%s-%d", s.ConversationID, n),
-		Rating:   value,
-		Comment:  comment,
-		Source:   "asimov-repl",
-		Metadata: map[string]any{"status": status, "turn": s.Turn, "scenario_id": sc.ID, "generated": sc.Generated()},
-	})
-	if err != nil {
-		return err
+	if export {
+		_, err = client.SubmitConversationRating(ctx, s.ConversationID, agento11y.ConversationRatingInput{
+			RatingID: fmt.Sprintf("player-%s-%d", s.ConversationID, n),
+			Rating:   value,
+			Comment:  comment,
+			Source:   "asimov-repl",
+			Metadata: map[string]any{"status": status, "turn": s.Turn, "scenario_id": sc.ID, "generated": sc.Generated()},
+		})
+		if err != nil {
+			return err
+		}
 	}
 	// Labels stay bounded: two ratings, and the game's few statuses.
 	rating := "good"

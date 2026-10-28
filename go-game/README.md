@@ -32,9 +32,18 @@ where each value comes from, and `go run ./cmd/doctor` checks them.
 - `AGENTO11Y_ENDPOINT`: the Agent Observability API URL; the legacy
   `GRAFANA_CLOUD_SIGIL_ENDPOINT` is also accepted.
 - `GRAFANA_CLOUD_INSTANCE_ID` and `GRAFANA_CLOUD_API_KEY`: generation export auth.
+  These three are Agent Observability's settings, and optional as a group: with
+  none of them, the game doesn't export generations, and records each model
+  call only as a span and in the `gen_ai.client.*` metrics. Some of them
+  without the rest is an error that names what's missing.
 - `OTLP_ENDPOINT` and `OTLP_HEADERS`: the OTLP gateway and its base64 basic
-  auth. A plain-HTTP `OTLP_ENDPOINT` on localhost (a local Collector) needs no
-  `OTLP_HEADERS`.
+  auth. A plain-HTTP `OTLP_ENDPOINT` on localhost (the [local
+  stack](../local-stack/README.md) or a local Collector) needs no
+  `OTLP_HEADERS`. OTLP alone, with no Agent Observability, is a complete
+  configuration.
+- `ASIMOV_GENERATIONS_FILE`: optional, only without Agent Observability
+  settings. A JSON-lines file that every generation is appended to, for
+  [`agento11y/judge-local.py --local`](../agento11y/README.md#judging-without-grafana-cloud).
 - `ASIMOV_AGENT_VERSION`: optional, defaults to `go-experiment-v1`.
 - `ASIMOV_LLM`: optional, `anthropic` (the default) or `mock`, which needs no
   `ANTHROPIC_API_KEY`; see [The mock game master](#the-mock-game-master). The
@@ -59,9 +68,12 @@ where each value comes from, and `go run ./cmd/doctor` checks them.
   choice `auto` (that model can't be forced to call a tool). The default
   keeps `roll_dice` and `claude-sonnet-4-6` for the demo.
 
-Grafana configuration is required by default. To deliberately play without
-exporting telemetry, use `--no-telemetry`. To play without an API key, LLM, or any
-telemetry network calls, use `--offline` and exact `/do` commands.
+Some telemetry configuration is required by default: OTLP, Agent Observability,
+or both. To deliberately play without exporting telemetry, use `--no-telemetry`.
+To play without an API key, LLM, or any telemetry network calls, use `--offline`
+and exact `/do` commands; `--offline --telemetry` still sends traces, metrics,
+and logs, but only to an `OTLP_ENDPOINT` on localhost (this is what
+`make play-offline-observed` runs).
 
 ```sh
 go run ./cmd/enterprise --offline
@@ -388,8 +400,9 @@ dice events, SDK generation metrics, the custom `game.actions` (by tool) and
 DC) counters, and
 structured logs, under `service.name=asimov-enterprise-go`. All requests in a
 game share its conversation ID; over HTTP, the session ID doubles as
-the conversation ID. Generation data goes to the Agent Observability endpoint;
-traces, metrics, and logs go to Grafana Cloud's OTLP gateway. Exporters flush
+the conversation ID. Generation data goes to the Agent Observability endpoint
+when it's configured; traces, metrics, and logs go to the OTLP endpoint (the
+local stack, or Grafana Cloud's OTLP gateway). Exporters flush
 on exit. Policy hooks are disabled: the local rules engine enforces game
 actions.
 

@@ -31,7 +31,8 @@ func main() {
 
 func run() error {
 	offline := flag.Bool("offline", false, "Play using exact /do commands, without an LLM or network telemetry")
-	noTelemetry := flag.Bool("no-telemetry", false, "Explicitly disable Grafana export")
+	noTelemetry := flag.Bool("no-telemetry", false, "Explicitly disable all telemetry export")
+	offlineTelemetry := flag.Bool("telemetry", false, "With --offline, still send traces, metrics, and logs to a local OTLP_ENDPOINT (nothing leaves this machine)")
 	env := flag.String("env", "../.env", "Environment file; existing shell variables take precedence")
 	serve := flag.Bool("serve", false, "Run an HTTP API server (one isolated session per client) instead of the REPL")
 	autoTelemetry := flag.Bool("telemetry-if-configured", false, "Send telemetry only when Grafana Cloud credentials are set; otherwise act as --no-telemetry")
@@ -77,6 +78,7 @@ func run() error {
 	diag := telemetry.NewDiagnostics(os.Stderr)
 	log.SetOutput(diag)
 	var client *agento11y.Client
+	var generationExport bool
 	cfg := telemetry.FromEnv()
 	if !*offline && !useMock && os.Getenv("ANTHROPIC_API_KEY") == "" {
 		return fmt.Errorf("ANTHROPIC_API_KEY is required (or use --offline)")
@@ -85,12 +87,20 @@ func run() error {
 	if *autoTelemetry && !cfg.Configured() {
 		*noTelemetry = true
 	}
-	if !*offline && !*noTelemetry {
+	if *offline && *offlineTelemetry && !*noTelemetry {
+		// Offline play has no model calls to record, and sends nothing off
+		// this machine: only OTLP to a receiver on it.
+		if !cfg.LocalCollector() {
+			return fmt.Errorf("--offline --telemetry needs OTLP_ENDPOINT on localhost (make local-stack starts one)")
+		}
+		cfg.GenerationEndpoint, cfg.APIEndpoint, cfg.Instance, cfg.Token, cfg.GenerationsFile = "", "", "", "", ""
+	}
+	if !*noTelemetry && (!*offline || *offlineTelemetry) {
 		r, err := telemetry.Init(ctx, cfg, diag)
 		if err != nil {
 			return err
 		}
-		client = r.Client
+		client, generationExport = r.Client, r.GenerationExport
 		logger = r.Logger
 		defer func() {
 			shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -100,11 +110,8 @@ func run() error {
 			}
 		}()
 	}
-	telemetryNote := "Grafana export on: generations, traces, metrics, and logs."
-	if client == nil {
-		telemetryNote = "Grafana telemetry is off for this run."
-	}
-	g := gm.GM{Client: client, Logger: logger, Roll: game.RandomRoll}
+	g := gm.GM{Client: client, GenerationExport: generationExport, Logger: logger, Roll: game.RandomRoll}
+	telemetryNote := describeTelemetry(cfg, client != nil)
 	// The fix for the false ending is opt-in; see gm.GM.EndingGuard.
 	if on, _ := strconv.ParseBool(os.Getenv("ASIMOV_ENDING_GUARD")); on && !*offline {
 		g.EndingGuard = true
@@ -158,6 +165,20 @@ func mockFlawNames() string {
 		names[i] = string(f)
 	}
 	return strings.Join(names, ", ")
+}
+
+// describeTelemetry is the one-line summary of where this run's telemetry
+// goes.
+func describeTelemetry(cfg telemetry.Config, on bool) string {
+	switch {
+	case !on:
+		return "Telemetry is off for this run."
+	case cfg.OTLPConfigured() && cfg.GenerationConfigured():
+		return "Grafana export on: generations, traces, metrics, and logs."
+	case cfg.OTLPConfigured():
+		return "Telemetry on: traces, metrics, and logs go to " + strings.TrimRight(cfg.Endpoint, "/") + ". Agent Observability is off."
+	}
+	return "Agent Observability export on: generations only."
 }
 
 // flagSet reports whether the named flag was given on the command line.

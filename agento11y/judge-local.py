@@ -11,6 +11,13 @@ through gcx, and the evaluators with yq.
     agento11y/judge-local.py --experiment exp-...            # judge a run
     agento11y/judge-local.py --calibrate exp-...             # compare with
                                                              # online scores
+    agento11y/judge-local.py --local logs/generations.jsonl  # no Grafana Cloud
+
+--local judges the generations a game run kept on this machine (make
+play-local-observed and make serve-local-observed write them to
+logs/generations.jsonl), so it needs only your Anthropic key and yq: no
+Grafana Cloud stack, gcx, or experiment. The verdicts go to --out and the
+table; --export and --calibrate need Agent Observability.
 
 Rules sample whole conversations at their sample_rate, as online; --sample
 overrides every rule's rate. Each verdict goes to --out (JSON lines), and
@@ -60,6 +67,23 @@ def gcx(*args):
     if out.returncode != 0:
         raise RuntimeError(f"gcx {' '.join(args)}: {out.stderr.strip() or out.stdout.strip()}")
     return json.loads(out.stdout)
+
+
+def local_conversations(path):
+    """The generations in a JSON-lines file the game kept, by conversation
+    ID, shaped like gcx's conversation output (the game's own export names a
+    generation's ID id)."""
+    convs = {}
+    for n, line in enumerate(pathlib.Path(path).read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            gen = json.loads(line)
+        except ValueError as e:
+            sys.exit(f"{path}:{n}: not JSON ({e}); is it a file from ASIMOV_GENERATIONS_FILE?")
+        gen.setdefault("generation_id", gen.get("id"))
+        convs.setdefault(gen.get("conversation_id") or "", {"generations": []})["generations"].append(gen)
+    return convs
 
 
 def b64json(s):
@@ -198,6 +222,7 @@ def export(items):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--experiment", help="judge every conversation of this experiment run")
+    ap.add_argument("--local", metavar="FILE", help="judge every conversation in this JSON-lines file of generations the game kept (ASIMOV_GENERATIONS_FILE), without Grafana Cloud")
     ap.add_argument("--calibrate", help="judge generations of this experiment that the stack already scored, and compare")
     ap.add_argument("--sample", type=float, help="override every rule's sample rate")
     ap.add_argument("--limit", type=int, default=0, help="judge at most this many generations per evaluator")
@@ -209,26 +234,35 @@ def main():
     ap.add_argument("--export", action="store_true", help="send verdicts to Agent Observability as local.<evaluator> scores")
     args = ap.parse_args()
     load_env()
-    exp = args.experiment or args.calibrate
+    exp = args.experiment or args.calibrate or ("local" if args.local else None)
     if not exp:
-        ap.error("give --experiment or --calibrate")
+        ap.error("give --experiment, --calibrate, or --local")
+    if args.local and (args.experiment or args.calibrate or args.export):
+        ap.error("--local judges a file on this machine; it can't be combined with --experiment, --calibrate, or --export")
     evaluators = {e["evaluator_id"]: e for e in (yaml(p) for p in sorted((ROOT / "evaluators").glob("*.yaml")))}
     rules = [yaml(p) for p in sorted((ROOT / "rules").glob("*.yaml"))]
-    report = gcx("experiments", "get-report", exp)
-    convs = [t["trial"]["conversation_id"] for row in report["rows"] for t in row["trials"] if t["trial"].get("conversation_id") and t["trial"]["conversation_id"] not in args.exclude]
-    print(f"{exp}: {len(convs)} conversations", file=sys.stderr)
+    if args.local:
+        local = local_conversations(args.local)
+        convs = [c for c in local if c not in args.exclude]
+    else:
+        report = gcx("experiments", "get-report", exp)
+        convs = [t["trial"]["conversation_id"] for row in report["rows"] for t in row["trials"] if t["trial"].get("conversation_id") and t["trial"]["conversation_id"] not in args.exclude]
+    print(f"{args.local or exp}: {len(convs)} conversations", file=sys.stderr)
 
     jobs = []  # (evaluator, generation, conversation, online verdict or None)
     results_by_call = {}
     for conv in convs:
-        try:
-            c = gcx("conversations", "get", conv)
-        except RuntimeError:
+        if args.local:
+            c = local[conv]
+        else:
             try:
                 c = gcx("conversations", "get", conv)
-            except RuntimeError as e:
-                print(f"skipping {conv}: {e}", file=sys.stderr)
-                continue
+            except RuntimeError:
+                try:
+                    c = gcx("conversations", "get", conv)
+                except RuntimeError as e:
+                    print(f"skipping {conv}: {e}", file=sys.stderr)
+                    continue
         results_by_call.update(call_results(c))
         for rule in rules:
             if not rule.get("enabled", True):

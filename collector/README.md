@@ -10,7 +10,7 @@ Pick this path if you want any of:
 
 - **Buffering / retry** that survives Grafana Cloud blips or local network drops.
 - **Processing** — sampling, attribute scrubbing/redaction, batching, transforms.
-- **Fan-out** to a second backend (e.g. local Tempo/Jaeger for dev, plus Grafana Cloud).
+- **Fan-out** to a second backend (e.g. local Tempo/Jaeger for dev, plus Grafana Cloud). For a local Grafana with no Cloud account at all, use [`local-stack/`](../local-stack/README.md) instead; it uses the same ports (4317 and 4318), so run one or the other.
 - **Centralised auth** — credentials live in the Collector, not in every app instance.
 - A demo of an OTel Collector pipeline alongside the AI app.
 

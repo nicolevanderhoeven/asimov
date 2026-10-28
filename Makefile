@@ -32,7 +32,7 @@ export SERVE_ADDR
 .DEFAULT_GOAL := help
 
 # The targets and their descriptions are listed by the runner: make help.
-TARGETS := play-offline play-local play serve doctor test unit smoke k6-graders k6-spend k6-code k6-ai k6-trajectory k6-e2e k6-mock k6
+TARGETS := play-offline play-local play serve local-stack local-stack-down play-offline-observed play-local-observed serve-local-observed doctor-local doctor test unit smoke k6-graders k6-spend k6-code k6-ai k6-trajectory k6-e2e k6-mock k6
 
 .PHONY: help $(TARGETS)
 help $(TARGETS):

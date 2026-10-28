@@ -29,6 +29,16 @@ const defaultE2EDuration = "30m"
 // otherwise.
 const defaultServeAddr = "localhost:8080"
 
+// serveAddr is where the game's HTTP API listens: SERVE_ADDR, or localhost
+// only. The API is unauthenticated and spends your Anthropic key, so it stays
+// on this machine unless SERVE_ADDR says otherwise.
+func (a *app) serveAddr() string {
+	if addr, _ := a.env.Get("SERVE_ADDR"); addr != "" {
+		return addr
+	}
+	return defaultServeAddr
+}
+
 // target is one shortcut. Extra command-line arguments are passed on to what
 // the target runs (the game, or k6), except for test, which takes NAME=value
 // settings, and unit, smoke, and doctor, which take none.
@@ -64,13 +74,27 @@ func targets() []target {
 			func(a *app, args []string) error { return a.game(args) }},
 		{"serve", "Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)", true,
 			func(a *app, args []string) error {
-				// The API is unauthenticated and spends your Anthropic key,
-				// so it stays on this machine unless SERVE_ADDR says otherwise.
-				addr, _ := a.env.Get("SERVE_ADDR")
-				if addr == "" {
-					addr = defaultServeAddr
+				return a.game(args, "--serve", "--telemetry-if-configured", "--addr", a.serveAddr())
+			}},
+		{"local-stack", "Start the local Grafana stack (needs Docker) and print where to look", false,
+			func(a *app, _ []string) error { return a.localStack() }},
+		{"local-stack-down", "Stop the local Grafana stack (its data is kept)", false,
+			func(a *app, _ []string) error { return a.localStackDown() }},
+		{"play-offline-observed", "Play with no API key or LLM, with telemetry to the local stack (local-stack first)", false,
+			func(a *app, args []string) error { return a.localGame(args, "--offline", "--telemetry") }},
+		{"play-local-observed", "Play with the AI GM, with telemetry to the local stack (local-stack first; needs ANTHROPIC_API_KEY)", true,
+			func(a *app, args []string) error { return a.localGame(args) }},
+		{"serve-local-observed", "Run the HTTP API on localhost:8080 for the k6 tests, with telemetry to the local stack", true,
+			func(a *app, args []string) error {
+				return a.localGame(args, "--serve", "--addr", a.serveAddr())
+			}},
+		{"doctor-local", "Check the local stack: send it one test span, metric, and log", false,
+			func(a *app, _ []string) error {
+				env, err := a.env.localEnv()
+				if err != nil {
+					return err
 				}
-				return a.game(args, "--serve", "--telemetry-if-configured", "--addr", addr)
+				return a.child("go-game", env, "go", "run", "./cmd/doctor")
 			}},
 		{"doctor", "Check .env and send one test span, metric, log, and generation to Grafana Cloud", true,
 			func(a *app, _ []string) error { return a.child("go-game", a.env, "go", "run", "./cmd/doctor") }},
@@ -166,7 +190,7 @@ func help(w io.Writer) {
 	fmt.Fprintln(w, "Usage: go run ./cmd/task <target> [arguments]   (or make <target>)")
 	fmt.Fprintln(w)
 	for _, t := range targets() {
-		name := fmt.Sprintf("%-16s", t.name)
+		name := fmt.Sprintf("%-22s", t.name)
 		if color {
 			name = "\033[36m" + name + "\033[0m"
 		}

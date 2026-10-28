@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -28,9 +30,17 @@ import (
 
 const Service = "asimov-enterprise-go"
 
-// APIEndpoint is the Agent Observability API that conversation ratings go
-// to; when empty, the SDK uses the host of GenerationEndpoint.
-type Config struct{ Endpoint, Authorization, GenerationEndpoint, APIEndpoint, Instance, Token, Version string }
+// Config holds the telemetry settings. Endpoint and Authorization are OTLP
+// (traces, metrics, logs); GenerationEndpoint, Instance, and Token are Agent
+// Observability, and each group works without the other. APIEndpoint is the
+// Agent Observability API that conversation ratings go to; when empty, the
+// SDK uses the host of GenerationEndpoint. GenerationsFile, only without
+// Agent Observability, is a local JSON-lines file that every generation is
+// also written to, for agento11y/judge-local.py.
+type Config struct {
+	Endpoint, Authorization, GenerationEndpoint, APIEndpoint, Instance, Token, Version string
+	GenerationsFile                                                                    string
+}
 
 func first(values ...string) string {
 	for _, v := range values {
@@ -52,29 +62,59 @@ func FromEnv() Config {
 		APIEndpoint:        os.Getenv("AGENTO11Y_API_ENDPOINT"),
 		Instance:           first(os.Getenv("GRAFANA_CLOUD_INSTANCE_ID"), os.Getenv("GRAFANA_CLOUD_INSTANCE")),
 		Token:              os.Getenv("GRAFANA_CLOUD_API_KEY"), Version: first(os.Getenv("ASIMOV_AGENT_VERSION"), "go-experiment-v1"),
+		GenerationsFile: strings.TrimSpace(os.Getenv("ASIMOV_GENERATIONS_FILE")),
 	}
 }
 
 // Configured reports whether c holds any Grafana Cloud credential, which
 // means the user meant to send telemetry. The endpoints don't count: a fresh
-// copy of env.example already fills them with placeholders.
+// copy of an old env.example already fills them with placeholders.
 func (c Config) Configured() bool {
 	return first(c.Instance, c.Token, c.Authorization) != ""
 }
 
+// OTLPConfigured reports whether any OTLP setting is present, so that
+// traces, metrics, and logs are exported.
+func (c Config) OTLPConfigured() bool {
+	return strings.TrimSpace(c.Endpoint) != "" || c.Authorization != ""
+}
+
+// GenerationConfigured reports whether any Agent Observability setting is
+// present. Agent Observability is a Grafana Cloud service, so a run with none
+// of them records model calls only as local spans and metrics.
+func (c Config) GenerationConfigured() bool {
+	return first(c.GenerationEndpoint, c.APIEndpoint, c.Instance, c.Token) != ""
+}
+
 // Validate reports every missing or placeholder setting at once, in sorted
-// order, so one run shows the whole fix.
+// order, so one run shows the whole fix. OTLP (traces, metrics, logs) and
+// Agent Observability generation export are independent: either one alone is
+// valid, and each must be complete once any of its settings is present, so a
+// half-filled Grafana Cloud configuration is reported instead of silently
+// ignored. Having neither is an error too, so that a run never loses its
+// telemetry without asking (--no-telemetry does that explicitly).
 func (c Config) Validate() error {
-	required := map[string]string{"OTLP_ENDPOINT": c.Endpoint, "AGENTO11Y_ENDPOINT (or GRAFANA_CLOUD_SIGIL_ENDPOINT)": c.GenerationEndpoint, "GRAFANA_CLOUD_INSTANCE_ID": c.Instance, "GRAFANA_CLOUD_API_KEY": c.Token}
-	// A local Collector (see collector/) holds the Grafana Cloud credentials
-	// itself, so the app sends it unauthenticated OTLP.
-	if !c.LocalCollector() {
-		required["OTLP_HEADERS"] = c.Authorization
+	otlp, generation := c.OTLPConfigured(), c.GenerationConfigured()
+	if !otlp && !generation {
+		return errors.New("no telemetry is configured; set OTLP_ENDPOINT (run make local-stack for a local Grafana, or see docs/grafana-cloud-setup.md for Grafana Cloud) or explicitly use --no-telemetry")
 	}
 	var missing []string
-	for name, v := range required {
-		if strings.TrimSpace(v) == "" {
-			missing = append(missing, name)
+	if otlp {
+		if strings.TrimSpace(c.Endpoint) == "" {
+			missing = append(missing, "OTLP_ENDPOINT")
+		}
+		// A local Collector or stack (see collector/ and local-stack/) takes
+		// unauthenticated OTLP; Grafana Cloud needs Basic auth.
+		if !c.LocalCollector() && c.Authorization == "" {
+			missing = append(missing, "OTLP_HEADERS")
+		}
+	}
+	partial := false
+	if generation {
+		for name, v := range map[string]string{"AGENTO11Y_ENDPOINT (or GRAFANA_CLOUD_SIGIL_ENDPOINT)": c.GenerationEndpoint, "GRAFANA_CLOUD_INSTANCE_ID": c.Instance, "GRAFANA_CLOUD_API_KEY": c.Token} {
+			if strings.TrimSpace(v) == "" {
+				missing, partial = append(missing, name), true
+			}
 		}
 	}
 	sort.Strings(missing)
@@ -90,28 +130,42 @@ func (c Config) Validate() error {
 	if len(missing) > 0 {
 		problems = append(problems, "missing "+strings.Join(missing, ", "))
 	}
+	if partial {
+		problems = append(problems, "Agent Observability needs all of AGENTO11Y_ENDPOINT, GRAFANA_CLOUD_INSTANCE_ID, and GRAFANA_CLOUD_API_KEY, or none of them")
+	}
 	if len(placeholders) > 0 {
 		problems = append(problems, "env.example's REGION placeholder is still in "+strings.Join(placeholders, ", "))
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("%s; configure Grafana telemetry or explicitly use --no-telemetry", strings.Join(problems, "; "))
 	}
-	endpoints := []string{c.Endpoint, c.GenerationEndpoint}
-	if c.APIEndpoint != "" {
-		endpoints = append(endpoints, c.APIEndpoint)
+	if c.GenerationsFile != "" && generation {
+		return errors.New("ASIMOV_GENERATIONS_FILE keeps generations locally when Agent Observability is off; clear it, or clear the Agent Observability settings")
 	}
-	for _, endpoint := range endpoints {
-		u, err := url.Parse(endpoint)
-		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
-			(u.Scheme != "https" && (endpoint != c.Endpoint || !c.LocalCollector())) {
-			return errors.New("telemetry endpoints must be HTTPS URLs without credentials, query parameters, or fragments (plain HTTP is allowed only for an OTLP_ENDPOINT on localhost)")
+	if otlp && !validEndpoint(c.Endpoint, c.LocalCollector()) {
+		return errors.New("OTLP_ENDPOINT must be an HTTPS URL without credentials, query parameters, or fragments (plain HTTP is allowed only for an endpoint on localhost)")
+	}
+	for _, endpoint := range []string{c.GenerationEndpoint, c.APIEndpoint} {
+		if endpoint != "" && !validEndpoint(endpoint, false) {
+			return errors.New("AGENTO11Y_ENDPOINT and AGENTO11Y_API_ENDPOINT must be HTTPS URLs without credentials, query parameters, or fragments (Agent Observability is a Grafana Cloud service, so plain HTTP is not accepted)")
 		}
 	}
 	return nil
 }
 
-// LocalCollector reports whether OTLP goes to a plain-HTTP Collector on this
-// machine rather than straight to Grafana Cloud.
+// validEndpoint reports whether endpoint is an HTTPS URL, or a plain-HTTP one
+// when allowHTTP, without credentials, a query, or a fragment.
+func validEndpoint(endpoint string, allowHTTP bool) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	return u.Scheme == "https" || (u.Scheme == "http" && allowHTTP)
+}
+
+// LocalCollector reports whether OTLP goes to a plain-HTTP receiver on this
+// machine (a Collector, or the local stack) rather than straight to Grafana
+// Cloud.
 func (c Config) LocalCollector() bool {
 	u, err := url.Parse(c.Endpoint)
 	if err != nil || u.Scheme != "http" {
@@ -126,12 +180,19 @@ func (c Config) LocalCollector() bool {
 
 // GenerationConfig is the agento11y client configuration for c: generation
 // export over HTTP with Grafana Cloud basic auth, and the API that player
-// ratings go to. logger receives the SDK's own export diagnostics.
+// ratings go to. Without Agent Observability settings, the export is off:
+// the client still records each model call as a span with the gen_ai.*
+// attributes and in the gen_ai.client.* metrics, but nothing leaves the
+// process through it. logger receives the SDK's own export diagnostics.
 func GenerationConfig(c Config, logger *log.Logger) agento11y.Config {
 	cfg := agento11y.DefaultConfig()
 	cfg.Logger = logger
 	cfg.AgentName = Service
 	cfg.AgentVersion = c.Version
+	if !c.GenerationConfigured() {
+		cfg.GenerationExport.Protocol = agento11y.GenerationExportProtocolNone
+		return cfg
+	}
 	cfg.GenerationExport.Protocol = agento11y.GenerationExportProtocolHTTP
 	cfg.GenerationExport.Endpoint = c.GenerationEndpoint
 	cfg.GenerationExport.Auth = agento11y.AuthConfig{Mode: agento11y.ExportAuthModeBasic, TenantID: c.Instance, BasicPassword: c.Token}
@@ -151,9 +212,13 @@ func (c Config) OTLPHeaders() map[string]string {
 }
 
 type Runtime struct {
-	Client   *agento11y.Client
-	Logger   *slog.Logger
-	shutdown []func(context.Context) error
+	// Client records model calls and tool executions. It is set whenever
+	// telemetry is on; GenerationExport says whether it also sends them to
+	// Agent Observability.
+	Client           *agento11y.Client
+	GenerationExport bool
+	Logger           *slog.Logger
+	shutdown         []func(context.Context) error
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
@@ -181,24 +246,71 @@ func Init(ctx context.Context, c Config, diag io.Writer) (_ *Runtime, err error)
 			_ = r.Shutdown(cleanup)
 		}
 	}()
-	res := resource.NewSchemaless(attribute.String("service.name", Service), attribute.String("service.version", c.Version))
+	r.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	logHandlers := fanOutHandler{}
+	if c.OTLPConfigured() {
+		if err = r.startOTLP(ctx, c, diag); err != nil {
+			return nil, err
+		}
+		logHandlers = append(logHandlers, r.Logger.Handler())
+	}
+	// agento11y logs its own export failures (rejected/failed generation
+	// sends, flush errors) through this logger rather than returning them to
+	// the caller. Fan it out to diag in addition to r.Logger's normal Loki
+	// destination, so those diagnostics are visible locally in real time
+	// instead of requiring a round trip through Grafana Cloud to discover.
+	// Routine per-batch success lines still go to Loki but not to diag.
+	local := dropMessages{slog.NewTextHandler(diag, nil), sdkSuccessPrefixes}
+	logHandlers = append(logHandlers, local)
+	// The client is created without Agent Observability settings too: it
+	// then only records each model call as a span and in the gen_ai.client.*
+	// metrics, which is what the local stack shows.
+	r.GenerationExport = c.GenerationConfigured()
+	cfg := GenerationConfig(c, slog.NewLogLogger(logHandlers, slog.LevelInfo))
+	if c.GenerationsFile != "" {
+		keep, e := startGenerationLog(c.GenerationsFile)
+		if e != nil {
+			return nil, fmt.Errorf("ASIMOV_GENERATIONS_FILE: %w", e)
+		}
+		r.shutdown = append(r.shutdown, keep.Shutdown)
+		cfg.GenerationExport.Protocol = agento11y.GenerationExportProtocolHTTP
+		cfg.GenerationExport.Endpoint = keep.Endpoint()
+		cfg.GenerationExport.Insecure = agento11y.BoolPtr(true)
+	}
+	r.Client = agento11y.NewClient(cfg)
+	return r, nil
+}
+
+// instanceID is a random ID for this process.
+func instanceID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// startOTLP sets up the trace, metric, and log exporters for c's OTLP
+// endpoint and installs them as the process's providers.
+func (r *Runtime) startOTLP(ctx context.Context, c Config, diag io.Writer) error {
+	// Each run gets its own instance ID, so its counters are separate series
+	// instead of one that resets (and loses its first increment) every run.
+	res := resource.NewSchemaless(attribute.String("service.name", Service), attribute.String("service.version", c.Version), attribute.String("service.instance.id", instanceID()))
 	headers := c.OTLPHeaders()
 	base := strings.TrimRight(c.Endpoint, "/")
 	te, e := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(base+"/v1/traces"), otlptracehttp.WithHeaders(headers))
 	if e != nil {
-		return nil, e
+		return e
 	}
 	tp := sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithBatcher(te), sdktrace.WithSampler(sdktrace.AlwaysSample()))
 	r.shutdown = append(r.shutdown, tp.Shutdown)
 	me, e := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(base+"/v1/metrics"), otlpmetrichttp.WithHeaders(headers))
 	if e != nil {
-		return nil, e
+		return e
 	}
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(sdkmetric.NewPeriodicReader(me, sdkmetric.WithInterval(5*time.Second))))
 	r.shutdown = append(r.shutdown, mp.Shutdown)
 	le, e := otlploghttp.New(ctx, otlploghttp.WithEndpointURL(base+"/v1/logs"), otlploghttp.WithHeaders(headers))
 	if e != nil {
-		return nil, e
+		return e
 	}
 	lp := sdklog.NewLoggerProvider(sdklog.WithResource(res), sdklog.WithProcessor(sdklog.NewBatchProcessor(le)))
 	r.shutdown = append(r.shutdown, lp.Shutdown)
@@ -210,15 +322,7 @@ func Init(ctx context.Context, c Config, diag io.Writer) (_ *Runtime, err error)
 	}))
 	otel.SetMeterProvider(mp)
 	r.Logger = slog.New(otelslog.NewHandler(Service, otelslog.WithLoggerProvider(lp)))
-	// agento11y logs its own export failures (rejected/failed generation
-	// sends, flush errors) through this logger rather than returning them to
-	// the caller. Fan it out to diag in addition to r.Logger's normal Loki
-	// destination, so those diagnostics are visible locally in real time
-	// instead of requiring a round trip through Grafana Cloud to discover.
-	// Routine per-batch success lines still go to Loki but not to diag.
-	local := dropMessages{slog.NewTextHandler(diag, nil), sdkSuccessPrefixes}
-	r.Client = agento11y.NewClient(GenerationConfig(c, slog.NewLogLogger(fanOutHandler{r.Logger.Handler(), local}, slog.LevelInfo)))
-	return r, nil
+	return nil
 }
 
 // sdkSuccessPrefixes are agento11y's routine per-export success messages. The

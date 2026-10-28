@@ -1,5 +1,9 @@
 # Send the game's telemetry to Grafana Cloud
 
+This is optional: [`local-stack/`](../local-stack/README.md) shows the same
+traces, metrics, and logs in a Grafana on your own machine, with no account.
+Grafana Cloud adds Agent Observability, which is available only there.
+
 This guide takes you from no account to the game's conversations, traces,
 metrics, and logs in Grafana Cloud. It takes about 15 minutes. The game
 sends two kinds of data, and each has its own endpoint:
@@ -130,7 +134,9 @@ can take a minute or two to appear.
 | `OTLP_HEADERS isn't base64` | Paste only the output of the `printf ... \| base64` command, not the raw `id:token`. |
 | `no such host` | A typo in the endpoint, or the `REGION` placeholder from `env.example` is still there. |
 | Conversations appear, but Agent Observability's analytics panels stay empty | The analytics come from your stack's Prometheus and Tempo. Check that metrics and traces are arriving (step 5), and that Agent Observability's Configuration page uses your stack's `grafanacloud-<stack>-prom` and `grafanacloud-<stack>-traces` data sources. |
-| The game exits with `missing ...` or `env.example's REGION placeholder is still in ...` | `make play` sends telemetry, so every Grafana setting must be filled in; the error lists all that aren't. Fill them in, or play with `make play-local` (`--no-telemetry`). `make serve` and the k6 tests skip telemetry when none of the Grafana credentials are set. |
+| The game exits with `missing ...` or `env.example's REGION placeholder is still in ...` | `make play` sends telemetry, so every setting of a group you started filling in must be filled in; the error lists all that aren't. Fill them in, or play with `make play-local` (`--no-telemetry`). `make serve` and the k6 tests skip telemetry when none of the Grafana credentials are set. |
+| The game exits with `no telemetry is configured` | Telemetry is on by default. Fill in `.env`, play with `make play-local` (`--no-telemetry`), or see it locally with `make local-stack` and `make play-local-observed` ([`local-stack/`](../local-stack/README.md)). |
+| The game exits with `Agent Observability needs all of ...` | OTLP (`OTLP_ENDPOINT`, `OTLP_HEADERS`) and Agent Observability (`AGENTO11Y_ENDPOINT`, `GRAFANA_CLOUD_INSTANCE_ID`, `GRAFANA_CLOUD_API_KEY`) are independent, and either works alone, but each needs all of its values. |
 
 ## Keep your keys safe
 

@@ -1,0 +1,34 @@
+# A local Grafana, Tempo, Prometheus, and Loki in one container, with the
+# asimov dashboard already loaded. No account needed. From the repository
+# root:
+#
+#   make local-stack         # start it and wait until it's ready
+#   make local-stack-down    # stop it (add -volumes to forget the data)
+#
+# Everything is bound to localhost: Grafana on :3000 (anonymous admin, so
+# there's no login), OTLP on :4317 (gRPC) and :4318 (HTTP). The collector/
+# setup uses the same OTLP ports, so run one or the other.
+name: asimov-local-stack
+services:
+  lgtm:
+    # Pinned: update it deliberately, and recheck the dashboard when you do.
+    image: grafana/otel-lgtm:0.38.1
+    ports:
+      - "127.0.0.1:${ASIMOV_GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    volumes:
+      # Traces, metrics, logs, and Grafana's own state survive a restart.
+      - lgtm-data:/data
+      # The image provisions the Prometheus, Tempo, and Loki data sources
+      # (uids prometheus, tempo, and loki); these add the asimov dashboard.
+      - ./provisioning/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/asimov.yaml:ro
+      - ./dashboards:/var/lib/asimov/dashboards:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:3000/api/health && curl -s -o /dev/null http://localhost:4318/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+volumes:
+  lgtm-data:

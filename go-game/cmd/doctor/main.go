@@ -1,8 +1,9 @@
 // Command doctor checks the game's configuration end to end: that every
 // setting it needs is present and well formed, that the Anthropic key works,
-// and that Grafana Cloud accepts one test span, metric, log line, and
-// generation. It never prints a secret, only whether each one is set and
-// what the server said about it.
+// and that the OTLP endpoint (the local stack or Grafana Cloud) accepts one
+// test span, metric, and log line, and that Agent Observability, when set up,
+// accepts one generation. It never prints a secret, only whether each one is
+// set and what the server said about it.
 package main
 
 import (
@@ -70,15 +71,15 @@ func main() {
 	fmt.Println("\nAnthropic")
 	checkAnthropic(ctx, r)
 
-	fmt.Println("\nGrafana Cloud settings")
+	fmt.Println("\nTelemetry settings")
 	cfg := telemetry.FromEnv()
 	settingsOK := checkSettings(r, cfg)
 
-	if settingsOK {
+	if settingsOK && cfg.OTLPConfigured() {
 		if cfg.LocalCollector() {
-			fmt.Println("\nDelivery (sends one test item of each kind; OTLP goes to the local Collector)")
+			fmt.Println("\nOTLP delivery (sends one test item of each kind to the receiver on this machine)")
 		} else {
-			fmt.Println("\nGrafana Cloud delivery (sends one test item of each kind)")
+			fmt.Println("\nGrafana Cloud OTLP delivery (sends one test item of each kind)")
 		}
 		res := resource.NewSchemaless(attribute.String("service.name", telemetry.Service), attribute.String("service.version", cfg.Version))
 		report := func(signal, where string, err error) {
@@ -91,7 +92,15 @@ func main() {
 		report("trace", `Explore → Traces: service "`+telemetry.Service+`", span "setup.check"`, sendSpan(ctx, cfg, res))
 		report("metric", "Explore → Metrics: asimov_setup_check_total", sendMetric(ctx, cfg, res))
 		report("log", `Explore → Logs: service_name="`+telemetry.Service+`"`, sendLog(ctx, cfg, res))
-		report("generation", `Agent Observability → Conversations: "`+conversationTitle+`"`, sendGeneration(ctx, cfg))
+	}
+	if settingsOK && cfg.GenerationConfigured() {
+		fmt.Println("\nAgent Observability delivery (sends one test generation)")
+		err := sendGeneration(ctx, cfg)
+		if err != nil {
+			r.fail("generation rejected: %s", explain(err))
+		} else {
+			r.ok(`generation accepted (Agent Observability → Conversations: "` + conversationTitle + `")`)
+		}
 	}
 
 	fmt.Println()
@@ -128,8 +137,10 @@ func checkAnthropic(ctx context.Context, r *report) {
 	}
 }
 
-// checkSettings reports each Grafana Cloud setting as set or missing,
-// showing only endpoint hosts and never a token.
+// checkSettings reports each telemetry setting as set or missing, showing
+// only endpoint hosts and never a token. OTLP and Agent Observability are
+// independent: either alone is fine, and each must be complete once any of
+// its settings is present.
 func checkSettings(r *report, cfg telemetry.Config) bool {
 	ok := true
 	need := func(name, value string, show bool) {
@@ -143,26 +154,34 @@ func checkSettings(r *report, cfg telemetry.Config) bool {
 			r.ok("%s is set", name)
 		}
 	}
-	need("OTLP_ENDPOINT", hostOf(cfg.Endpoint), true)
-	if cfg.LocalCollector() {
-		r.ok("OTLP goes to a local Collector, which holds the Grafana Cloud credentials")
-	} else {
-		need("OTLP_HEADERS", cfg.Authorization, false)
-		if cfg.Authorization != "" {
-			checkOTLPHeaders(r, strings.TrimPrefix(cfg.Authorization, "Basic "))
+	if cfg.OTLPConfigured() {
+		need("OTLP_ENDPOINT", hostOf(cfg.Endpoint), true)
+		if cfg.LocalCollector() {
+			r.ok("OTLP goes to a receiver on this machine (the local stack or a Collector), which needs no credentials here")
+		} else {
+			need("OTLP_HEADERS", cfg.Authorization, false)
+			if cfg.Authorization != "" {
+				checkOTLPHeaders(r, strings.TrimPrefix(cfg.Authorization, "Basic "))
+			}
 		}
+	} else {
+		r.warn("OTLP_ENDPOINT is not set, so no traces, metrics, or logs are sent (make local-stack starts a local Grafana for them)")
 	}
-	need("AGENTO11Y_ENDPOINT", hostOf(cfg.GenerationEndpoint), true)
-	need("GRAFANA_CLOUD_INSTANCE_ID", cfg.Instance, true)
-	need("GRAFANA_CLOUD_API_KEY", cfg.Token, false)
+	if cfg.GenerationConfigured() {
+		need("AGENTO11Y_ENDPOINT", hostOf(cfg.GenerationEndpoint), true)
+		need("GRAFANA_CLOUD_INSTANCE_ID", cfg.Instance, true)
+		need("GRAFANA_CLOUD_API_KEY", cfg.Token, false)
+		if strings.TrimSpace(cfg.Token) != "" && !strings.HasPrefix(cfg.Token, "glc_") {
+			r.warn("GRAFANA_CLOUD_API_KEY doesn't start with glc_; Cloud Access Policy tokens usually do")
+		}
+	} else {
+		r.ok("Agent Observability is off (optional; it is a Grafana Cloud service): model calls still appear as spans with gen_ai.* attributes")
+	}
 	for name, endpoint := range map[string]string{"OTLP_ENDPOINT": cfg.Endpoint, "AGENTO11Y_ENDPOINT": cfg.GenerationEndpoint} {
 		if strings.Contains(endpoint, "REGION") {
 			r.fail("%s still has env.example's REGION placeholder; copy the real URL from Grafana Cloud", name)
 			ok = false
 		}
-	}
-	if strings.TrimSpace(cfg.Token) != "" && !strings.HasPrefix(cfg.Token, "glc_") {
-		r.warn("GRAFANA_CLOUD_API_KEY doesn't start with glc_; Cloud Access Policy tokens usually do")
 	}
 	if ok {
 		if err := cfg.Validate(); err != nil {
