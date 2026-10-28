@@ -5,9 +5,9 @@ traces, metrics, and logs in a Grafana on your own machine, with no account.
 Grafana Cloud adds Agent Observability, which is available only there.
 
 This guide takes you from no account to the game's conversations, traces,
-metrics, and logs in Grafana Cloud. The setup time depends on how familiar you are
-with the Grafana Cloud portal. The game sends two kinds of data, and each has
-its own endpoint:
+metrics, and logs in Grafana Cloud. The setup time depends on how familiar you
+are with the Grafana Cloud portal. The game sends two kinds of data, and each
+has its own endpoint:
 
 ```mermaid
 flowchart LR
