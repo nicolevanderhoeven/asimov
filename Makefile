@@ -22,7 +22,7 @@ ARGS ?=
 .DEFAULT_GOAL := help
 
 # The targets and their descriptions are listed by the runner: make help.
-TARGETS := play-offline play-local play serve doctor test unit smoke k6-graders k6-code k6-ai k6-trajectory k6-e2e k6
+TARGETS := play-offline play-local play serve doctor test unit smoke k6-graders k6-code k6-ai k6-trajectory k6-e2e k6-mock k6
 
 .PHONY: help $(TARGETS)
 help $(TARGETS):

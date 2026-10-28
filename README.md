@@ -115,7 +115,8 @@ rolled, a GM that breaks voice) and the k6 graders and judges catch them. The
 run ends with a summary of which tests caught something; a test marked
 `caught` crossed its thresholds, which is the point. The flaws are
 deterministic, so the same `MOCK_SEED` plants the same ones, and
-`MOCK_FLAWS=off make k6-mock` runs a clean game master. You can also play the
+`MOCK_FLAWS=off make k6-mock` (on Windows without make, `go run ./cmd/task k6-mock MOCK_FLAWS=off`)
+runs a clean game master. You can also play the
 mock yourself: `cd go-game && go run ./cmd/enterprise --llm mock --no-telemetry`.
 [`go-game/README.md`](go-game/README.md#the-mock-game-master) lists the flaws
 and how to set them. Mock turns are scripted, not creative: a real

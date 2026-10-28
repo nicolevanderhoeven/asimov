@@ -40,6 +40,7 @@ func run() error {
 	llm := flag.String("llm", "anthropic", "The game master's model: anthropic (needs ANTHROPIC_API_KEY), or mock (no key, no network: scripted GM that plants the demo's flaws). Defaults to $ASIMOV_LLM when set")
 	mockSeed := flag.Uint64("mock-seed", 1, "With --llm mock, the seed that decides which flaws appear: the same seed and conversation plant the same flaws. Defaults to $ASIMOV_MOCK_SEED when set")
 	mockFlaws := flag.String("mock-flaws", "", "With --llm mock, the chance of each planted flaw: default, off, or a list such as all=0.3,voice_break=0 (flaws: "+mockFlawNames()+"). Defaults to $ASIMOV_MOCK_FLAWS when set")
+	mockLatency := flag.Duration("mock-latency", 20*time.Millisecond, "With --llm mock, how long each model call takes, so latencies are steady instead of noise")
 	flag.Parse()
 	if err := dotenv.Load(*env); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read environment file: %w", err)
@@ -113,7 +114,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		mock := gm.NewMock(gm.MockConfig{Seed: *mockSeed, Rates: rates})
+		mock := gm.NewMock(gm.MockConfig{Seed: *mockSeed, Rates: rates, Latency: *mockLatency})
 		telemetryNote += " " + mock.Describe()
 		g.Model = gm.Wrap(mock, client, cfg.Version, diag)
 	} else if !*offline {

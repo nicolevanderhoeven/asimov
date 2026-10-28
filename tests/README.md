@@ -65,9 +65,11 @@ ones is luck of the seed: `test-code.js` plays only three prompts. The script
 itself fails only when a test can't run, or when flaws were planted and
 nothing caught any.
 
-Choose the flaws with environment variables:
+Choose the flaws with settings, given as arguments
+(`make k6-mock ARGS="MOCK_SEED=7"`, or `go run ./cmd/task k6-mock MOCK_SEED=7`)
+or as environment variables; an argument wins:
 
-| Variable | Meaning |
+| Setting | Meaning |
 | --- | --- |
 | `MOCK_SEED` | Which flaws appear. The same seed and conversation plant the same ones. Default 1. |
 | `MOCK_FLAWS` | The chance of each flaw: `default`, `off`, or a list such as `all=0.3,voice_break=0`. |
@@ -78,11 +80,14 @@ Choose the flaws with environment variables:
 pass. `test-trajectory.js` still reports `silent reroll` there: a combat round
 makes several `roll_dice` calls, and the test counts that whoever narrates.
 
-To run one test free, set `MOCK=1` on the script:
-`MOCK=1 scripts/k6.sh --summary-mode=full tests/test-trajectory.js`. It starts
-the mock judge on `127.0.0.1:8099` (`MOCK_JUDGE_ADDR`) and a mock-backed game
-server on `localhost:8081`, with output in `logs/`. The mock player and
-judges know the classic adventure, so leave `ASIMOV_SCENARIO` at `classic`.
+To run one test free, name its script:
+`go run ./cmd/task k6-mock tests/test-trajectory.js MOCK_SEED=3`. The
+task runner ([`cmd/task`](../cmd/task/mock.go)) starts the mock judge on
+`127.0.0.1:8099` (`MOCK_JUDGE_ADDR`) and a mock-backed game server on
+`localhost:8081`, with their output in `logs/`, and stops both afterwards. It
+works the same on Windows, macOS, and Linux. The mock player and judges know
+the classic adventure, so the run always plays `classic`, whatever `.env`
+says.
 A real `ANTHROPIC_API_KEY` stays the way to see the full experience: Claude's
 narration, rulings, and judgment are not scripted.
 
