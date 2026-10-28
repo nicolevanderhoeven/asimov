@@ -304,7 +304,7 @@ func (a *app) startServer(env environ, baseURL string, flags []string, sig <-cha
 	if u, err := url.Parse(baseURL); err == nil && u.Port() != "" {
 		addr = ":" + u.Port()
 	}
-	s, err := spawn(env, path, serverLog, append([]string{"--serve", "--addr", addr}, flags...)...)
+	s, err := spawn(env, path, serverLog, append([]string{"--serve", "--telemetry-if-configured", "--addr", addr}, flags...)...)
 	if err != nil {
 		return nil, err
 	}
