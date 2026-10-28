@@ -36,6 +36,10 @@ where each value comes from, and `go run ./cmd/doctor` checks them.
   auth. A plain-HTTP `OTLP_ENDPOINT` on localhost (a local Collector) needs no
   `OTLP_HEADERS`.
 - `ASIMOV_AGENT_VERSION`: optional, defaults to `go-experiment-v1`.
+- `ASIMOV_LLM`: optional, `anthropic` (the default) or `mock`, which needs no
+  `ANTHROPIC_API_KEY`; see [The mock game master](#the-mock-game-master). The
+  `--llm` flag overrides it, and `ASIMOV_MOCK_SEED` and `ASIMOV_MOCK_FLAWS`
+  (flags `--mock-seed` and `--mock-flaws`) set which flaws it plants.
 - `ASIMOV_SCENARIO`: optional, `classic` (the default) or `generated`; see
   [Scenarios](#scenarios). The `--scenario` flag overrides it.
 - `ASIMOV_ENDING_GUARD`: optional, off by default. `1` turns on the fix for
@@ -65,6 +69,84 @@ go run ./cmd/enterprise --offline
 
 The game does not save progress: every run starts a new adventure from scratch,
 and state lives only in memory until you quit.
+
+### The mock game master
+
+`--llm mock` (or `ASIMOV_LLM=mock`) replaces Claude with a game master that
+needs no API key and makes no network calls, so the whole testing and
+monitoring pipeline runs for free. It is a `provider.LanguageModel` in
+[`internal/gm`](internal/gm/mock.go), so it goes through the same
+instrumented client as Claude: with telemetry on, its generations, spans, and
+metrics flow exactly as real ones do, labelled `model=mock`. Add
+`--no-telemetry` to keep them local.
+
+```sh
+go run ./cmd/enterprise --llm mock --no-telemetry                    # play it
+go run ./cmd/enterprise --llm mock --no-telemetry --serve --addr :8080   # serve it to k6
+```
+
+It reads the same prompts a model would: the resolver gets the game's view
+(its legal actions and improvised effects) and picks the one tool call that
+matches the player's words by keyword; the narrator gets the engine result,
+makes the GM's `roll_dice` calls when the game waits on one, and narrates
+from templates. It is not a language model, so it understands only the
+phrasing the demo's players use ("I read the logs", "I go to sickbay and pull
+the biopatterns", "What is the Enterprise?"); anything else becomes a flavor
+improvisation.
+
+What makes it useful for testing is that it plants the demo's flaws **on
+demand**. A real model plants them only sometimes, so a newcomer may run the
+tests and see nothing caught; the mock plants each one at a chosen chance:
+
+| Flaw | What the mock does | Caught by |
+| --- | --- | --- |
+| `false_ending` (default 0.15) | Narrates the crew's return and the rescue while the engine's status is `playing`. | e2e judge, `asimov_no_false_ending` |
+| `false_kill` (0.25) | Narrates the drone (or what guards the cause) destroyed while the engine has it active. | e2e judge, `asimov_no_false_kill` |
+| `fabricated_roll` (0.2) | Narrates a die result no roll produced, on any turn, with or without a real roll. | trajectory grader (`fabrication`, `non-invocation`), `asimov_dice_fidelity` |
+| `silent_reroll` (0.4) | When the GM's roll is due, calls `roll_dice` three times and narrates one. | trajectory grader (`silent reroll`, `misapplied`) |
+| `skipped_roll` (0.25) | Never makes the GM's roll the game waits on, so the game skips it. | trajectory grader (`skipped`), `asimov_roll_ownership` |
+| `voice_break` (0.1) | Mentions the engine, HP, or armor class, or narrates Data in the third person. | e2e judge, `asimov_gm_voice` |
+| `refusal` (0.1) | Says "you can't do that" and that something is locked, instead of "yes, and". | e2e judge, `asimov_gm_voice` |
+| `missed_roll` (0.3) | Rules that a phaser attack or a tricorder bypass needs no roll. | ruling judge, `asimov_no_missed_roll` |
+
+A chance applies when the situation allows the flaw (`false_kill` needs an
+active drone; the roll flaws need a roll), and a narration gets at most one
+flaw, so each is easy to tell from the rest. The defaults are high enough
+that a short k6 run (the trajectory test and one e2e run) sees every flaw, and
+low enough that most turns are clean. The short tests can still
+come out green for one seed: `tests/test-code.js` plays three prompts.
+
+Set the chances with `--mock-flaws` or `ASIMOV_MOCK_FLAWS`: `default`, `off`
+(a clean game master), or a list such as `all=0.3,voice_break=0` or just
+`false_ending` (a bare name means 1). The flaws are **deterministic**: a
+flaw is decided from `--mock-seed` (or `ASIMOV_MOCK_SEED`, default 1) and the
+whole conversation so far, never from call order or the clock, so the same
+seed and the same conversation plant the same flaws. Dice are still random:
+the engine's rolls come from the system's random numbers, as always.
+
+### The mock judge
+
+The k6 scripts call Claude too: to write probes, to judge answers, to play
+the e2e player and persona, and to review the story. They all read an
+`ANTHROPIC_API_URL`, so a small local server can stand in for Claude:
+
+```sh
+go run ./cmd/mockjudge                      # listens on 127.0.0.1:8099
+ANTHROPIC_API_URL=http://127.0.0.1:8099/v1/messages ANTHROPIC_API_KEY=mock k6 run ../tests/test-ai.js
+```
+
+[`internal/mockjudge`](internal/mockjudge/server.go) speaks the subset of the
+Messages API the scripts use (`POST /v1/messages` with an `output_config`
+JSON schema, answering with one text block) and tells the roles apart by the
+schema's fields. Its judges reason from the transcript they are given, not
+from any marker the mock game master leaves behind: a flaw is caught because
+the narration contradicts the engine state beside it (a rescue narrated while
+the status is `playing`), the way a real judge would see it. The output-only
+judge in the trajectory test sees nothing but the reply, so it passes made-up
+dice, which is the contrast that test shows. The mock e2e player works through
+the classic adventure's steps and tries each intent its playthrough lists.
+`scripts/k6.sh` starts it for you with `MOCK=1`, and `make k6-mock` runs the
+whole suite; see [`../tests/README.md`](../tests/README.md#run-everything-free-with-the-mock-game-master-and-judge).
 
 ## Serve
 
