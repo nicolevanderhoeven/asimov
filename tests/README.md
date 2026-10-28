@@ -70,7 +70,7 @@ example `go run ./cmd/task k6-code`.
 | `make k6-ai` | [`test-ai.js`](test-ai.js): Claude varies the lore and role probes, and another Claude model grades the narration against facts fixed in the script. | 1–2 min | ~20 |
 | `make k6-trajectory` | [`test-trajectory.js`](test-trajectory.js): ten runs of a five-turn script, with every response graded on the path it took. See [Trajectory evals](../go-game/README.md#trajectory-evals). | a few min | ~200 |
 | `make k6-e2e` | [`test-e2e.js`](test-e2e.js): five whole playthroughs, played and graded by Claude against intents, each of which must rescue the crew. See [End-to-end conversations](#end-to-end-conversations). | 5–10 min | a few hundred |
-| `make test` | The same e2e test, starting new playthroughs for 30 minutes. Set `E2E_DURATION` for a different length, such as `make test E2E_DURATION=2h`. See the cost warning above. | 30 min, plus up to 15 min to finish | about a thousand |
+| `make test` | The same e2e test, starting new playthroughs for 30 minutes. Set `E2E_DURATION` for a different length, such as `make test E2E_DURATION=2h`. Needs its own limit, as in `make test K6_MAX_SPEND_USD=60`. See the cost warning above. | 30 min, plus up to 15 min to finish | about a thousand |
 
 If you set up the [online evaluators](../agento11y/README.md), they also make
 judge calls on every test's generations: the quality and resolution rules
