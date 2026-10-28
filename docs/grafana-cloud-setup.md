@@ -5,8 +5,9 @@ traces, metrics, and logs in a Grafana on your own machine, with no account.
 Grafana Cloud adds Agent Observability, which is available only there.
 
 This guide takes you from no account to the game's conversations, traces,
-metrics, and logs in Grafana Cloud. It takes about 15 minutes. The game
-sends two kinds of data, and each has its own endpoint:
+metrics, and logs in Grafana Cloud. The setup time depends on how familiar you are
+with the Grafana Cloud portal. The game sends two kinds of data, and each has
+its own endpoint:
 
 ```mermaid
 flowchart LR
@@ -28,8 +29,12 @@ mistake.
 ## 1. Create a stack and enable Agent Observability
 
 1. Sign up for [Grafana Cloud](https://grafana.com/auth/sign-up/create-user)
-   (the free tier is enough) or use an existing stack. You need the stack's
-   admin role.
+   or use an existing stack. You need the stack's admin role. A free stack
+   can work for trying this out. Its allowances, which include Agent
+   Observability generations, metrics series, and logs and traces volume, are
+   listed on the [pricing page](https://grafana.com/pricing/); at the time of
+   writing, Agent Observability is limited to 30k generations per month. Check
+   them against what you plan to run, since long k6 tests make many calls.
 2. In your stack, go to **Observability → Agent Observability**, review and
    accept the terms, and click **Save**.
 
