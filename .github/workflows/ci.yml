@@ -1,6 +1,7 @@
 # Checks that asimov builds and runs natively on Windows, macOS, and Linux.
 # Everything here works without credentials: nothing calls a model or sends
-# telemetry, and the workflow needs no credentials of any kind.
+# telemetry (the mock game master and judge run on localhost), and the
+# workflow needs no credentials of any kind.
 name: CI
 
 on:
@@ -52,6 +53,15 @@ jobs:
       - name: Offline play
         run: go run ./cmd/task smoke
 
+      # The whole testing pipeline with no key and no cost: a mock game master
+      # that plants the demo's flaws, and a mock judge for k6. The first run
+      # must catch the planted flaws, the second must pass with none planted.
+      - name: k6 against the mock game master and judge
+        run: go run ./cmd/task k6-mock
+
+      - name: k6 against a mock game master with no planted flaws
+        run: go run ./cmd/task k6-mock MOCK_FLAWS=off
+
       # The k6 runner starts the game server, loads .env, runs k6, and stops
       # the server again. The values here are placeholders, not credentials:
       # the server needs them to start, and never contacts the endpoints for
@@ -82,4 +92,4 @@ jobs:
 
       - name: Show the game server's log on failure
         if: failure()
-        run: cat logs/server.log || true
+        run: cat logs/server.log logs/mockjudge.log || true

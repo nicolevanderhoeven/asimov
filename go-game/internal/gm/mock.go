@@ -118,6 +118,11 @@ func ParseMockFlaws(spec string) (map[Flaw]float64, error) {
 type MockConfig struct {
 	Seed  uint64
 	Rates map[Flaw]float64
+	// Latency is how long each model call takes. A real model takes
+	// seconds; the mock answers in microseconds, which makes latency
+	// comparisons (and charts) noise, so the demo gives it a steady few
+	// milliseconds. Zero means no delay, as the unit tests want.
+	Latency time.Duration
 }
 
 // Mock is a game master model that needs no API key: it turns each player
@@ -227,6 +232,12 @@ func usageOf(p provider.CallOptions, r reply) provider.Usage {
 // respond answers one model call. The resolver is told apart from the
 // narrator by its tools, as a real model would be by its prompt.
 func (m *Mock) respond(ctx context.Context, p provider.CallOptions) (reply, error) {
+	if m.cfg.Latency > 0 {
+		select {
+		case <-time.After(m.cfg.Latency):
+		case <-ctx.Done():
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return reply{}, err
 	}

@@ -121,7 +121,8 @@ Set the chances with `--mock-flaws` or `ASIMOV_MOCK_FLAWS`: `default`, `off`
 `false_ending` (a bare name means 1). The flaws are **deterministic**: a
 flaw is decided from `--mock-seed` (or `ASIMOV_MOCK_SEED`, default 1) and the
 whole conversation so far, never from call order or the clock, so the same
-seed and the same conversation plant the same flaws. Dice are still random:
+seed and the same conversation plant the same flaws. Each call takes a steady
+20 ms (`--mock-latency`), so latency comparisons aren't noise. Dice are still random:
 the engine's rolls come from the system's random numbers, as always.
 
 ### The mock judge
@@ -145,8 +146,7 @@ the status is `playing`), the way a real judge would see it. The output-only
 judge in the trajectory test sees nothing but the reply, so it passes made-up
 dice, which is the contrast that test shows. The mock e2e player works through
 the classic adventure's steps and tries each intent its playthrough lists.
-`scripts/k6.sh` starts it for you with `MOCK=1`, and `make k6-mock` runs the
-whole suite; see [`../tests/README.md`](../tests/README.md#run-everything-free-with-the-mock-game-master-and-judge).
+The task runner starts it for you, and `make k6-mock` runs the whole suite; see [`../tests/README.md`](../tests/README.md#run-everything-free-with-the-mock-game-master-and-judge).
 
 ## Serve
 
