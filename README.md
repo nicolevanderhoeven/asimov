@@ -166,11 +166,13 @@ open <http://localhost:3000/d/asimov-local> (no login). You should see the
 actions you took, counts of rejected actions and improvisations, ratings per
 agent version, and a `game.turn` trace for each turn that opens in Tempo.
 
-![The asimov dashboard in local Grafana after four offline games](assets/local-grafana-dashboard.png)
+![The asimov dashboard in local Grafana after a live game with the AI game master, with data in the model-call panels](assets/local-grafana-dashboard-live.png)
 
-This screenshot comes from offline play, which makes no model calls, so the
-model-call panels (latency, tokens) are empty in it. They fill in when you play
-with an Anthropic key, as described next.
+This screenshot is from a short game with the AI game master, so the
+model-call panels (latency, tokens) have data. The `live-test-v1` series come
+from an earlier test run in the same stack. Offline play makes no model calls,
+so those panels stay empty until you play with an Anthropic key, as described
+next.
 
 With an Anthropic key in `.env`, `make play-local-observed` plays with the AI
 game master instead, and the model-call panels (latency, tokens) fill in:
