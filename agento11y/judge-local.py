@@ -330,6 +330,11 @@ def main():
             line += f"  {agree}/{len(both)} ({agree / max(len(both), 1):.0%}); online pass {sum(bool(r['online_passed']) for r in both)}/{len(both)}"
         print(line)
     errors = sum("error" in r for r in results)
+    if errors:
+        first = next(r["error"] for r in results if "error" in r)
+        print(f"\n{errors} judge calls failed; the first said: {first}", file=sys.stderr)
+        if "CERTIFICATE_VERIFY_FAILED" in first:
+            print("Python can't find CA certificates (a python.org install on macOS needs its 'Install Certificates.command' run once); or point SSL_CERT_FILE at a CA bundle, such as /etc/ssl/cert.pem.", file=sys.stderr)
     print(f"{'all':32} {total_pass:>4}/{total:<4} {total_pass / max(total, 1):7.1%}   ({errors} errors; {tokens[0]} input, {tokens[1]} output tokens)")
 
     if args.export and not args.calibrate:

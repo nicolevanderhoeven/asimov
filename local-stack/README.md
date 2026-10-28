@@ -30,10 +30,13 @@ key; the other checks don't need one).
 
 ![The asimov dashboard in local Grafana, after a few offline games under two agent versions: counts of actions, rejected actions, improvisations, and ratings; running totals; per-version bar gauges; tool-execution counts and latency; and the game.turn traces. The model-call panels are empty because these games used no AI game master.](../assets/local-grafana-dashboard.png)
 
-That screenshot is from a real run of `make play-offline-observed` (four short
-games under two `ASIMOV_AGENT_VERSION`s, rated good and bad), so the
-model-call panels (tokens, model-call latency) are empty: they fill in once
-you play with the AI game master. The dashboard,
+![The same dashboard after four turns with the AI game master: the model-call panels show streamText operations, latency, tokens, and a table of the seven model calls with their model, finish reason, and token counts.](../assets/local-grafana-dashboard-ai-gm.png)
+
+The first screenshot is from a real run of `make play-offline-observed` (four
+short games under two `ASIMOV_AGENT_VERSION`s, rated good and bad), so its
+model-call panels are empty. The second is from a real run of
+`make play-local-observed` (four scripted turns on `claude-sonnet-4-6`, rated
+good), where they fill in. The dashboard,
 [`dashboards/asimov.json`](dashboards/asimov.json), has:
 
 | Panel | Source |
@@ -42,7 +45,7 @@ you play with the AI game master. The dashboard,
 | Ratings and actions per agent version | the same counters, by `service_version` (set `ASIMOV_AGENT_VERSION` per variant, then rate games with `/rate good` or `/rate bad`) |
 | Operations, latency, tokens, and tool calls per model call | the `gen_ai_client_*` metrics the Agent Observability SDK records |
 | Recent turns | one `game.turn` trace per player turn, in Tempo; open one to see its dice events and model calls |
-| Recent model calls | spans with `gen_ai.operation.name="generateText"` and the standard `gen_ai.*` attributes |
+| Recent model calls | one span per model call (`gen_ai.operation.name` is `streamText`) with the standard `gen_ai.*` attributes: model, token counts, finish reason |
 | Logs | the game's logs in Loki, `{service_name="asimov-enterprise-go"}` |
 
 Grafana also has the three data sources (Prometheus, Tempo, and Loki, with

@@ -182,6 +182,10 @@ experiment.
    `judge-local.jsonl` (`--out` changes that). Every judge call costs about 1.4
    cents.
 
+If every call fails with `CERTIFICATE_VERIFY_FAILED`, Python can't find CA
+certificates: a python.org install on macOS needs its `Install Certificates.command`
+run once, or point `SSL_CERT_FILE` at a CA bundle (`/etc/ssl/cert.pem` on macOS).
+
 `--export` and `--calibrate` need Agent Observability and can't be combined
 with `--local`. A narration from a game played under one `ASIMOV_AGENT_VERSION`
 carries that version in each row, so you can compare versions by grouping the

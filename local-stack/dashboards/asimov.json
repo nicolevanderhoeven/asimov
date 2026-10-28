@@ -353,7 +353,8 @@
           "unit": "short",
           "decimals": 0,
           "noValue": "0",
-          "min": 0
+          "min": 0,
+          "displayName": "${__field.labels.service_version} ${__field.labels.rating} ${__field.labels.outcome}"
         },
         "overrides": []
       },
@@ -367,12 +368,14 @@
           ]
         },
         "valueMode": "color",
-        "minVizHeight": 12,
+        "minVizHeight": 16,
         "namePlacement": "top",
         "text": {
           "titleSize": 14,
           "valueSize": 26
-        }
+        },
+        "sizing": "manual",
+        "maxVizHeight": 36
       }
     },
     {
@@ -408,7 +411,8 @@
           "unit": "short",
           "decimals": 0,
           "noValue": "0",
-          "min": 0
+          "min": 0,
+          "displayName": "${__field.labels.service_version} ${__field.labels.rating} ${__field.labels.outcome}"
         },
         "overrides": []
       },
@@ -422,12 +426,14 @@
           ]
         },
         "valueMode": "color",
-        "minVizHeight": 12,
+        "minVizHeight": 16,
         "namePlacement": "top",
         "text": {
           "titleSize": 14,
           "valueSize": 26
-        }
+        },
+        "sizing": "manual",
+        "maxVizHeight": 36
       }
     },
     {
@@ -447,7 +453,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Operations, running total",
-      "description": "gen_ai_client_operation_duration count: model calls (generateText) and tool executions (execute_tool). Model calls need the AI game master (make play-local-observed).",
+      "description": "gen_ai_client_operation_duration count: model calls (the game streams them: streamText) and tool executions (execute_tool). Model calls need the AI game master (make play-local-observed).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -716,7 +722,7 @@
       "id": 17,
       "type": "table",
       "title": "Recent model calls",
-      "description": "Each generation is a span with the standard gen_ai.* attributes (model, token counts, finish reason), even without Agent Observability.",
+      "description": "One row per model call: a span with the standard gen_ai.* attributes (model, token counts, finish reason), even without Agent Observability. Click a trace ID to open it in Tempo.",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -735,9 +741,9 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"asimov-enterprise-go\" && span.gen_ai.operation.name = \"generateText\" } | select(span.gen_ai.request.model, span.gen_ai.usage.input_tokens, span.gen_ai.usage.output_tokens, span.gen_ai.response.finish_reasons)",
+          "query": "{ resource.service.name = \"asimov-enterprise-go\" && span.gen_ai.request.model != nil } | select(span.gen_ai.operation.name, span.gen_ai.request.model, span.gen_ai.usage.input_tokens, span.gen_ai.usage.output_tokens, span.gen_ai.response.finish_reasons)",
           "limit": 30,
-          "tableType": "traces"
+          "tableType": "spans"
         }
       ],
       "fieldConfig": {
