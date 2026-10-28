@@ -31,17 +31,19 @@ Robotics: Observability for AI" by Nicole van der Hoeven
 
 ## Quickstart: play in 2 minutes, no accounts
 
-You need either [Go](https://go.dev/dl/) 1.21 or newer (Go downloads the
-1.26.3 toolchain this project needs automatically) or
-[Docker](https://docs.docker.com/get-docker/). `make` comes with macOS and
-Linux; on Windows, use Docker, WSL, or the commands in each target of the
-[`Makefile`](Makefile).
+You need [Git](https://git-scm.com/downloads) and either
+[Go](https://go.dev/dl/) 1.21 or newer (Go downloads the 1.26.3 toolchain this
+project needs automatically) or [Docker](https://docs.docker.com/get-docker/).
+It runs natively on Windows, macOS, and Linux; the game and the k6 tests need no WSL or bash (the optional online-evaluator scripts in [`agento11y/`](agento11y/) do).
 
 ```sh
 git clone https://github.com/nicolevanderhoeven/asimov.git
 cd asimov
-make play-offline          # or: docker compose run --rm play --offline
+make play-offline                  # macOS and Linux
+go run ./cmd/task play-offline     # any OS, including Windows, without make
 ```
+
+Or with Docker: `docker compose run --rm play --offline`.
 
 Offline mode uses no API key, no LLM, and no network. Type `/actions` to see
 what you can do, then try `/do inspect logs`. Type `/help` for every command
@@ -52,12 +54,43 @@ Prefer not to install anything? Open the repository in
 [Dev Container](https://code.visualstudio.com/docs/devcontainers/containers):
 [`.devcontainer/`](.devcontainer/) sets up Go and k6 for you.
 
+## Set up your machine
+
+Everything runs from the repository root through one small Go program,
+[`cmd/task`](cmd/task). `make <target>` is a thin wrapper around
+`go run ./cmd/task <target>`, so on Windows, where `make` isn't usually
+installed, use the second form. Both do the same thing.
+
+| | Windows (PowerShell) | macOS | Linux |
+| --- | --- | --- | --- |
+| Go | `winget install GoLang.Go` | `brew install go` | [go.dev/dl](https://go.dev/dl/) or your package manager |
+| k6 (only for the k6 tests) | `winget install k6 --source winget` | `brew install k6` | [k6 install guide](https://grafana.com/docs/k6/latest/set-up/install-k6/) |
+| Run a target | `go run ./cmd/task unit` | `make unit` | `make unit` |
+| Create `.env` | `copy env.example .env` | `cp env.example .env` | `cp env.example .env` |
+
+Open a new terminal after installing so that `go` and `k6` are on your `PATH`.
+Running any target that needs `.env` creates it from `env.example` the first
+time. Edit it in a text editor and save it as UTF-8, not UTF-16 (Windows
+PowerShell's `>` writes UTF-16, which nothing can read).
+
+Check your install without any account or key:
+
+```sh
+go run ./cmd/task unit        # Go tests, about a minute the first time
+go run ./cmd/task smoke       # plays a scripted offline game
+go run ./cmd/task k6-graders  # needs k6; checks the trajectory graders
+```
+
+GitHub Actions runs the same credential-free checks on Windows, macOS, and
+Linux for every change.
+
 ## Play with the AI game master
 
-1. Create your settings file: `cp env.example .env`
+1. Create your settings file: `cp env.example .env` (`copy env.example .env`
+   on Windows)
 2. Put an [Anthropic API key](https://console.anthropic.com/settings/keys) in
    `.env` as `ANTHROPIC_API_KEY`.
-3. Run `make play-local`.
+3. Run `make play-local` (`go run ./cmd/task play-local` on Windows).
 
 Now you can type anything ("I read the operations log", "I splice my
 positronic net into the sensor buffer"), and the GM interprets it, rules on
@@ -90,7 +123,7 @@ This is the point of the demo. It takes about 15 minutes, and the
 | How the game, its rules, its HTTP API, and its instrumentation work | [`go-game/README.md`](go-game/README.md) |
 | Play a new scenario every game, built from modules, and compare how the GM does against the classic one | [`go-game/README.md#scenarios`](go-game/README.md#scenarios) |
 
-Run `make` on its own to list every shortcut:
+Run `make` (or `go run ./cmd/task`) on its own to list every shortcut:
 
 ```text
   play-offline     Play with no API key, LLM, or telemetry (exact /do commands only)
@@ -100,11 +133,13 @@ Run `make` on its own to list every shortcut:
   doctor           Check .env and send one test span, metric, log, and generation to Grafana Cloud
   test             The full e2e eval for E2E_DURATION (default 30m): costs about 40-60 USD per 30 min
   unit             Run the Go unit tests (no credentials needed)
+  smoke            Play a scripted offline game to check the install works (no credentials needed)
   k6-graders       Trajectory graders against fixed cases: about 1s, no server or API calls
   k6-code          Fixed prompts with code checks: under 1 min, ~10 model calls
   k6-ai            Varied probes judged by Claude: 1-2 min, ~20 model calls
   k6-trajectory    Dice trajectory evals: a few min, ~200 model calls
   k6-e2e           Five whole playthroughs: 5-10 min, a few hundred model calls
+  k6               Run any k6 script with .env, starting the game server if needed (arguments go to k6)
 ```
 
 ## How it fits together
@@ -124,7 +159,8 @@ signals go straight to Grafana Cloud; a Collector is optional.
 | [`agento11y/`](agento11y/) | Online evaluator and rule definitions |
 | [`collector/`](collector/) | Optional OpenTelemetry Collector setup |
 | [`docs/`](docs/) | The Grafana Cloud setup guide |
-| [`scripts/`](scripts/) | The k6 runner the `make k6-*` targets use |
+| [`cmd/task/`](cmd/task/) | The task runner behind every `make` target and the k6 runs; it works on Windows, macOS, and Linux |
+| [`.github/`](.github/) | CI: credential-free checks on all three operating systems |
 
 ### How calls are routed
 

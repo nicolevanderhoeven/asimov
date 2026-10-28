@@ -1,0 +1,85 @@
+# Checks that asimov builds and runs natively on Windows, macOS, and Linux.
+# Everything here works without credentials: nothing calls a model or sends
+# telemetry, and the workflow needs no credentials of any kind.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-game/go.mod
+          cache-dependency-path: go-game/go.sum
+
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Build the game and the task runner
+        run: |
+          go build ./...
+          cd go-game && go build ./...
+
+      # go vet and go test (with -race where the platform supports it).
+      - name: Unit tests
+        run: go run ./cmd/task unit
+
+      - name: k6 trajectory graders
+        run: go run ./cmd/task k6-graders
+
+      - name: Offline play
+        run: go run ./cmd/task smoke
+
+      # The k6 runner starts the game server, loads .env, runs k6, and stops
+      # the server again. The values here are placeholders, not credentials:
+      # the server needs them to start, and never contacts the endpoints for
+      # this check.
+      - name: k6 runner starts and stops the game server
+        run: |
+          printf '%s\r\n' \
+            'ANTHROPIC_API_KEY=not-a-real-key' \
+            'OTLP_ENDPOINT=http://localhost:4318' \
+            'AGENTO11Y_ENDPOINT=https://example.invalid' \
+            'GRAFANA_CLOUD_INSTANCE_ID=1' \
+            'GRAFANA_CLOUD_API_KEY=not-a-real-token' \
+            'CI_LIFECYCLE="quoted value" # a comment' > .env
+          go run ./cmd/task k6 .github/ci/lifecycle.js
+          rm .env
+
+      - name: make wraps the task runner
+        if: runner.os != 'Windows'
+        run: make smoke
+
+      - name: Docker Compose file is valid
+        run: |
+          if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
+            docker compose config --quiet
+          else
+            echo "Docker isn't available on this runner; skipping."
+          fi
+
+      - name: Show the game server's log on failure
+        if: failure()
+        run: cat logs/server.log || true

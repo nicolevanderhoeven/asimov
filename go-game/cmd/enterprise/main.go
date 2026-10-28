@@ -14,7 +14,7 @@ import (
 
 	"github.com/grafana/agento11y/go/agento11y"
 	"github.com/grafana/ai-sdk/providers/anthropic"
-	"github.com/joho/godotenv"
+	"github.com/nicolevanderhoeven/asimov/go-game/internal/dotenv"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/game"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/gm"
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/telemetry"
@@ -37,7 +37,7 @@ func run() error {
 	scenario := flag.String("scenario", "classic", "The adventure: classic, or generated (built from random modules). With --serve, the default for sessions that don't choose. Defaults to $ASIMOV_SCENARIO when set")
 	seed := flag.Uint64("seed", 0, "Replay the generated scenario with this seed; 0 picks a random one. Not used with --serve")
 	flag.Parse()
-	if err := godotenv.Load(*env); err != nil && !os.IsNotExist(err) {
+	if err := dotenv.Load(*env); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read environment file: %w", err)
 	}
 	// The flag wins; otherwise the environment, which .env may set.
