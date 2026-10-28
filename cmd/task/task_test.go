@@ -5,10 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -79,25 +78,26 @@ func TestEnvironSetDoesNotAliasTheOriginal(t *testing.T) {
 	}
 }
 
-// The Makefile lists the targets it forwards; they must match the runner's.
-func TestMakefileForwardsEveryTarget(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
-	if err != nil {
-		t.Fatal(err)
+// make is a thin wrapper: every runner target must dispatch to the runner.
+func TestMakeForwardsEveryTarget(t *testing.T) {
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("make is not on PATH")
 	}
-	m := regexp.MustCompile(`(?m)^TARGETS := (.*)$`).FindSubmatch(b)
-	if m == nil {
-		t.Fatal("no TARGETS line in the Makefile")
-	}
-	got := strings.Fields(string(m[1]))
-	var want []string
+	names := []string{"help"}
 	for _, tg := range targets() {
-		want = append(want, tg.name)
+		names = append(names, tg.name)
 	}
-	sort.Strings(got)
-	sort.Strings(want)
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Makefile targets %v, runner targets %v", got, want)
+	for _, name := range names {
+		cmd := exec.Command("make", "-n", name)
+		cmd.Dir = filepath.Join("..", "..")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Errorf("make -n %s: %v\n%s", name, err, out)
+			continue
+		}
+		if want := "go run ./cmd/task " + name; !strings.Contains(string(out), want) {
+			t.Errorf("make -n %s printed %q, want it to run %q", name, out, want)
+		}
 	}
 }
 
