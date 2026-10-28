@@ -6,6 +6,7 @@ import { gradeResponse } from './lib/trajectory-grader.js';
 import { finding, pendingCheck, rulingContext, rulingOf, rulingPrompt, rulingSchema, rulingThresholds, RULING_SYSTEM } from './lib/ruling-judge.js';
 import * as o11y from './lib/agento11y.js';
 import { gmModel } from './lib/gm-model.js';
+import { parseLimit, startSpend, useSpend, checkSpend, recordUsage, reportSpend } from './lib/spend.js';
 
 // Trajectory tests for the GM's dice, graded by the path each response took
 // rather than its prose. The GM decides when Data's checks need a roll
@@ -50,6 +51,9 @@ const VUS = parseInt(__ENV.VUS || '2', 10);
 // Player /roll responses allowed after one scripted input before giving up.
 const MAX_ROLLS = 6;
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const SPEND_LIMIT = parseLimit(__ENV.K6_MAX_SPEND_USD);
+// The trajectory test prints JSON lines only, so --console-output stays JSONL.
+const printSpend = (text) => console.log(JSON.stringify({ spend: text }));
 const SOURCE = { kind: 'k6', id: 'test-trajectory' };
 const RECORD_EXPERIMENT = o11y.configured && __ENV.TRAJ_EXPERIMENT !== '0';
 
@@ -136,8 +140,10 @@ const outputJudgeSchema = {
 };
 
 export function setup() {
-  if (!RECORD_EXPERIMENT) return { experimentID: null };
+  const spend = startSpend(BASE_URL, SPEND_LIMIT);
+  if (!RECORD_EXPERIMENT) return { experimentID: null, spend };
   return {
+    spend,
     experimentID: o11y.startExperiment(SOURCE, {
       name: `GM dice trajectory ${new Date().toISOString()}`,
       description: `${RUNS} runs of the ${SCRIPT.length}-turn script from tests/test-trajectory.js, graded on each response's roll_dice trajectory and, for contrast, by an output-only judge.`,
@@ -161,9 +167,11 @@ export function setup() {
 
 export function teardown(data) {
   if (data.experimentID) o11y.finishExperiment(SOURCE, data.experimentID);
+  reportSpend(data.spend, printSpend);
 }
 
 export default function (data) {
+  useSpend(data.spend, printSpend);
   const run = exec.scenario.iterationInTest + 1;
   const session = createSession();
   if (!session) {
@@ -186,6 +194,7 @@ function playTurn(data, run, session, n, step) {
   const graded = [];
   let input = step.input;
   for (let k = 0; k <= MAX_ROLLS; k++) {
+    checkSpend();
     const g = playStep(run, session, n, k, input);
     if (!g) break;
     graded.push(g);
@@ -359,9 +368,11 @@ function callClaude(model, system, content, schema, maxTokens, name) {
   };
   const headers = { ...JSON_HEADERS, 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01' };
   for (let attempt = 1; attempt <= 3; attempt++) {
+    checkSpend();
     const res = http.post(ANTHROPIC_URL, JSON.stringify(payload), { headers, tags: { name }, timeout: '60s' });
     if (res.status === 200) {
       const message = parseJSON(res);
+      recordUsage(name, model, message?.usage);
       // A reply cut off by max_tokens is incomplete JSON; retry with room.
       if (message?.stop_reason === 'max_tokens' && attempt < 3) {
         payload.max_tokens = Math.min(payload.max_tokens * 2, 4096);

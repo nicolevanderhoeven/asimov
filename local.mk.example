@@ -3,5 +3,9 @@
 # Run make test for two hours instead of 30 minutes: roughly $150-250.
 # E2E_DURATION = 2h
 
+# The spend limit in US dollars that make test must be given; every other k6
+# target defaults to 5. A value on the command line still wins.
+# K6_MAX_SPEND_USD = 60
+
 # Stream k6's results to Grafana Cloud k6 (run k6 cloud login once first).
 # K6_CLOUD = 1

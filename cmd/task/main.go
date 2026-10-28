@@ -74,7 +74,7 @@ func targets() []target {
 			}},
 		{"doctor", "Check .env and send one test span, metric, log, and generation to Grafana Cloud", true,
 			func(a *app, _ []string) error { return a.child("go-game", a.env, "go", "run", "./cmd/doctor") }},
-		{"test", "The full e2e eval for E2E_DURATION (default 30m): costs about 40-60 USD per 30 min", true,
+		{"test", "The full e2e eval for E2E_DURATION (default 30m), about 40-60 USD per 30 min: needs K6_MAX_SPEND_USD", true,
 			(*app).test},
 		{"unit", "Run the Go unit tests (no credentials needed)", false,
 			func(a *app, _ []string) error { return a.unit() }},
@@ -86,6 +86,13 @@ func targets() []target {
 					return err
 				}
 				return a.child(".", a.env, "k6", append([]string{"run", "tests/test-trajectory-graders.js"}, args...)...)
+			}},
+		{"k6-spend", "The spend limit's logic: about 1s, no server or API calls", false,
+			func(a *app, args []string) error {
+				if err := needK6(); err != nil {
+					return err
+				}
+				return a.child(".", a.env, "k6", append([]string{"run", "tests/test-spend.js"}, args...)...)
 			}},
 		{"k6-code", "Fixed prompts with code checks: under 1 min, ~10 model calls", true,
 			k6Target("tests/test-code.js")},
@@ -183,13 +190,16 @@ func useColor() bool {
 
 // test is the long e2e eval: the k6 e2e test, started afresh for
 // E2E_DURATION. Settings may be given as arguments, such as E2E_DURATION=10m
-// or K6_CLOUD=1, or in the environment; an argument wins.
+// or K6_CLOUD=1, or in the environment; an argument wins. It has no default
+// spend limit: K6_MAX_SPEND_USD must be given, as an argument or in the
+// shell or .env, so the run never costs money by accident.
 func (a *app) test(args []string) error {
 	duration, _ := a.env.Get("E2E_DURATION")
 	if duration == "" {
 		duration = defaultE2EDuration
 	}
 	cloud := ""
+	limit, _ := a.env.Get("K6_MAX_SPEND_USD")
 	for _, arg := range args {
 		name, value, _ := strings.Cut(arg, "=")
 		switch name {
@@ -199,15 +209,29 @@ func (a *app) test(args []string) error {
 			}
 		case "K6_CLOUD":
 			cloud = value
+		case "K6_MAX_SPEND_USD":
+			if value != "" {
+				limit = value
+			}
 		default:
-			return fmt.Errorf("test takes E2E_DURATION=... and K6_CLOUD=..., not %q", arg)
+			return fmt.Errorf("test takes E2E_DURATION=..., K6_MAX_SPEND_USD=... and K6_CLOUD=..., not %q", arg)
 		}
 	}
+	if limit == "" {
+		if dotenv, err := a.env.withDotEnv(".env"); err == nil {
+			limit, _ = dotenv.Get("K6_MAX_SPEND_USD")
+		}
+	}
+	if limit == "" {
+		return errors.New("test costs real money and needs its own spend limit in US dollars, for example:\n  make test K6_MAX_SPEND_USD=60\n(about $40-60 per 30 minutes; the run stops when it reaches the limit)")
+	}
+	a.override = a.override.Set("K6_MAX_SPEND_USD", limit)
 	if cloud != "" {
 		a.override = a.override.Set("K6_CLOUD", cloud)
 	}
 	fmt.Fprintf(a.stdout, "test plays e2e playthroughs for %s, plus up to 15 min to finish.\n", duration)
 	fmt.Fprintln(a.stdout, "It costs real Anthropic credits: roughly $40-60 per 30 minutes. Ctrl-C now to stop.")
+	fmt.Fprintf(a.stdout, "It stops at K6_MAX_SPEND_USD, now $%s.\n", limit)
 	time.Sleep(5 * time.Second)
 	return a.k6([]string{"-e", "E2E_DURATION=" + duration, "tests/test-e2e.js"})
 }

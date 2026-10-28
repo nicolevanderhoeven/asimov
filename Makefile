@@ -12,9 +12,13 @@ TASK := go run ./cmd/task
 # roughly $40-60 in Anthropic calls; a command-line value wins over local.mk,
 # as in make test E2E_DURATION=10m. The default is in the task runner.
 E2E_DURATION ?=
+# Every k6 target stops at K6_MAX_SPEND_USD of Anthropic spend (default 5, see
+# tests/README.md). make test has no default: it must be given a limit, as in
+# make test K6_MAX_SPEND_USD=60.
+K6_MAX_SPEND_USD ?=
 # K6_CLOUD=1 streams k6's results to Grafana Cloud k6 (after k6 cloud login).
 K6_CLOUD ?=
-export E2E_DURATION K6_CLOUD
+export E2E_DURATION K6_CLOUD K6_MAX_SPEND_USD
 # Extra arguments for the game or for k6, as in
 # make k6 ARGS="-e RUNS=50 tests/test-trajectory.js"
 ARGS ?=
@@ -28,7 +32,7 @@ export SERVE_ADDR
 .DEFAULT_GOAL := help
 
 # The targets and their descriptions are listed by the runner: make help.
-TARGETS := play-offline play-local play serve doctor test unit smoke k6-graders k6-code k6-ai k6-trajectory k6-e2e k6-mock k6
+TARGETS := play-offline play-local play serve doctor test unit smoke k6-graders k6-spend k6-code k6-ai k6-trajectory k6-e2e k6-mock k6
 
 .PHONY: help $(TARGETS)
 help $(TARGETS):

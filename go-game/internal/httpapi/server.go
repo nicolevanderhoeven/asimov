@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/nicolevanderhoeven/asimov/go-game/internal/gm"
+	"github.com/nicolevanderhoeven/asimov/go-game/internal/spend"
 )
 
 // Server adapts gm.GM and a per-session Store to HTTP. offline mirrors
@@ -18,10 +19,13 @@ type Server struct {
 	// DefaultScenario is the scenario a new session plays when its request
 	// doesn't name one: "classic" (the default) or "generated".
 	DefaultScenario string
+	// Spend is the ledger behind GET and POST /spend: the GM's model calls
+	// land in it through spend.Meter, and the k6 scripts add their own.
+	Spend *spend.Ledger
 }
 
 func NewServer(g *gm.GM, store *Store, logger *slog.Logger, offline bool) *Server {
-	return &Server{gm: g, store: store, logger: logger, offline: offline}
+	return &Server{gm: g, store: store, logger: logger, offline: offline, Spend: spend.NewLedger()}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -33,5 +37,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /session/{id}/resolve", s.handleResolve)
 	mux.HandleFunc("POST /session/{id}/roll", s.handleRoll)
 	mux.HandleFunc("POST /session/{id}/improvise", s.handleImprovise)
+	mux.HandleFunc("GET /spend", s.handleGetSpend)
+	mux.HandleFunc("POST /spend", s.handleAddSpend)
 	return mux
 }

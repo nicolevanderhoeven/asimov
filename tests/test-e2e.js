@@ -5,6 +5,7 @@ import { check, group, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 import * as o11y from './lib/agento11y.js';
 import { gmModel } from './lib/gm-model.js';
+import { parseLimit, startSpend, useSpend, checkSpend, recordUsage, reportSpend } from './lib/spend.js';
 import { describeFindings, gradeResponse } from './lib/trajectory-grader.js';
 import { finding, pendingCheck, rulingContext, rulingOf, rulingPrompt, rulingSchema, rulingThresholds, RULING_SYSTEM } from './lib/ruling-judge.js';
 
@@ -33,6 +34,9 @@ const JUDGE_MODEL = __ENV.JUDGE_MODEL || 'claude-opus-5-5';
 const RULING_JUDGE_MODEL = __ENV.RULING_JUDGE_MODEL || 'claude-opus-5-5';
 const STORY_JUDGE_MODEL = __ENV.STORY_JUDGE_MODEL || JUDGE_MODEL;
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+// E2E_DURATION keeps the run spending for that long (make test), so it must
+// come with a limit of its own; the other runs default to $5.
+const SPEND_LIMIT = parseLimit(__ENV.K6_MAX_SPEND_USD, { explicitRequired: !!__ENV.E2E_DURATION });
 const MAX_HP = 24;
 // Which adventure every playthrough plays: classic (the original, fixed
 // scenario) or generated (a new scenario built from modules for each
@@ -232,6 +236,7 @@ const PLAYTHROUGHS = {
 
 export function setup() {
   return {
+    spend: startSpend(BASE_URL, SPEND_LIMIT),
     experimentID: RECORD_EXPERIMENT ? o11y.startExperiment(SOURCE, {
       name: `Silent Enterprise e2e (${SCENARIO_MODE}) ${new Date().toISOString()}`,
       description: 'Whole-conversation playthroughs of The Silent Enterprise from tests/test-e2e.js: guided, adversarial, and cooperative Claude players, graded by a Claude judge against each playthrough\'s intents.',
@@ -258,6 +263,7 @@ export function setup() {
 
 export function teardown(data) {
   if (data.experimentID) o11y.finishExperiment(SOURCE, data.experimentID);
+  reportSpend(data.spend);
 }
 
 // directed plays the guided and then the adversarial playthrough.
@@ -272,6 +278,7 @@ export function cooperative(data) {
 }
 
 function playthrough(spec, data, attempt) {
+  useSpend(data.spend);
   const run = play(spec);
   if (!run) return;
   publish(run, judge(run), judgeStory(run), data.experimentID, attempt);
@@ -986,6 +993,7 @@ function callClaude(model, system, messages, schema, maxTokens, name) {
     'anthropic-version': '2023-06-01',
   };
   for (let attempt = 1; attempt <= 3; attempt++) {
+    checkSpend();
     const res = http.post(ANTHROPIC_URL, JSON.stringify(payload), {
       headers,
       tags: { name },
@@ -994,6 +1002,7 @@ function callClaude(model, system, messages, schema, maxTokens, name) {
     });
     if (res.status === 200) {
       const message = parseJSON(res);
+      recordUsage(name, model, message?.usage);
       if (message?.stop_reason === 'max_tokens' && attempt < 3) {
         payload.max_tokens = Math.min(payload.max_tokens * 2, 8192);
         continue;

@@ -201,3 +201,21 @@ func TestTail(t *testing.T) {
 		t.Errorf("tail of a missing file = %q", got)
 	}
 }
+
+func TestTestTargetNeedsASpendLimit(t *testing.T) {
+	wd, _ := os.Getwd()
+	defer os.Chdir(wd)
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	err := a.test([]string{"E2E_DURATION=1m"})
+	if err == nil || !strings.Contains(err.Error(), "K6_MAX_SPEND_USD=60") {
+		t.Errorf("test without a limit = %v, want an error that shows how to give one", err)
+	}
+	// An empty value, as make exports for an unset variable, is no limit.
+	a.env = environ{"K6_MAX_SPEND_USD="}
+	if err := a.test(nil); err == nil {
+		t.Error("an empty K6_MAX_SPEND_USD should not count as a limit")
+	}
+}
