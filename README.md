@@ -137,9 +137,10 @@ To play with the AI game master, create `.env` with `cp env.example .env`
 
 `docker compose run --rm tasks <target>` runs the same task runner as
 `make <target>` inside a container that has Go and k6, so it also runs
-`k6-graders` and `k6-spend`. The targets that call Claude (`k6-code` and the
-other paid ones) need `.env` and an Anthropic key, and spend real money; see
-the spending limit under [Go further](#go-further).
+`k6-graders` and `k6-spend`. The `tasks` container cannot see `.env`, so the
+targets that call Claude (`k6-code` and the other paid ones) are not supported
+through it; use the Go path for those, and see the spending limit under
+[Go further](#go-further).
 
 For the local Grafana stack, start it, then play against it:
 
