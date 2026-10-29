@@ -35,11 +35,11 @@ Pick the paths you want; each row lists only what that path adds.
 
 | Path | Tools | Accounts and keys | Disk |
 | --- | --- | --- | --- |
-| Offline play (`make play-offline`) | Go 1.21 or newer (it downloads the 1.26.3 toolchain), or Docker | None | See the Go caches below |
-| Unit tests (`make unit`) | Go, as above | None | See the Go caches below |
-| Mock tests (`make k6-mock`) | Go, plus [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) (CI uses the latest release) | None | See the Go caches below |
-| AI game master (`make play-local`, the paid k6 tests) | Go | An [Anthropic API key](https://console.anthropic.com/settings/keys) with access to the models below | See the Go caches below |
-| Local monitoring (`make local-stack`) | [Docker](https://docs.docker.com/get-docker/) with Compose (the stack is the `grafana/otel-lgtm:0.38.1` image) | None; add an Anthropic key for the model-call panels | The image and its `lgtm-data` volume (not measured) |
+| Offline play (`make play-offline`) | Go 1.21 or newer (it downloads the 1.26.3 toolchain), or Docker ([Docker only](#quickstart-with-docker-only)) | None | See the Go caches below, or about 70 MB for the Docker image |
+| Unit tests (`make unit`) | Go, as above, or Docker | None | See the Go caches below, or about 1.6 GB for the Docker tools image |
+| Mock tests (`make k6-mock`) | Go, plus [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) (CI uses the latest release), or Docker, which has both | None | See the Go caches below, or about 1.6 GB for the Docker tools image |
+| AI game master (`make play-local`, the paid k6 tests) | Go, or Docker for playing (not for the paid k6 tests) | An [Anthropic API key](https://console.anthropic.com/settings/keys) with access to the models below | See the Go caches below |
+| Local monitoring (`make local-stack`) | [Docker](https://docs.docker.com/get-docker/) with Compose (the stack is the `grafana/otel-lgtm:0.38.1` image) | None; add an Anthropic key for the model-call panels | The image (about 2.6 GB) and its `lgtm-data` volume (not measured) |
 | Grafana Cloud (`make play`) | Go | A Grafana Cloud stack with Agent Observability, and an Anthropic key | None locally |
 | Online evaluators ([`agento11y/`](agento11y/README.md)) | [`gcx`](https://github.com/grafana/gcx#installing-gcx) and [`yq`](https://github.com/mikefarah/yq#install) (install with the commands in their official documentation; the judge-local script also needs Python 3) | A Grafana Cloud stack, or an Anthropic key for local judging | None |
 
@@ -72,7 +72,8 @@ make play-offline                  # macOS and Linux
 go run ./cmd/task play-offline     # any OS, including Windows, without make
 ```
 
-Or with Docker: `docker compose run --rm play --offline`.
+Or with only Docker, no Go: `docker compose run --rm play --offline`. See
+[Quickstart with Docker only](#quickstart-with-docker-only) for the rest.
 
 Offline mode uses no API key, no LLM, and no network. Type `/actions` to see
 what you can do, then try `/do inspect logs`. Type `/help` for every command
@@ -103,6 +104,65 @@ check it against `checksums.txt` on the same page. Each archive holds:
 
 Releases hold only the game. The task runner, the k6 tests, and the local
 Grafana stack need a checkout of the repository.
+
+## Quickstart with Docker only
+
+If you have Docker but don't want to install Go, everything below runs in
+containers. You need [Git](https://git-scm.com/downloads) and
+[Docker](https://docs.docker.com/get-docker/) with Compose v2 (Docker Desktop
+includes it); nothing else, and no account. The first command that uses an
+image builds it, which takes a few minutes; later runs start at once.
+
+```sh
+git clone https://github.com/nicolevanderhoeven/asimov.git
+cd asimov
+```
+
+Run these from the repository root. They work the same in PowerShell, `cmd`,
+and a Unix shell.
+
+| To do this | Run |
+| --- | --- |
+| Play offline, with no key and no network | `docker compose run --rm play --offline` |
+| Check the install (unit tests, then a scripted game) | `docker compose run --rm tasks unit`<br>`docker compose run --rm tasks smoke` |
+| Run every k6 test against the mock GM and judge, free | `docker compose run --rm tasks k6-mock` |
+| The same with a clean GM (no planted flaws) | `docker compose run --rm tasks k6-mock MOCK_FLAWS=off` |
+| Play with the AI game master | `docker compose run --rm play --no-telemetry` (after the key steps below) |
+
+To play with the AI game master, create `.env` with `cp env.example .env`
+(`copy env.example .env` in PowerShell), put your
+[Anthropic API key](https://console.anthropic.com/settings/keys) in it as
+`ANTHROPIC_API_KEY`, and run the last command above. The container reads
+`.env` when it starts; the file is never copied into an image.
+
+`docker compose run --rm tasks <target>` runs the same task runner as
+`make <target>` inside a container that has Go and k6, so it also runs
+`k6-graders` and `k6-spend`. The `tasks` container cannot see `.env`, so the
+targets that call Claude (`k6-code` and the other paid ones) are not supported
+through it; use the Go path for those, and see the spending limit under
+[Go further](#go-further).
+
+For the local Grafana stack, start it, then play against it:
+
+```sh
+docker compose -f local-stack/compose.yaml up -d --wait
+docker compose run --rm play-observed --offline --telemetry     # no key needed
+docker compose run --rm play-observed                           # the AI GM; needs the key in .env
+```
+
+Play a few turns (`/do inspect logs`, `/do move sickbay`, `/rate good`), then
+open <http://localhost:3000/d/asimov-local> (no login); see
+[the monitoring section](#see-the-monitoring-locally-no-account) for what to
+expect. `play-observed` joins the stack's network and sends it telemetry
+whatever `.env` says about Grafana Cloud. Stop the stack with
+`docker compose -f local-stack/compose.yaml down`; add `-v` to forget its data.
+
+What the Docker path doesn't do: the `make` shortcuts, the online-evaluator
+scripts in [`agento11y/`](agento11y/README.md) (they need `gcx`, `yq`, and
+Python on your machine), and sending telemetry to Grafana Cloud, which works
+(fill in `.env` as in [the setup guide](docs/grafana-cloud-setup.md) and run
+`docker compose run --rm play`) but has no `make doctor` equivalent beyond
+`docker compose run --rm --entrypoint doctor play`.
 
 ## Set up your machine
 

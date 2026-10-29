@@ -1,0 +1,12 @@
+# The task runner (cmd/task) with Go and k6, for running the checks and the
+# free mock test suite without installing either. See compose.yaml at the
+# repository root: docker compose run --rm tasks k6-mock
+FROM grafana/k6:1.4.2 AS k6
+
+FROM golang:1.26.3
+COPY --from=k6 /usr/bin/k6 /usr/local/bin/k6
+WORKDIR /repo
+COPY go-game/go.mod go-game/go.sum go-game/
+RUN cd go-game && go mod download
+COPY . .
+ENTRYPOINT ["go", "run", "./cmd/task"]

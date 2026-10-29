@@ -165,17 +165,20 @@ func validEndpoint(endpoint string, allowHTTP bool) bool {
 
 // LocalCollector reports whether OTLP goes to a plain-HTTP receiver on this
 // machine (a Collector, or the local stack) rather than straight to Grafana
-// Cloud.
+// Cloud. A host name with no dot, such as the lgtm service of the local stack
+// when the game runs in a container beside it, counts: it can only name a
+// machine on the local network, never a public one.
 func (c Config) LocalCollector() bool {
 	u, err := url.Parse(c.Endpoint)
 	if err != nil || u.Scheme != "http" {
 		return false
 	}
-	switch u.Hostname() {
-	case "localhost", "127.0.0.1", "::1":
+	switch host := u.Hostname(); {
+	case host == "localhost", host == "127.0.0.1", host == "::1":
 		return true
+	default:
+		return host != "" && !strings.Contains(host, ".") && !strings.Contains(host, ":")
 	}
-	return false
 }
 
 // GenerationConfig is the agento11y client configuration for c: generation
