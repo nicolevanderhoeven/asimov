@@ -41,7 +41,7 @@ make k6-mock
 It runs every test below in turn, with the game server on its mock game
 master (`--llm mock`) and a local mock judge standing in for Claude behind
 `ANTHROPIC_API_URL`: the probe generator, every judge, the e2e player and its
-persona, and the story critic. It takes about 30 seconds, and needs only Go
+persona, and the story critic. It takes about 1 minute, and needs only Go
 and k6, so it suits CI.
 [`go-game/README.md`](../go-game/README.md#the-mock-game-master) explains
 both mocks.
