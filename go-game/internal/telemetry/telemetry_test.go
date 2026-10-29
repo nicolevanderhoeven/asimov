@@ -51,7 +51,7 @@ func TestRejectInsecureEndpoint(t *testing.T) {
 	}
 }
 func TestLocalCollectorNeedsNoOTLPAuth(t *testing.T) {
-	for _, endpoint := range []string{"http://localhost:4318", "http://127.0.0.1:4318", "http://[::1]:4318"} {
+	for _, endpoint := range []string{"http://localhost:4318", "http://127.0.0.1:4318", "http://[::1]:4318", "http://lgtm:4318"} {
 		c := Config{Endpoint: endpoint, GenerationEndpoint: "https://example.com/export", Instance: "test", Token: "test"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("%s: %v", endpoint, err)
@@ -62,6 +62,11 @@ func TestLocalCollectorNeedsNoOTLPAuth(t *testing.T) {
 	}
 	if (Config{Endpoint: "https://example.com/otlp", GenerationEndpoint: "https://example.com/export", Instance: "test", Token: "test"}).Validate() == nil {
 		t.Fatal("missing OTLP_HEADERS accepted for Grafana Cloud")
+	}
+	for _, endpoint := range []string{"https://lgtm:4318", "http://otlp.example.com:4318", "http://203.0.113.5:4318"} {
+		if (Config{Endpoint: endpoint}).LocalCollector() {
+			t.Fatalf("%s counted as a local collector", endpoint)
+		}
 	}
 }
 func TestRatingsUseTheAPIEndpoint(t *testing.T) {

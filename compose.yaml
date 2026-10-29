@@ -5,6 +5,15 @@
 #   docker compose run --rm play --offline          # play in the terminal, no keys needed
 #   docker compose run --rm play                    # play with the AI GM and telemetry
 #   docker compose run --rm --entrypoint doctor play  # check your .env
+#
+# The checks and the free mock tests run in a container too (Go and k6 inside):
+#   docker compose run --rm tasks k6-mock           # every k6 test against the mock GM and judge
+#   docker compose run --rm tasks unit              # any task from `make`, such as smoke
+#
+# To send telemetry to the local Grafana stack, start it first
+# (docker compose -f local-stack/compose.yaml up -d --wait), then:
+#   docker compose run --rm play-observed --offline --telemetry
+#   docker compose run --rm play-observed           # the AI GM; needs ANTHROPIC_API_KEY
 x-game: &game
   build: ./go-game
   image: asimov-enterprise
@@ -27,3 +36,34 @@ services:
     profiles: [play]
     stdin_open: true
     tty: true
+  # Plays against the local Grafana stack (local-stack/compose.yaml), which
+  # must be running. Like the make targets of the same kind, it sends
+  # telemetry there and blanks every Grafana Cloud setting, whatever .env says.
+  play-observed:
+    <<: *game
+    profiles: [play]
+    stdin_open: true
+    tty: true
+    environment:
+      OTLP_ENDPOINT: http://lgtm:4318
+      OTLP_HEADERS: ""
+      AGENTO11Y_ENDPOINT: ""
+      AGENTO11Y_API_ENDPOINT: ""
+      GRAFANA_CLOUD_SIGIL_ENDPOINT: ""
+      GRAFANA_CLOUD_INSTANCE_ID: ""
+      GRAFANA_CLOUD_INSTANCE: ""
+      GRAFANA_CLOUD_API_KEY: ""
+    networks:
+      - local-stack
+  # The task runner with Go and k6, so the checks and the free mock tests need
+  # nothing installed but Docker: docker compose run --rm tasks <target>.
+  tasks:
+    build:
+      context: .
+      dockerfile: Dockerfile.tasks
+    image: asimov-tasks
+    profiles: [tasks]
+networks:
+  local-stack:
+    name: asimov-local-stack_default
+    external: true

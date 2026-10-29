@@ -1,0 +1,9 @@
+.env
+.env.*
+!env.example
+.git
+logs
+local.mk
+go-game/enterprise
+go-game/mockjudge
+go-game/.enterprise-save*
