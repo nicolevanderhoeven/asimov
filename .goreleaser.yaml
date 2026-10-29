@@ -1,0 +1,54 @@
+# Builds the game and its setup checker for Windows, macOS, and Linux when a
+# v* tag is pushed. See .github/workflows/release.yml. To check this file
+# without publishing anything: goreleaser release --snapshot --clean
+version: 2
+
+# The game is its own Go module, so the builds run from go-game.
+builds:
+  - id: enterprise
+    dir: go-game
+    main: ./cmd/enterprise
+    binary: enterprise
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: [-s, -w]
+  - id: doctor
+    dir: go-game
+    main: ./cmd/doctor
+    binary: doctor
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: [-s, -w]
+
+# One archive per platform holding both programs.
+archives:
+  - id: asimov
+    ids: [enterprise, doctor]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "asimov_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - src: go-game/README.md
+        dst: README.md
+      - src: env.example
+        dst: env.example
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: github-native
+
+release:
+  # A tag like v1.0.0-rc.1 is marked as a pre-release.
+  prerelease: auto
