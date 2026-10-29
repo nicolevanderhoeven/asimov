@@ -316,7 +316,8 @@ func (a *app) startServer(env environ, baseURL string, flags []string, sig <-cha
 		select {
 		case <-s.done:
 			s.log.Close()
-			return nil, fmt.Errorf("The game server exited; see %s:\n%s", serverLog, tail(serverLog, 5))
+			out := tail(serverLog, 5)
+			return nil, fmt.Errorf("The game server exited; see %s:\n%s%s", serverLog, out, noKeyHint(out))
 		case <-sig:
 			s.stop()
 			return nil, exitError{130}
@@ -325,6 +326,15 @@ func (a *app) startServer(env environ, baseURL string, flags []string, sig <-cha
 	}
 	s.stop()
 	return nil, fmt.Errorf("The game server didn't start within 30s; see %s.", serverLog)
+}
+
+// noKeyHint suggests the free mock tests when a game server's log says it
+// has no Anthropic key.
+func noKeyHint(serverOutput string) string {
+	if strings.Contains(serverOutput, "ANTHROPIC_API_KEY is required") {
+		return "\nNo key? make k6-mock runs the same tests for free."
+	}
+	return ""
 }
 
 // stop shuts the server down: Ctrl-C where that can be sent, so it flushes

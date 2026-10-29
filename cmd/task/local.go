@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // localStackCompose is the Compose file of the local Grafana stack.
@@ -59,16 +62,41 @@ func (a *app) localStack() error {
 	if err := needDocker(); err != nil {
 		return err
 	}
-	if err := a.child(".", a.env, "docker", "compose", "-f", localStackCompose, "up", "-d", "--wait"); err != nil {
-		return err
-	}
 	port, _ := a.env.Get("ASIMOV_GRAFANA_PORT")
 	if port == "" {
 		port = "3000"
 	}
+	// Docker's own error goes to the terminal as before; a copy is kept to
+	// recognize a port that is taken.
+	var docker bytes.Buffer
+	up := *a
+	up.stderr = io.MultiWriter(a.stderr, &docker)
+	if err := up.child(".", a.env, "docker", "compose", "-f", localStackCompose, "up", "-d", "--wait"); err != nil {
+		if hint := portHint(docker.String(), port); hint != "" {
+			fmt.Fprintln(a.stderr, hint)
+		}
+		return err
+	}
 	fmt.Fprintf(a.stdout, "Grafana: http://localhost:%s/d/asimov-local (no login).\n", port)
 	fmt.Fprintln(a.stdout, "Now play with: make play-offline-observed (no API key) or make play-local-observed (AI game master).")
 	return nil
+}
+
+// portHint explains a failed local-stack start when Docker's output says a
+// port is taken, and returns "" for any other failure. grafanaPort is the
+// port Grafana was asked to use.
+func portHint(dockerOutput, grafanaPort string) string {
+	taken := false
+	for _, s := range []string{"port is already allocated", "address already in use", "Only one usage of each socket address", "ports are not available"} {
+		taken = taken || strings.Contains(dockerOutput, s)
+	}
+	if !taken {
+		return ""
+	}
+	if strings.Contains(dockerOutput, ":"+grafanaPort+" ") || strings.Contains(dockerOutput, ":"+grafanaPort+":") {
+		return fmt.Sprintf("Port %s is in use. Set ASIMOV_GRAFANA_PORT to a free port in your shell and run local-stack again, as in ASIMOV_GRAFANA_PORT=3001 make local-stack (PowerShell: $env:ASIMOV_GRAFANA_PORT=3001, then go run ./cmd/task local-stack).", grafanaPort)
+	}
+	return "A port the stack needs is in use. Grafana's port can move (set ASIMOV_GRAFANA_PORT in your shell), but OTLP stays on 4317 and 4318: stop whatever holds them, such as the Collector from collector/, and run local-stack again."
 }
 
 func (a *app) localStackDown() error {

@@ -87,7 +87,8 @@ make k6-code                   # terminal 2
 - The image is pinned (`grafana/otel-lgtm:0.38.1`); update it deliberately and
   check the dashboard when you do. This is a local demo stack, not a
   production setup: no authentication, no retention settings.
-- Ports: Grafana on 3000 (set `ASIMOV_GRAFANA_PORT` to move it), OTLP on 4317
+- Ports: Grafana on 3000 (set `ASIMOV_GRAFANA_PORT` in your shell to move it, as in
+  `ASIMOV_GRAFANA_PORT=3001 make local-stack`), OTLP on 4317
   (gRPC) and 4318 (HTTP). The [Collector setup](../collector/README.md) uses
   the same OTLP ports, so run one or the other.
 - The game accepts a plain-HTTP `OTLP_ENDPOINT` only on localhost, so run the
