@@ -83,6 +83,27 @@ Prefer not to install anything? Open the repository in
 [Dev Container](https://code.visualstudio.com/docs/devcontainers/containers):
 [`.devcontainer/`](.devcontainer/) sets up Go and k6 for you.
 
+## Download a release
+
+Tagged releases carry ready-built programs, so you can play a fixed version
+without installing Go. There are none until the first `v*` tag is pushed; until
+then, use the quickstart above. When one exists, open the
+[Releases page](https://github.com/nicolevanderhoeven/asimov/releases), pick
+the archive for your system (Windows, macOS, or Linux; amd64 or arm64), and
+check it against `checksums.txt` on the same page. Each archive holds:
+
+- `enterprise`, the game (`enterprise.exe` on Windows)
+- `doctor`, which checks your `.env` settings
+- `env.example`, `LICENSE`, and the game's README
+
+```sh
+./enterprise --offline                 # no key, no network
+./enterprise --llm mock --no-telemetry # the scripted game master the tests use
+```
+
+Releases hold only the game. The task runner, the k6 tests, and the local
+Grafana stack need a checkout of the repository.
+
 ## Set up your machine
 
 Everything runs from the repository root through one small Go program,

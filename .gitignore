@@ -18,3 +18,6 @@ go-game/.enterprise-save*
 
 /task
 /task.exe
+
+# GoReleaser output (see .goreleaser.yaml)
+/dist/
