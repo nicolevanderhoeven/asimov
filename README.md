@@ -35,9 +35,9 @@ Pick the paths you want; each row lists only what that path adds.
 
 | Path | Tools | Accounts and keys | Disk |
 | --- | --- | --- | --- |
-| Offline play (`make play-offline`) | Go 1.21 or newer (it downloads the 1.26.3 toolchain), or Docker ([Docker only](#quickstart-with-docker-only)) | None | See the Go caches below, or about 70 MB for the Docker image |
+| Offline play (`make play-offline`) | Go 1.21 or newer (check with `go version`; it downloads the 1.26.3 toolchain), or Docker ([Docker only](#quickstart-with-docker-only)) | None | See the Go caches below, or about 70 MB for the Docker image |
 | Unit tests (`make unit`) | Go, as above, or Docker | None | See the Go caches below, or about 1.6 GB for the Docker tools image |
-| Mock tests (`make k6-mock`) | Go, plus [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) (CI uses the latest release), or Docker, which has both | None | See the Go caches below, or about 1.6 GB for the Docker tools image |
+| Mock tests (`make k6-mock`) | Go, plus [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) (CI uses the latest release; on Linux arm64 see [Set up your machine](#set-up-your-machine)), or Docker, which has both | None | See the Go caches below, or about 1.6 GB for the Docker tools image |
 | AI game master (`make play-local`, the paid k6 tests) | Go, or Docker for playing (not for the paid k6 tests) | An [Anthropic API key](https://console.anthropic.com/settings/keys) with access to the models below | See the Go caches below |
 | Local monitoring (`make local-stack`) | [Docker](https://docs.docker.com/get-docker/) with Compose (the stack is the `grafana/otel-lgtm:0.38.1` image) | None; add an Anthropic key for the model-call panels | The image (about 2.6 GB) and its `lgtm-data` volume (not measured) |
 | Grafana Cloud (`make play`) | Go | A Grafana Cloud stack with Agent Observability, and an Anthropic key | None locally |
@@ -58,12 +58,19 @@ Pick the paths you want; each row lists only what that path adds.
 - **Windows:** the game, the task runner, and the k6 tests run without WSL or
   bash; the scripts in `agento11y/` need a bash shell.
 
-## Quickstart: play in 2 minutes, no accounts
+## Quickstart: play in a few minutes, no accounts
 
 You need [Git](https://git-scm.com/downloads) and either
 [Go](https://go.dev/dl/) 1.21 or newer (Go downloads the 1.26.3 toolchain this
 project needs automatically) or [Docker](https://docs.docker.com/get-docker/).
 It runs natively on Windows, macOS, and Linux; the game and the k6 tests need no WSL or bash (the optional online-evaluator scripts in [`agento11y/`](agento11y/) do).
+
+Run `go version` first: it must say 1.21 or newer. The `golang-go` package on
+Ubuntu 22.04 and Debian 12 is older (1.18 and 1.19) and stops with a compile
+error that says Go 1.21 or newer is required; install Go from [go.dev/dl](https://go.dev/dl/)
+instead. The first run downloads the Go toolchain and the game's modules and
+compiles them, so expect about 3 minutes (2m47 measured on 8 CPUs), mostly
+downloads; later runs start in seconds.
 
 ```sh
 git clone https://github.com/nicolevanderhoeven/asimov.git
@@ -71,6 +78,12 @@ cd asimov
 make play-offline                  # macOS and Linux
 go run ./cmd/task play-offline     # any OS, including Windows, without make
 ```
+
+A minimal Linux install may lack the tools these steps use. On Debian and
+Ubuntu, `sudo apt-get install git make curl gnupg sudo ca-certificates` first,
+or skip `make` and use `go run ./cmd/task <target>`, which needs only Go. On a
+Mac, `git` and `make` come with Apple's Command Line Tools; the first `git` or
+`make` offers to install them, which takes a few minutes.
 
 Or with only Docker, no Go: `docker compose run --rm play --offline`. See
 [Quickstart with Docker only](#quickstart-with-docker-only) for the rest.
@@ -111,7 +124,8 @@ If you have Docker but don't want to install Go, everything below runs in
 containers. You need [Git](https://git-scm.com/downloads) and
 [Docker](https://docs.docker.com/get-docker/) with Compose v2 (Docker Desktop
 includes it); nothing else, and no account. The first command that uses an
-image builds it, which takes a few minutes; later runs start at once.
+image builds it, which took about 5 minutes on a Docker with nothing cached
+(pulling the Go image, then compiling); later runs start at once.
 
 ```sh
 git clone https://github.com/nicolevanderhoeven/asimov.git
@@ -119,7 +133,15 @@ cd asimov
 ```
 
 Run these from the repository root. They work the same in PowerShell, `cmd`,
-and a Unix shell.
+and a Unix shell. On Windows, Docker means
+[Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+with WSL 2 or Hyper-V, a bigger install than Go alone. In Git Bash, play
+(`docker compose run`) may need `winpty` in front to get a terminal; Windows
+Terminal or PowerShell doesn't.
+
+After `git pull`, add `--build` (as in `docker compose run --rm --build play
+--offline`), because `docker compose run` keeps using an image it already
+built and you would play the old version.
 
 | To do this | Run |
 | --- | --- |
@@ -173,9 +195,9 @@ installed, use the second form. Both do the same thing.
 
 | | Windows (PowerShell) | macOS | Linux |
 | --- | --- | --- | --- |
-| Go | `winget install GoLang.Go` | `brew install go` | [go.dev/dl](https://go.dev/dl/) or your package manager |
-| k6 (only for the k6 tests) | `winget install k6 --source winget` | `brew install k6` | [k6 install guide](https://grafana.com/docs/k6/latest/set-up/install-k6/) |
-| Run a target | `go run ./cmd/task unit` | `make unit` | `make unit` |
+| Go | `winget install GoLang.Go` | `brew install go` | [go.dev/dl](https://go.dev/dl/), or your package manager if `go version` says 1.21 or newer (Ubuntu 22.04 and Debian 12 ship older) |
+| k6 (only for the k6 tests) | `winget install k6 --source winget` | `brew install k6` | [k6 install guide](https://grafana.com/docs/k6/latest/set-up/install-k6/); on arm64 its apt repository has no package, so use the [`k6-<version>-linux-arm64.tar.gz` release](https://github.com/grafana/k6/releases) or [`.devcontainer/install-k6.sh`](.devcontainer/install-k6.sh), which installs it for amd64 or arm64 |
+| Run a target | `go run ./cmd/task unit` | `make unit` (needs Command Line Tools) | `make unit` (or `go run ./cmd/task unit`, which needs no make) |
 | Create `.env` | `copy env.example .env` | `cp env.example .env` | `cp env.example .env` |
 
 Open a new terminal after installing so that `go` and `k6` are on your `PATH`.
@@ -186,7 +208,7 @@ PowerShell's `>` writes UTF-16, which nothing can read).
 Check your install without any account or key:
 
 ```sh
-go run ./cmd/task unit        # Go tests, about a minute the first time
+go run ./cmd/task unit        # Go tests, 1-3 minutes the first time (2m52 measured)
 go run ./cmd/task smoke       # plays a scripted offline game
 go run ./cmd/task k6-graders  # needs k6; checks the trajectory graders
 ```
@@ -215,8 +237,12 @@ localhost. You need [Go](https://go.dev/dl/) and
 [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/); no `.env`.
 
 ```sh
-make k6-mock               # about 30 seconds
+make k6-mock               # about 1 minute (58 s measured the first time)
 ```
+
+Expect red `✗` lines and `level=error` messages before the summary: the
+planted flaws make tests fail on purpose. The line at the end, `OK: the tests
+caught the planted flaws`, is the verdict.
 
 With a real model the planted flaws appear only sometimes, so you may run the
 tests and see nothing caught. The mock plants each one on demand (a rescue
@@ -243,8 +269,10 @@ make play-offline-observed      # no API key needed
 ```
 
 Play a few turns (`/do inspect logs`, `/do move sickbay`, `/rate good`), then
-open <http://localhost:3000/d/asimov-local> (no login). You should see the
-actions you took, counts of rejected actions and improvisations, ratings per
+open <http://localhost:3000/d/asimov-local> (no login). If something else
+holds port 3000, `make local-stack` says so; set `ASIMOV_GRAFANA_PORT=3001`
+in your shell (not `.env`) for that command and use that port in the URL. You
+should see the actions you took, counts of rejected actions and improvisations, ratings per
 agent version, and a `game.turn` trace for each turn that opens in Tempo.
 
 ![The asimov dashboard in local Grafana after a live game with the AI game master, with data in the model-call panels](assets/local-grafana-dashboard-live.png)
@@ -297,26 +325,28 @@ so plan on more than a few minutes:
 Run `make` (or `go run ./cmd/task`) on its own to list every shortcut:
 
 ```text
-  play-offline     Play with no API key, LLM, or telemetry (exact /do commands only)
-  play-local       Play with the AI GM but without sending telemetry (needs ANTHROPIC_API_KEY)
-  play             Play with the AI GM, sending telemetry to Grafana Cloud
-  serve            Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)
-  local-stack      Start the local Grafana stack (needs Docker) and print where to look
-  play-offline-observed  Play with no API key or LLM, with telemetry to the local stack
-  play-local-observed    Play with the AI GM, with telemetry to the local stack
+  play-offline           Play with no API key, LLM, or telemetry (exact /do commands only)
+  play-local             Play with the AI GM but without sending telemetry (needs ANTHROPIC_API_KEY)
+  play                   Play with the AI GM, sending telemetry to Grafana Cloud
+  serve                  Run the HTTP API on localhost:8080 for the k6 tests (SERVE_ADDR=:8080 exposes it)
+  local-stack            Start the local Grafana stack (needs Docker) and print where to look
+  local-stack-down       Stop the local Grafana stack (its data is kept)
+  play-offline-observed  Play with no API key or LLM, with telemetry to the local stack (local-stack first)
+  play-local-observed    Play with the AI GM, with telemetry to the local stack (local-stack first; needs ANTHROPIC_API_KEY)
   serve-local-observed   Run the HTTP API on localhost:8080 for the k6 tests, with telemetry to the local stack
-  doctor           Check .env and send one test span, metric, log, and generation to Grafana Cloud
-  test             The full e2e eval for E2E_DURATION (default 30m), about 40-60 USD per 30 min: needs K6_MAX_SPEND_USD
-  unit             Run the Go unit tests (no credentials needed)
-  smoke            Play a scripted offline game to check the install works (no credentials needed)
-  k6-graders       Trajectory graders against fixed cases: about 1s, no server or API calls
-  k6-spend         The spend limit's logic: about 1s, no server or API calls
-  k6-code          Fixed prompts with code checks: under 1 min, ~10 model calls
-  k6-ai            Varied probes judged by Claude: 1-2 min, ~20 model calls
-  k6-trajectory    Dice trajectory evals: a few min, ~200 model calls
-  k6-e2e           Five whole playthroughs: 5-10 min, a few hundred model calls
-  k6               Run any k6 script with .env, starting the game server if needed (arguments go to k6)
-  k6-mock          Every k6 test against the mock GM and judge: free, no .env needed, about 1 min
+  doctor-local           Check the local stack: send it one test span, metric, and log
+  doctor                 Check .env and send one test span, metric, log, and generation to Grafana Cloud
+  test                   The full e2e eval for E2E_DURATION (default 30m), about 40-60 USD per 30 min: needs K6_MAX_SPEND_USD
+  unit                   Run the Go unit tests (no credentials needed)
+  smoke                  Play a scripted offline game to check the install works (no credentials needed)
+  k6-graders             Trajectory graders against fixed cases: about 1s, no server or API calls
+  k6-spend               The spend limit's logic: about 1s, no server or API calls
+  k6-code                Fixed prompts with code checks: under 1 min, ~10 model calls
+  k6-ai                  Varied probes judged by Claude: 1-2 min, ~20 model calls
+  k6-trajectory          Dice trajectory evals: a few min, ~200 model calls
+  k6-e2e                 Five whole playthroughs: 5-10 min, a few hundred model calls
+  k6-mock                Every k6 test against the mock GM and judge: free, no .env needed, about 1 min
+  k6                     Run any k6 script with .env, starting the game server if needed (arguments go to k6)
 ```
 
 Every k6 target stops once its run has spent `K6_MAX_SPEND_USD` on Anthropic
@@ -375,7 +405,7 @@ evaluators can catch.
 
 ## Talks
 
-- [KubeCon Europe 2025](https://nicolevanderhoeven.com/blog/20250402-asmiovs-zeroth-law-of-robotics/) in London, England ([video](https://www.youtube.com/watch?v=x6EKTCAWtn8))
+- [KubeCon Europe 2025](https://nicolevanderhoeven.com/blog/20250402-asimovs-zeroth-law-of-robotics/) in London, England ([video](https://www.youtube.com/watch?v=x6EKTCAWtn8))
 - [Dutch Cloud Native Days 2025](https://nicolevanderhoeven.com/blog/20250703-asimovs-zeroth-law-dutch-cloud-native-day/) in Utrecht, the Netherlands
 - [Newcrafts 2025](https://nicolevanderhoeven.com/blog/20251106-asimovs-zeroth-law-newcrafts/) in Paris, France ([slides](https://nicole.to/asimovslides))
 - [ExpoQA 2026](https://nicolevanderhoeven.com/blog/20260526-asimovs-zeroth-law-expoqa-madrid/) in Madrid, Spain ([slides](https://nicole.to/expoqa2026))

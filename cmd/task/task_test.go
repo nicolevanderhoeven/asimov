@@ -219,3 +219,29 @@ func TestTestTargetNeedsASpendLimit(t *testing.T) {
 		t.Error("an empty K6_MAX_SPEND_USD should not count as a limit")
 	}
 }
+
+func TestPortHint(t *testing.T) {
+	grafana := "Error response from daemon: Bind for 127.0.0.1:3000 failed: port is already allocated"
+	otlp := "Error response from daemon: Bind for 127.0.0.1:4318 failed: port is already allocated"
+	if got := portHint(grafana, "3000"); !strings.Contains(got, "ASIMOV_GRAFANA_PORT") {
+		t.Errorf("hint for Grafana's port = %q, want it to name ASIMOV_GRAFANA_PORT", got)
+	}
+	if got := portHint(grafana, "3001"); strings.Contains(got, "ASIMOV_GRAFANA_PORT=3001") {
+		t.Errorf("hint for a different port = %q, want no advice to move to the port that isn't taken", got)
+	}
+	if got := portHint(otlp, "3000"); !strings.Contains(got, "4317 and 4318") {
+		t.Errorf("hint for an OTLP port = %q, want it to name the OTLP ports", got)
+	}
+	if got := portHint("no such image", "3000"); got != "" {
+		t.Errorf("hint for an unrelated failure = %q, want none", got)
+	}
+}
+
+func TestNoKeyHint(t *testing.T) {
+	if got := noKeyHint("Error: ANTHROPIC_API_KEY is required (or use --offline)"); !strings.Contains(got, "make k6-mock") {
+		t.Errorf("hint = %q, want it to suggest make k6-mock", got)
+	}
+	if got := noKeyHint("listen tcp :8080: address already in use"); got != "" {
+		t.Errorf("hint for another failure = %q, want none", got)
+	}
+}
