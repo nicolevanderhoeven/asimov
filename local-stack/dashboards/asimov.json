@@ -16,7 +16,198 @@
   },
   "refresh": "10s",
   "templating": {
-    "list": []
+    "list": [
+      {
+        "type": "constant",
+        "name": "price_s46_in",
+        "label": "claude-sonnet-4-6 in USD/MTok",
+        "query": "3",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "3",
+          "value": "3"
+        },
+        "options": [
+          {
+            "text": "3",
+            "value": "3",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_s46_out",
+        "label": "claude-sonnet-4-6 out USD/MTok",
+        "query": "15",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "15",
+          "value": "15"
+        },
+        "options": [
+          {
+            "text": "15",
+            "value": "15",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_s55_in",
+        "label": "claude-sonnet-5-5 in USD/MTok",
+        "query": "2",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "2",
+          "value": "2"
+        },
+        "options": [
+          {
+            "text": "2",
+            "value": "2",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_s55_out",
+        "label": "claude-sonnet-5-5 out USD/MTok",
+        "query": "10",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "10",
+          "value": "10"
+        },
+        "options": [
+          {
+            "text": "10",
+            "value": "10",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_o55_in",
+        "label": "claude-opus-5-5 in USD/MTok",
+        "query": "4",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "4",
+          "value": "4"
+        },
+        "options": [
+          {
+            "text": "4",
+            "value": "4",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_o55_out",
+        "label": "claude-opus-5-5 out USD/MTok",
+        "query": "20",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "20",
+          "value": "20"
+        },
+        "options": [
+          {
+            "text": "20",
+            "value": "20",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_h45_in",
+        "label": "claude-haiku-4-5 in USD/MTok",
+        "query": "1",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "1",
+          "value": "1"
+        },
+        "options": [
+          {
+            "text": "1",
+            "value": "1",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_h45_out",
+        "label": "claude-haiku-4-5 out USD/MTok",
+        "query": "5",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "5",
+          "value": "5"
+        },
+        "options": [
+          {
+            "text": "5",
+            "value": "5",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_h45d_in",
+        "label": "claude-haiku-4-5-20251001 in USD/MTok",
+        "query": "1",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "1",
+          "value": "1"
+        },
+        "options": [
+          {
+            "text": "1",
+            "value": "1",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "type": "constant",
+        "name": "price_h45d_out",
+        "label": "claude-haiku-4-5-20251001 out USD/MTok",
+        "query": "5",
+        "hide": 2,
+        "skipUrlSync": true,
+        "current": {
+          "text": "5",
+          "value": "5"
+        },
+        "options": [
+          {
+            "text": "5",
+            "value": "5",
+            "selected": true
+          }
+        ]
+      }
+    ]
   },
   "annotations": {
     "list": []
@@ -670,6 +861,158 @@
       }
     },
     {
+      "id": 19,
+      "type": "stat",
+      "title": "Estimated total cost",
+      "description": "What the model calls in the selected range would cost at list price. This is an estimate: it multiplies input and output tokens by Anthropic's list price per million tokens for each model (gen_ai_request_model), and cached tokens are not separated, so cache reads and writes are billed at the plain rate. Prices are the dashboard constants price_* (Settings, Variables); models without a price there are left out. Totals are over the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum((max_over_time(gen_ai_client_token_usage_sum{gen_ai_token_type=\"input\"}[$__range]) * on (gen_ai_request_model) group_left () (label_replace(vector($price_s46_in), \"gen_ai_request_model\", \"claude-sonnet-4-6\", \"\", \"\") or label_replace(vector($price_s55_in), \"gen_ai_request_model\", \"claude-sonnet-5-5\", \"\", \"\") or label_replace(vector($price_o55_in), \"gen_ai_request_model\", \"claude-opus-5-5\", \"\", \"\") or label_replace(vector($price_h45_in), \"gen_ai_request_model\", \"claude-haiku-4-5\", \"\", \"\") or label_replace(vector($price_h45d_in), \"gen_ai_request_model\", \"claude-haiku-4-5-20251001\", \"\", \"\"))) or (max_over_time(gen_ai_client_token_usage_sum{gen_ai_token_type=\"output\"}[$__range]) * on (gen_ai_request_model) group_left () (label_replace(vector($price_s46_out), \"gen_ai_request_model\", \"claude-sonnet-4-6\", \"\", \"\") or label_replace(vector($price_s55_out), \"gen_ai_request_model\", \"claude-sonnet-5-5\", \"\", \"\") or label_replace(vector($price_o55_out), \"gen_ai_request_model\", \"claude-opus-5-5\", \"\", \"\") or label_replace(vector($price_h45_out), \"gen_ai_request_model\", \"claude-haiku-4-5\", \"\", \"\") or label_replace(vector($price_h45d_out), \"gen_ai_request_model\", \"claude-haiku-4-5-20251001\", \"\", \"\")))) / 1e6",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "noValue": "No model calls yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Estimated cost per turn",
+      "description": "Estimated total cost divided by the number of game.turn traces in the selected range. This is an estimate: it multiplies input and output tokens by Anthropic's list price per million tokens for each model (gen_ai_request_model), and cached tokens are not separated, so cache reads and writes are billed at the plain rate. Prices are the dashboard constants price_* (Settings, Variables); models without a price there are left out. Totals are over the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum((max_over_time(gen_ai_client_token_usage_sum{gen_ai_token_type=\"input\"}[$__range]) * on (gen_ai_request_model) group_left () (label_replace(vector($price_s46_in), \"gen_ai_request_model\", \"claude-sonnet-4-6\", \"\", \"\") or label_replace(vector($price_s55_in), \"gen_ai_request_model\", \"claude-sonnet-5-5\", \"\", \"\") or label_replace(vector($price_o55_in), \"gen_ai_request_model\", \"claude-opus-5-5\", \"\", \"\") or label_replace(vector($price_h45_in), \"gen_ai_request_model\", \"claude-haiku-4-5\", \"\", \"\") or label_replace(vector($price_h45d_in), \"gen_ai_request_model\", \"claude-haiku-4-5-20251001\", \"\", \"\"))) or (max_over_time(gen_ai_client_token_usage_sum{gen_ai_token_type=\"output\"}[$__range]) * on (gen_ai_request_model) group_left () (label_replace(vector($price_s46_out), \"gen_ai_request_model\", \"claude-sonnet-4-6\", \"\", \"\") or label_replace(vector($price_s55_out), \"gen_ai_request_model\", \"claude-sonnet-5-5\", \"\", \"\") or label_replace(vector($price_o55_out), \"gen_ai_request_model\", \"claude-opus-5-5\", \"\", \"\") or label_replace(vector($price_h45_out), \"gen_ai_request_model\", \"claude-haiku-4-5\", \"\", \"\") or label_replace(vector($price_h45d_out), \"gen_ai_request_model\", \"claude-haiku-4-5-20251001\", \"\", \"\")))) / 1e6) / (sum(max_over_time(traces_spanmetrics_calls_total{span_name=\"game.turn\"}[$__range])))",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "noValue": "No model calls yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 21,
+      "type": "bargauge",
+      "title": "Estimated cost per agent version",
+      "description": "Estimated cost by ASIMOV_AGENT_VERSION (gen_ai_agent_version), so you can see what a change to the agent did to the bill. This is an estimate: it multiplies input and output tokens by Anthropic's list price per million tokens for each model (gen_ai_request_model), and cached tokens are not separated, so cache reads and writes are billed at the plain rate. Prices are the dashboard constants price_* (Settings, Variables); models without a price there are left out. Totals are over the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (gen_ai_agent_version)((max_over_time(gen_ai_client_token_usage_sum{gen_ai_token_type=\"input\"}[$__range]) * on (gen_ai_request_model) group_left () (label_replace(vector($price_s46_in), \"gen_ai_request_model\", \"claude-sonnet-4-6\", \"\", \"\") or label_replace(vector($price_s55_in), \"gen_ai_request_model\", \"claude-sonnet-5-5\", \"\", \"\") or label_replace(vector($price_o55_in), \"gen_ai_request_model\", \"claude-opus-5-5\", \"\", \"\") or label_replace(vector($price_h45_in), \"gen_ai_request_model\", \"claude-haiku-4-5\", \"\", \"\") or label_replace(vector($price_h45d_in), \"gen_ai_request_model\", \"claude-haiku-4-5-20251001\", \"\", \"\"))) or (max_over_time(gen_ai_client_token_usage_sum{gen_ai_token_type=\"output\"}[$__range]) * on (gen_ai_request_model) group_left () (label_replace(vector($price_s46_out), \"gen_ai_request_model\", \"claude-sonnet-4-6\", \"\", \"\") or label_replace(vector($price_s55_out), \"gen_ai_request_model\", \"claude-sonnet-5-5\", \"\", \"\") or label_replace(vector($price_o55_out), \"gen_ai_request_model\", \"claude-opus-5-5\", \"\", \"\") or label_replace(vector($price_h45_out), \"gen_ai_request_model\", \"claude-haiku-4-5\", \"\", \"\") or label_replace(vector($price_h45d_out), \"gen_ai_request_model\", \"claude-haiku-4-5-20251001\", \"\", \"\")))) / 1e6",
+          "legendFormat": "{{gen_ai_agent_version}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "noValue": "No model calls yet",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "valueMode": "color",
+        "minVizHeight": 16,
+        "namePlacement": "top",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 26
+        },
+        "sizing": "manual",
+        "maxVizHeight": 36
+      }
+    },
+    {
       "id": 15,
       "type": "row",
       "title": "Turn traces, model calls, and logs",
@@ -678,7 +1021,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 43
       },
       "panels": []
     },
@@ -695,7 +1038,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 44
       },
       "targets": [
         {
@@ -731,7 +1074,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 53
       },
       "targets": [
         {
@@ -769,7 +1112,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 62
       },
       "targets": [
         {
