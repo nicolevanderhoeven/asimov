@@ -32,6 +32,8 @@ key; the other checks don't need one).
 
 ![The same dashboard after four turns with the AI game master: the model-call panels show streamText operations, latency, tokens, and a table of the seven model calls with their model, finish reason, and token counts.](../assets/local-grafana-dashboard-ai-gm.png)
 
+![The cost panels in local Grafana: estimated total cost, cost per turn, and cost per agent version. The screenshot uses synthetic token counts sent over OTLP to two agent versions on two models, so the figures only show how the panels compute.](../assets/local-grafana-cost-panels.png)
+
 The first screenshot is from a real run of `make play-offline-observed` (four
 short games under two `ASIMOV_AGENT_VERSION`s, rated good and bad), so its
 model-call panels are empty. The second is from a real run of
@@ -44,6 +46,7 @@ good), where they fill in. The dashboard,
 | Actions, rejected actions, improvisations, ratings, and their running totals | `game_actions_total`, `game_improvisations_total`, `game_ratings_total` |
 | Ratings and actions per agent version | the same counters, by `service_version` (set `ASIMOV_AGENT_VERSION` per variant, then rate games with `/rate good` or `/rate bad`) |
 | Operations, latency, tokens, and tool calls per model call | the `gen_ai_client_*` metrics the Agent Observability SDK records |
+| Estimated total cost, cost per turn, and cost per agent version | the token counts above, times Anthropic's list price per million tokens for each `gen_ai_request_model`, over the `game.turn` span count. An estimate: cached tokens aren't separated. The prices are the hidden `price_*` dashboard variables (Dashboard settings, Variables), checked against Anthropic's [pricing page](https://platform.claude.com/docs/en/about-claude/pricing) on 2026-11-10 |
 | Recent turns | one `game.turn` trace per player turn, in Tempo; open one to see its dice events and model calls |
 | Recent model calls | one span per model call (`gen_ai.operation.name` is `streamText`) with the standard `gen_ai.*` attributes: model, token counts, finish reason |
 | Logs | the game's logs in Loki, `{service_name="asimov-enterprise-go"}` |
